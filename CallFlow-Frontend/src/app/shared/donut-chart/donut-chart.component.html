@@ -1,0 +1,30 @@
+<div class="donut-chart">
+  <!-- Chart Title -->
+  <div class="chart-title">{{ title }}</div>
+  
+  <!-- ApexCharts Radial Bar (Donut Chart) -->
+  <div class="chart-container">
+    <apx-chart
+      #chart
+      [series]="chartOptions.series!"
+      [chart]="chartOptions.chart!"
+      [plotOptions]="chartOptions.plotOptions!"
+      [stroke]="chartOptions.stroke!"
+      [colors]="chartOptions.colors!"
+      [fill]="chartOptions.fill!"
+      
+      >
+    </apx-chart>
+  </div>
+  
+  <!-- Cell count (with icon) -->
+  <div class="cell-count d-flex align-items-center gap-2 " *ngIf="cellCount">
+    <i class="bi bi-broadcast"></i>
+    <span>{{ cellCount }}</span>
+  </div>
+  
+  <!-- Details list -->
+  <ul class="details-list" *ngIf="details && details.length > 0">
+    <li *ngFor="let detail of details">{{ detail }}</li>
+  </ul>
+</div>

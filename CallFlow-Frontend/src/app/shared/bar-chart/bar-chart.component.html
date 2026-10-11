@@ -1,0 +1,53 @@
+<!-- Bar Chart Container -->
+<div class="bar-chart">
+  <!-- Chart Title -->
+  <h3 class="chart-title">{{ title }}</h3>
+
+  
+  <!-- ApexCharts Component -->
+  <div class="chart-wrapper">
+    <apx-chart
+      #chart
+      *ngIf="chartOptions?.series?.length"
+      [series]="chartOptions.series!"
+      [chart]="chartOptions.chart!"
+      [xaxis]="chartOptions.xaxis!"
+      [yaxis]="chartOptions.yaxis!"
+      [dataLabels]="chartOptions.dataLabels!"
+      [plotOptions]="chartOptions.plotOptions!"
+      [colors]="chartOptions.colors!"
+      [grid]="chartOptions.grid!"
+      [tooltip]="chartOptions.tooltip!">
+    </apx-chart>
+  </div>
+  
+  <!-- Custom Legend (if showLegend is true) -->
+<div class="chart-legend" *ngIf="Abnormal_KPIs_Legend">
+  
+  <!-- Title row (centered) -->
+  <!-- <div class="text-center mb-2" style="font-size: 18px;">
+    Variance Indicator
+  </div> -->
+
+  <!-- Legend items row -->
+  <!-- <div class="d-flex justify-content-center gap-3 flex-wrap">
+    
+    <div class="d-flex align-items-center gap-1">
+      <span class="rounded" style="width:12px; height:12px; background:#84cc16;"></span>
+      <span>Less than 30%</span>
+    </div>
+
+    <div class="d-flex align-items-center gap-1">
+      <span class="rounded" style="width:12px; height:12px; background:#eab308;"></span>
+      <span>30% - 100%</span>
+    </div>
+
+    <div class="d-flex align-items-center gap-1">
+      <span class="rounded" style="width:12px; height:12px; background:#dc2626;"></span>
+      <span>More than 100%</span>
+    </div>
+
+  </div> -->
+</div>
+</div>
+

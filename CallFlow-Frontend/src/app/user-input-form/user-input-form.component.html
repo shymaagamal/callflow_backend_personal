@@ -1,0 +1,100 @@
+<div class="portal-container">
+  <div class="card form-card">
+    <div class="card-header-title">
+      <p class="title ms-3">Telecom Troubleshooting Portal</p>
+      <div class="logo-circle ">
+        <img src="assets/voda-icon.png" alt="icon Image">
+      </div>
+    </div>
+
+    <div class="card-body">
+      <!-- Live analysis pipeline -- replaces the old bare spinner overlay -->
+      <div *ngIf="isLoading" class="loader-overlay d-flex align-items-center justify-content-center">
+        <div class="pipeline-panel">
+          <p class="pipeline-title">Running your analysis...</p>
+          <app-job-status-card
+            *ngFor="let p of pipeline"
+            layout="row"
+            [system]="p.key"
+            [label]="p.label"
+            [status]="p.status"
+            [step]="p.step"
+            [progress]="p.progress"
+            [error]="p.error">
+          </app-job-status-card>
+        </div>
+      </div>
+
+      <div class="form-group mb-3">
+        <label class="form-label">Complaint Type</label>
+        <p-dropdown
+          [options]="complaintTypes"
+          [(ngModel)]="formData.Complain_Type"
+          placeholder="Complaint Type"
+          [style]="{'width':'100%'}"
+          styleClass="w-100">
+        </p-dropdown>
+      </div>
+
+      <div class="row mb-3">
+        <div class="col-md-6">
+          <label class="form-label">From</label>
+          <p-calendar
+            [(ngModel)]="formData.start_date"
+            dateFormat="dd/mm/yy"
+            [iconDisplay]="'input'"
+            [showIcon]="true"
+            placeholder="DD | MM | YYYY"
+            [style]="{'width':'100%'}"
+            [showTime]="true"
+            [hourFormat]="24"
+            styleClass="w-100">
+          </p-calendar>
+        </div>
+
+        <div class="col-md-6">
+          <label class="form-label">To</label>
+          <p-calendar
+            [(ngModel)]="formData.end_date"
+            dateFormat="dd/mm/yy"
+            [iconDisplay]="'input'"
+            [showIcon]="true"
+            placeholder="DD | MM | YYYY"
+            [style]="{'width':'100%'}"
+            [showTime]="true"
+            [hourFormat]="24"
+            styleClass="w-100">
+          </p-calendar>
+        </div>
+      </div>
+
+      <div class="form-group mb-4">
+        <label class="form-label d-block mb-2">
+          Please insert MSISDNs List
+        </label>
+        <div class="upload-box">
+          <textarea
+            class="form-control upload-textarea"
+            [(ngModel)]="formData.msisdn_list"
+            placeholder="Enter comma-separated values here...&#10;Value1, Value2, Value3"
+            rows="4">
+          </textarea>
+        </div>
+      </div>
+
+      <div class="text-center">
+        <p-button
+          label="Start Analyzing"
+          [disabled]="isLoading"
+          (onClick)="onStartAnalyzing()"
+          styleClass="analyze-btn">
+        </p-button>
+        <!-- Export Data button — visible only to callflow_download_files group -->
+  <div class="text-center mt-3" style="position: relative;" *ngIf="canDownload">
+    <app-download-button [formData]="formData">
+    </app-download-button>
+  </div>
+      </div>
+    </div>
+  </div>
+</div>

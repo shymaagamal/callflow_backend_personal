@@ -1,0 +1,32 @@
+<div class="failure-rate-card" [class.highlighted]="highlighted">
+  <!-- Header: Cluster Name and Location -->
+  <div class="card-header">
+    <div class="cluster-info">
+      <h4 class="cluster-name">{{ clusterName }}</h4>
+      <span class="location">{{ location }}</span>
+    </div>
+    <div class="failure-percentage">{{ failureRate }}%</div>
+  </div>
+
+  <!-- Progress Bar -->
+  <div class="progress-bar-container">
+    <div class="progress-bar-background">
+      <div 
+        class="progress-bar-fill" 
+        [style.width]="getProgressWidth()"
+        [style.background-color]="getProgressBarColor()">
+      </div>
+    </div>
+  </div>
+
+  <!-- Details: Users, Cells, TACs, Anomaly -->
+  <div class="card-details">
+    <span class="detail-item">{{ users }} users</span>
+    <span class="detail-separator">•</span>
+    <span class="detail-item">{{ cells }} cells</span>
+    <span class="detail-separator">•</span>
+    <span class="detail-item">{{ tacs }} TACs</span>
+    <span class="detail-separator">•</span>
+    <span class="detail-item">Anomaly: {{ anomaly }}</span>
+  </div>
+</div>

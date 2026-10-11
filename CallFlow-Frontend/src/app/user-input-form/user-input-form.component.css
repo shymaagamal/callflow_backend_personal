@@ -1,0 +1,27 @@
+/* Add to user-input-form.component.css -- styles for the new pipeline panel */
+
+.pipeline-panel {
+  background: #fff;
+  border-radius: 14px;
+  padding: 20px 24px;
+  width: 420px;
+  max-width: 90vw;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+}
+
+.pipeline-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+  margin: 0 0 14px;
+  text-align: center;
+}
+
+.pipeline-panel app-job-status-card {
+  display: block;
+  margin-bottom: 10px;
+}
+
+.pipeline-panel app-job-status-card:last-child {
+  margin-bottom: 0;
+}

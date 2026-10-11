@@ -1,0 +1,87 @@
+.nodes-container {
+  background: #fff;
+  border-radius: 12px;
+  padding: 1rem;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+
+  h3 {
+    font-size: 1.1rem;
+    font-weight: 500;
+    margin: 0;
+  }
+
+  .filter-select {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 0.4rem 0.6rem;
+    font-size: 0.85rem;
+    width: 40%;
+  }
+}
+
+.nodes-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.node-card {
+  border: 1px solid #f1f1f1;
+  border-radius: 10px;
+  padding: 0.75rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.node-left {
+  .node-name {
+    font-weight: 500;
+  }
+
+  .node-meta {
+    font-size: 0.8rem;
+    color: #6b7280;
+    margin-top: 0.25rem;
+  }
+
+  .view-cells {
+    font-size: 0.75rem;
+    color: #9ca3af;
+    margin-top: 0.5rem;
+    cursor: pointer;
+  }
+}
+
+.node-right {
+  display: flex;
+  gap: 1.2rem;
+
+  .metric {
+    text-align: right;
+
+    .label {
+      font-size: 0.7rem;
+      color: #6b7280;
+    }
+
+    .value {
+      font-weight: 500;
+    }
+
+    .anomaly {
+      color: #ef4444;
+    }
+  }
+}

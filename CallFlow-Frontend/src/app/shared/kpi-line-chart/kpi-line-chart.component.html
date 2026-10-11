@@ -1,0 +1,11 @@
+<div class="kpi-chart-container">
+  <apx-chart
+    *ngIf="chartOptions?.series?.length"
+    [series]="chartOptions.series!"
+    [chart]="chartOptions.chart!"
+    [stroke]="chartOptions.stroke!"
+    [fill]="chartOptions.fill!"
+    [colors]="chartOptions.colors!"
+    [tooltip]="chartOptions.tooltip!">
+  </apx-chart>
+</div>

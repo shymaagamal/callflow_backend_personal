@@ -1,0 +1,34 @@
+<div class="nodes-container">
+  <!-- Header -->
+  <div class="header">
+     <h6 class="mb-0 fs-5">{{ title }}</h6>
+     
+    <select class="filter-select" [(ngModel)]="selectedFilter">
+      <option value="cellName">Cell Name</option>
+    </select>
+  </div>
+
+  <!-- List -->
+  <div class="nodes-list">
+    <div class="node-card" *ngFor="let node of nodes">
+      <div class="node-left">
+        <div class="node-name">{{ node.nodeName }}</div>
+        <div class="node-meta">
+          {{ node.band }} • {{ node.tac }} • {{ node.cellsCount }} cells
+        </div>
+        <div class="view-cells">Click to view cells</div>
+      </div>
+
+      <div class="node-right">
+        <div class="metric">
+          <span class="label">Anomaly</span>
+          <span class="value anomaly">{{ node.anomaly }}</span>
+        </div>
+        <div class="metric">
+          <span class="label">Users</span>
+          <span class="value">{{ node.users }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

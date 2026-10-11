@@ -1,0 +1,38 @@
+/* Failure Rate List Container */
+.failure-rate-list {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+
+/* List Title */
+.list-title {
+  font-size: 1.1rem;
+  font-weight: 400;
+  color: #111827;
+  margin-bottom: 1.5rem;
+  margin-top: 0;
+}
+
+/* Cards Container */
+.cards-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  background-color: #f9fafb;
+  overflow-y: auto;      /* scrolling */
+  max-height: 360px;     /* control scroll height */
+  padding-right: 0.5rem; /* space for scrollbar */
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .failure-rate-list {
+    padding: 1rem;
+  }
+
+  .list-title {
+    font-size: 1.25rem;
+    margin-bottom: 1rem;
+  }
+}

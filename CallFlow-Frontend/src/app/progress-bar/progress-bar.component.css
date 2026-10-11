@@ -1,0 +1,122 @@
+/* Failure Rate Card Container */
+.failure-rate-card {
+  background: white;
+  border: 2px solid #e5e7eb;
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 1rem;
+  transition: all 0.3s ease;
+}
+
+/* Highlighted card (red border) */
+.failure-rate-card.highlighted {
+  border-color: #dc2626;
+  box-shadow: 0 4px 6px rgba(220, 38, 38, 0.1);
+}
+
+.failure-rate-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+/* Header Section */
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.cluster-info {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1;
+}
+
+.cluster-name {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #111827;
+  margin: 0;
+}
+
+.location {
+  font-size: 0.875rem;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.failure-percentage {
+  font-size: 1.875rem;
+  font-weight: 400;
+  color: #111827;
+  min-width: 80px;
+  text-align: right;
+}
+
+/* Progress Bar */
+.progress-bar-container {
+  margin-bottom: 1rem;
+}
+
+.progress-bar-background {
+  width: 100%;
+  height: 12px;
+  background-color: #e5e7eb;
+  border-radius: 6px;
+  overflow: hidden;
+  position: relative;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 6px;
+  transition: width 0.6s ease, background-color 0.3s ease;
+  animation: slideIn 0.8s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    width: 0;
+  }
+}
+
+/* Details Section */
+.card-details {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
+.detail-item {
+  font-weight: 500;
+}
+
+.detail-separator {
+  color: #d1d5db;
+  font-weight: 400;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .failure-rate-card {
+    padding: 1rem;
+  }
+
+  .cluster-name {
+    font-size: 1rem;
+  }
+
+  .failure-percentage {
+    font-size: 1.5rem;
+    min-width: 60px;
+  }
+
+  .card-details {
+    font-size: 0.75rem;
+  }
+}

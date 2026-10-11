@@ -1,0 +1,474 @@
+body {
+  font-family: Arial, sans-serif;
+  background: #f6f5f5;
+  margin: 0;
+  padding: 20px;
+}
+
+.toolbar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+input, select, button {
+  padding: 5px;
+}
+
+.submit-btn {
+  background-color: #007bff;   /* Default blue */
+  color: white;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 20px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.2s ease-in-out;
+}
+
+/* 🔵 Hover effect */
+.submit-btn:hover {
+  background-color: #0056b3;   /* Darker blue on hover */
+  transform: translateY(-2px); /* Subtle lift effect */
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* 🔴 Active (on click) */
+.submit-btn:active {
+  background-color: red;   /* Even darker on click */
+  transform: translateY(0);    /* Return to normal */
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* ⚪ Disabled state */
+.submit-btn:disabled {
+  background-color: #cccccc;
+  color: #666666;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+
+
+.cards-container{
+   background-color: white;
+   justify-content: center;
+}
+
+.cards-container-header{
+   margin-left: 20px;
+   font-size: 22px;
+   font-weight: 600;
+}
+
+.custom-box {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 16px;
+  margin: 0 10px;
+  font-size: 14px;
+  background-color: #fff;
+  height: 100%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  line-height: 1;
+}
+
+.card-title{
+   font-weight: 700;
+   padding-bottom: 12px;
+}
+
+.icon-circle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: black;
+  color: white;
+  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  font-size: 16px;
+  margin-right: 5px;
+  margin-top: -10px;
+}
+
+
+.custom-box strong {
+   color: grey;
+   font-size: small;
+}
+
+
+.custom-box p {
+   color: black;
+   font-size: medium;
+   font-weight: 500;
+   
+}
+
+
+.text-danger {
+  color: rgb(244, 19, 19);
+  margin-top: 20px;
+  padding-left: 10px;
+  font-weight: 700;
+  font-size: large;
+}
+
+.summary-btn button{
+   margin-top: 20px;
+}
+
+
+
+
+.custom-tab-group {
+  border: 1px solid #8e8e8e;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.custom-tab {
+  background-color: #fff;
+  color: #000;
+  border-right: 1px solid #8e8e8e;
+  padding: 6px 20px;
+  font-size: 16px;
+  font-weight: 500;
+  transition: background-color 0.3s;
+  width: 150px;
+}
+
+.custom-tab:last-child {
+  border-right: none;
+}
+
+.custom-tab:hover {
+  background-color: #a6a2a2;
+}
+
+.active-tab {
+  background-color: #d60000;
+  color: #fff;
+  font-weight: 500;
+}
+
+.cell-wrap {
+  word-wrap: break-word;
+  white-space: normal;
+  max-width: 100%;
+}
+
+
+
+
+
+.kpis-container{
+   background-color: white;
+   
+}
+
+
+.custom-subtab{
+  background-color: #fff;
+  color: #000;
+  padding: 6px 20px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color 0.3s;
+  width: fit-content;
+  margin-top: 15px;
+}
+
+.active-subtab {
+  border-bottom: 3px solid  #d60000;
+  font-weight: 600;
+}
+
+.charts {
+  display: flex;
+  gap: 30px;
+  margin-top: 20px;
+}
+.chart-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  justify-content: space-between;
+}
+
+.chart-item {
+  flex: 1 1 calc(33.333% - 20px); /* 3 per row, minus gap */
+  min-width: 300px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  flex: 1;
+  border: 1px solid rgb(171, 170, 170);
+  box-shadow: 0 0 5px rgba(0,0,0,0.1);
+  padding: 8px;
+}
+
+
+
+.chart-container {
+  flex: 0 0 calc(50% - 8px); /* two per row, accounting for gap */
+  box-sizing: border-box;
+  padding: 8px;
+  background: white;
+  padding: 15px;
+  border-radius: 8px;
+  flex: 1;
+  box-shadow: 0 0 5px rgba(0,0,0,0.1);
+  /*height: fit-content;*/
+}
+
+.chart-title{
+   font-weight: 600;
+}
+
+
+
+/***** Angular Mat Table (Remedy) */
+
+/* 🔍 Search box */
+mat-form-field {
+  margin-bottom: 1rem;
+}
+
+mat-form-field.mat-form-field {
+  background-color: #fff;
+  border-radius: 6px;
+}
+
+mat-label {
+  color: #333;
+  font-weight: 500;
+}
+
+mat-form-field input {
+  color: #111;
+  padding: 6px;
+}
+
+/* ✅ Scoped table styles */
+:host ::ng-deep .table-container {
+  /*overflow-x: auto;
+  -webkit-overflow-scrolling: touch; */
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  width: 100%;
+}
+
+:host ::ng-deep table {
+  width: 100%;
+ /* min-width: 1200px; /* force horizontal scroll if many columns */
+  border-collapse: collapse;
+}
+
+/* Sticky header */
+:host ::ng-deep .mat-header-row {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+:host ::ng-deep .mat-header-cell {
+  color: #fff !important;
+  background-color: red !important;
+  font-weight: bold;
+  text-transform: capitalize;
+  border-right: 1px solid #eee;
+  padding: 10px;
+}
+
+/* Data rows */
+:host ::ng-deep .mat-row:nth-child(even) {
+  background-color: #f9f9f9;
+}
+
+:host ::ng-deep .mat-row:nth-child(odd) {
+  background-color: #ffffff;
+}
+
+:host ::ng-deep .mat-cell {
+  border-bottom: 1px solid #ddd;
+  border-right: 1px solid #eee;
+  padding: 8px 10px;
+  color: #333;
+}
+
+/* Hover effect */
+:host ::ng-deep .mat-row:hover {
+  background-color: #ffebee;
+}
+
+/* 📄 Paginator Styling */
+:host ::ng-deep .mat-paginator {
+  background: #f5f5f5;
+  border-top: 2px solid #b71c1c;
+  padding: 8px;
+  color: #333;
+}
+
+:host ::ng-deep .mat-paginator-navigation-first,
+:host ::ng-deep .mat-paginator-navigation-previous,
+:host ::ng-deep .mat-paginator-navigation-next,
+:host ::ng-deep .mat-paginator-navigation-last {
+  color: #b71c1c !important;
+}
+
+:host ::ng-deep .mat-paginator-range-label {
+  font-weight: bold;
+  color: #000;
+}
+
+/* 🔽 Sorting arrow style */
+:host ::ng-deep .mat-sort-header-arrow {
+  color: #fff !important;
+}
+
+
+.remedy-cards-container{
+  width: 100%;
+}
+
+.status-card {
+  background-color: #f5f5f5;
+  border-radius: 12px;
+  padding: 20px;
+  margin: 10px 0;
+  text-align: center;
+  color: #fff;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  transition: transform 0.2s;
+}
+
+.status-card:hover {
+  transform: translateY(-5px);
+}
+
+/* Card header icon */
+.status-card .icon {
+  font-size: 30px;
+  margin-bottom: 10px;
+}
+
+/* Title + Count */
+.status-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.status-count {
+  font-size: 22px;
+  font-weight: bold;
+  margin: 5px 0 0;
+}
+
+/* Colors by status */
+.assigned {
+  background-color: #6c757d; /* grey */
+}
+
+.pending {
+  background-color: #ffc107; /* yellow */
+  color: #000;
+}
+
+.inprogress {
+  background-color: #17a2b8; /* blue */
+}
+
+.resolved {
+  background-color: #28a745; /* green */
+}
+
+.closed {
+  background-color: #343a40; /* dark grey */
+}
+
+.cancelled {
+  background-color: #dc3545; /* red */
+}
+
+.location-cards-container {
+  width: 100%;
+}
+
+.location-card {
+  width: 100%;
+  border-radius: 15px;
+  box-shadow: 0 3px 6px rgba(0, 0, 0, 0.1);
+  margin-bottom: 1rem;
+}
+
+.icon {
+  font-size: 1.8rem;
+  color: #007bff;
+}
+
+.card-title {
+  font-weight: 600;
+  margin-top: 0.5rem;
+}
+
+li {
+  font-size: 0.95rem;
+}
+
+
+
+.loading-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  background: #ffffff;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 4px solid #ccc;
+  border-top-color: green; 
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 12px;
+  margin: 0 auto;
+}
+
+.loading-message {
+  font-size: 16px;
+  color: #444;
+  font-weight: 500;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.no-data-message {
+  text-align: center;
+  font-size: 1.2rem;
+  color: #888;
+  margin: 20px 0;
+}
+
+.no-tickets-message {
+  text-align: center;
+  font-size: 16px;
+  color: #888;
+  padding: 2rem;
+  font-style: italic;
+}
+
+

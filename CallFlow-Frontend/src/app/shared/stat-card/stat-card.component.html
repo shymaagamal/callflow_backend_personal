@@ -1,0 +1,40 @@
+<div class="stat-card"[style.width]="width">
+  <!-- Header with title and icon -->
+  <div class="stat-header">
+    <span class="stat-title"[style.font-size]="titleFontSize">{{ title }}</span>
+    <div class="stat-icon" [style.background-color]="iconColor">
+      <i class="pi {{ icon }}"></i>
+    </div>
+  </div>
+  
+  <!-- Main value display: loading / unavailable / real value -->
+  <div class="stat-value mt-3" [style.font-size]="fontSize" [style.margin-left]="margin_size">
+    <ng-container *ngIf="loading">
+      <span class="stat-loading" role="status" aria-label="Loading">
+        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+      </span>
+    </ng-container>
+    <ng-container *ngIf="!loading && unavailable">
+      <span class="stat-unavailable" title="{{ unavailableText }}">—</span>
+    </ng-container>
+    <ng-container *ngIf="!loading && !unavailable">{{ value }}</ng-container>
+  </div>
+
+  <!-- Loading / unavailable subtitle -->
+  <div class="stat-subtitle" *ngIf="loading">Loading…</div>
+  <div class="stat-subtitle" *ngIf="!loading && unavailable">{{ unavailableText }}</div>
+
+  <!-- Optional subtitle (for custom text) -->
+  <div class="stat-subtitle" *ngIf="subtitle && !clickable && !loading && !unavailable">
+    {{ subtitle }}
+  </div>
+
+  <!-- Clickable "Click for more info" link (only once real data is present) -->
+  <div class="stat-clickable" *ngIf="clickable && !loading && !unavailable">
+    <a href="javascript:void(0)" 
+       class="more-info-link" 
+       (click)="handleMoreInfoClick()">
+      Click for more info
+    </a>
+  </div>
+</div>

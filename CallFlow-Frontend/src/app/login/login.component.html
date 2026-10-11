@@ -1,0 +1,66 @@
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+
+<div class="container-fluid vh-100">
+    <div class="row h-100">
+        <!-- Left Column (40% width) -->
+        <div class="col-md-5 d-flex flex-column align-items-start p-5">
+            <!-- Move Image to Top -->
+            <img src="assets/VFLogo.png" alt="Left Image" class="img-fluid mb-4 align-self-start">
+
+            <!-- Form Section -->
+            <form class="w-100" #loginForm="ngForm" (ngSubmit)="login()">
+                <!-- Username -->
+             <div class="form-group form-group mb-3 w-100">
+                <label for="username"  style="font-weight: bold;" class="mb-2">NT Username</label>
+                <input 
+                type="text" 
+                id="username" 
+                class="form-control form-control-lg" 
+                placeholder="EX: VF-Egypt" 
+                style="font-size: 16px;"
+                [(ngModel)]="username" 
+                name="username" 
+                #usernameField="ngModel" 
+                required minlength="3"/>
+               
+                <div *ngIf="usernameField.invalid && usernameField.touched" class="text-danger">
+                    <small *ngIf="usernameField.errors?.['required']">Username is required.</small>
+                  </div>
+              </div>
+        
+              <div class="form-group form-group mb-4 w-100">
+                <label for="password" style="font-weight: bold;" class="mb-2">NT Password</label>
+                <input 
+      type="password" 
+      id="password" 
+      class="form-control form-control-lg" 
+      placeholder="Enter your password" 
+      [(ngModel)]="password" 
+      name="password" 
+      #passwordField="ngModel" 
+      required minlength="6" />
+
+    <!-- Validation message for password -->
+    <div *ngIf="passwordField.invalid && passwordField.touched" class="text-danger">
+      <small *ngIf="passwordField.errors?.['required']">Password is required.</small>
+    </div>   
+  </div>
+   <!-- Error message display -->
+   <div *ngIf="errorMessage" class="alert alert-danger">
+    {{ errorMessage }}
+  </div>
+         
+                <!-- Login Button -->
+                <button type="submit"
+                    class="btn btn-danger justify-content-left align-items-left  "
+                    style="background-color: red; width: 20%; margin-left: 80%;" >Log In </button>
+
+            </form>
+        </div>
+
+        <!-- Right Column (60% width) -->
+        <div class="col-md-7 d-flex justify-content-center align-items-center flex-column d-flex">
+            <img src="assets/vodafone.png" alt="Right Image" class="img-fluid img-VF">
+        </div>
+    </div>
+</div>

@@ -1,0 +1,32 @@
+<div class="kpi-card">
+  <!-- KPI Header: Title and Anomalies Badge -->
+  <div class="kpi-header">
+    <span class="kpi-title">{{ kpi.kpiName }}</span>
+    <span class="anomalies">{{ kpi.anomalies }}</span>
+  </div>
+
+  <!-- KPI Value -->
+     <div class="kpi-value">
+    {{ kpi.value }}
+  </div>
+  <!-- <div class="kpi-value" [class.bad]="kpi.delta < 0">
+    {{ kpi.value }}{{ kpi.unit }}
+  </div> -->
+
+  <!-- KPI Delta (Change Percentage) -->
+  <!-- <div class="kpi-delta" [class.down]="kpi.delta < 0">
+    {{ kpi.delta }}%
+  </div> -->
+
+  <!-- Line Chart -->
+  <app-kpi-line-chart
+    [series]="kpi.series"
+    [timestamps]="kpi.timestamps"
+    [index]="index">
+  </app-kpi-line-chart>
+
+  <!-- Baseline -->
+  <!-- <div class="baseline">
+    Baseline: {{ kpi.baseline }}{{ kpi.unit }}
+  </div> -->
+</div>

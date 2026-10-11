@@ -1,0 +1,81 @@
+<div class="correlations-page">
+    <div class="container-fluid ">
+
+        <!-- TOP 3 CARDS SECTION -->
+        <div class="row g-3 mb-4">
+            <!-- Total Complaints Card -->
+            <div class="col-md-4 ">
+                <app-stat-card [title]="'Total Complaints'" [value]="totalComplaints" [icon]="'pi-exclamation-triangle'"
+                    [iconColor]="'#9333ea'">
+                </app-stat-card>
+            </div>
+
+            <!-- Top Cluster Card -->
+            <div class="col-md-4">
+                <app-stat-card [title]="'Top Cell'" [value]="topCell" [icon]="'pi-sitemap'"
+                    [iconColor]="'#f59e0b'" [fontSize]="'1.5rem'" [Correlation_Cards]="true" [margin_size]="'30%'">
+                </app-stat-card>
+            </div>
+
+            <!-- Top Handset Card -->
+            <div class="col-md-4">
+                <app-stat-card [title]="'Top Handset'" [value]="topHandset" [icon]="'pi-mobile'" [iconColor]="'#ef4444'"
+                    [fontSize]="'1.5rem'" [Correlation_Cards]="true">
+                </app-stat-card>
+            </div>
+        </div>
+
+        <!-- FAILURE RATE BY CLUSTER CHART -->
+        <div class="row mb-4">
+            <div class="col-12 KPIs-container">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="mb-0 fs-5">Abnormal KPIs</h6>
+
+                    <p-dropdown [options]="Abnormal_System" [(ngModel)]="Select_Abnormal_System"
+                        placeholder="Abnormal Systems" styleClass="abnormal-dropdown"
+                        (onChange)="onSystemChange()">
+                    </p-dropdown>
+
+                </div>
+                <!-- KPI Cards Grid -->
+                <div *ngIf="kpisData.length === 0" class="text-center text-muted p-3">
+                    No abnormal KPIs to display for this system.
+                </div>
+                <div *ngIf="truncatedKpiCount > 0" class="text-muted small mb-2">
+                    Showing top {{ kpisData.length }} of {{ totalKpiCount }} abnormal KPIs
+                    (most abnormal first).
+                </div>
+                <div class="kpis-grid">
+                    <app-kpi-card *ngFor="let kpi of kpisData let i = index" [kpi]="kpi" [index]="i">
+                    </app-kpi-card>
+                </div>
+            </div>
+            
+        </div>
+
+        <!-- Nodes By Cell -->
+        <div class="row mb-4 ">
+            <!-- <div class="col-4">
+                <app-nodes-per-cell title="Nodes per Cell" [nodes]="nodesPerCellData">
+                </app-nodes-per-cell>
+            </div> -->
+
+            <div class="col-4">
+                <app-failure-rate-list [title]="'Failure Rate by Cluster'" [failureRates]="failureRateData">
+                </app-failure-rate-list>
+            </div>
+            <div class="col-8">
+                <div class="card">
+                    <div class="card-body">
+                        <h6 class="mb-0 fs-5">Top Nodes by Impact</h6>
+                        <app-bar-chart [data]="topNodesChartData" [horizontal_option]="true" [height]="350"
+                            [Abnormal_KPIs_Legend]="false" [DEFAULT_BAR_COLOR]="'#0BBCBC'"
+                            [yAxisLabel]="'Impact Score'">
+                        </app-bar-chart>
+                    </div>
+                </div>
+            </div>
+            
+
+        </div>
+    </div>

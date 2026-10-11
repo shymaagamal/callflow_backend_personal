@@ -1,0 +1,120 @@
+<!-- download-button.component.html -->
+<ng-container *ngIf="canDownload">
+
+  <!-- Trigger -->
+  <button class="dl-trigger" (click)="togglePanel()" [disabled]="panelState === 'running'">
+    <i class="pi pi-file-export"></i>
+    Export Data
+    <span class="dl-badge" *ngIf="panelState === 'running'">Running</span>
+  </button>
+
+  <!-- Panel -->
+  <div class="dl-panel" *ngIf="showPanel">
+
+    <!-- IDLE: system checklist -->
+    <ng-container *ngIf="panelState === 'idle'">
+      <p class="dl-title">Select systems to export</p>
+
+      <p class="dl-note">
+        <i class="pi pi-info-circle"></i>
+        Smartcare runs first. NPP, Splunk, Viavi and Remedy then run in parallel.
+      </p>
+
+      <div class="dl-checklist">
+        <label *ngFor="let s of systems" class="dl-item">
+          <input type="checkbox" [(ngModel)]="s.checked" />
+          <i class="pi" [ngClass]="s.icon"></i>
+          {{ s.label }}
+        </label>
+      </div>
+
+      <button
+        class="dl-start"
+        (click)="startExport()"
+        [disabled]="!isFormReady || selectedKeys.length === 0">
+        <i class="pi pi-cloud-download"></i>
+        Start Export
+      </button>
+
+      <p class="dl-warn" *ngIf="!isFormReady">
+        Fill in all form fields before exporting.
+      </p>
+    </ng-container>
+
+    <!-- RUNNING: per-system live status + overall bar -->
+    <ng-container *ngIf="panelState === 'running'">
+      <p class="dl-title">Exporting...</p>
+      <p class="dl-step">{{ currentStep }}</p>
+
+      <div class="dl-systems">
+        <div *ngFor="let s of systems" class="dl-sys-row" [class.unchecked]="!s.checked">
+          <div class="dl-sys-icon" [attr.data-sys]="s.key">
+            <i class="pi" [ngClass]="s.icon"></i>
+          </div>
+          <span class="dl-sys-label">{{ s.label }}</span>
+          <!-- per-system status indicator -->
+          <span class="dl-sys-status" [attr.data-status]="s.status">
+            <i class="pi"
+               [ngClass]="{
+                 'pi-clock':       s.status === 'idle',
+                 'pi-spin pi-spinner': s.status === 'running',
+                 'pi-check-circle':   s.status === 'done',
+                 'pi-times-circle':   s.status === 'failed'
+               }">
+            </i>
+          </span>
+        </div>
+      </div>
+
+      <div class="dl-bar-bg">
+        <div class="dl-bar-fill" [style.width.%]="overallProgress"></div>
+      </div>
+      <p class="dl-pct">{{ overallProgress }}%</p>
+    </ng-container>
+
+    <!-- DONE -->
+    <ng-container *ngIf="panelState === 'done'">
+      <div class="dl-systems">
+        <div *ngFor="let s of systems" class="dl-sys-row" [class.unchecked]="!s.checked">
+          <div class="dl-sys-icon" [attr.data-sys]="s.key">
+            <i class="pi" [ngClass]="s.icon"></i>
+          </div>
+          <span class="dl-sys-label">{{ s.label }}</span>
+          <span class="dl-sys-status" [attr.data-status]="s.status">
+            <i class="pi"
+               [ngClass]="{
+                 'pi-check-circle': s.status === 'done',
+                 'pi-times-circle': s.status === 'failed',
+                 'pi-minus-circle': !s.checked
+               }">
+            </i>
+          </span>
+        </div>
+      </div>
+
+      <div class="dl-success-banner">
+        <i class="pi pi-check-circle"></i>
+        Ready · {{ sizeKb }} KB
+        <span *ngIf="failedSystems.length > 0" class="dl-partial">
+          ({{ failedSystems.join(', ') }} failed)
+        </span>
+      </div>
+
+      <a *ngIf="zipUrl" [href]="'https://10.30.30.177' + zipUrl"
+         class="dl-link" download>
+        <i class="pi pi-download"></i> Download again
+      </a>
+      <button class="dl-reset" (click)="reset()">New export</button>
+    </ng-container>
+
+    <!-- FAILED -->
+    <ng-container *ngIf="panelState === 'failed'">
+      <div class="dl-error-banner">
+        <i class="pi pi-times-circle"></i>
+        <span>{{ error }}</span>
+      </div>
+      <button class="dl-reset" (click)="reset()">Try again</button>
+    </ng-container>
+
+  </div>
+</ng-container>

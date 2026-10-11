@@ -1,0 +1,111 @@
+
+   .title h1 {
+    color:#222; 
+    letter-spacing:1px;
+    font-family:"Playfair Display", serif; 
+    font-weight:500;
+    font-size:50px; 
+    letter-spacing:1px; 
+    width:160px; 
+    margin:auto; 
+    white-space:nowrap;
+    padding-bottom:18px;
+    margin-left: 50px;
+    background: var(--red-to-pink-to-purple-vertical-gradient);
+     }
+     
+     .title h1:before {
+      background-color: #c50000;
+      content: '';
+      display: block;
+      height: 5px;
+      width: 100px;
+      margin-bottom: 5px;
+     }
+     
+     .title h1:after {
+      background-color: #c50000;
+      content: '';
+      display: block;
+      height: 5px;
+      width: 100px;
+      margin-bottom: 5px;
+      margin-left: 400px;
+  
+     }
+     
+     .title h1 span {
+      margin-top: 5px;
+      font-size:20px; 
+      color:#444; 
+      word-spacing:1px; 
+      font-weight:normal; 
+      letter-spacing:2px;
+      text-transform: uppercase; 
+      font-family:"Raleway", sans-serif; font-weight:500;
+      display: grid;
+      grid-template-columns: 1fr max-content 1fr;
+      grid-template-rows: 27px 0;
+      grid-gap: 5px;
+     }
+     
+.btn-group{
+  height: 50px;
+  color: black;
+  font-weight: bold;
+  font-size: larger;
+}
+
+.btn-danger{
+  width: 400px;
+  margin: 0 auto;    
+  border-radius: 5px;
+}
+
+
+.btn-outline {
+  color: black;
+  border: rgb(71, 70, 70) 2px solid;
+  border-radius: rgb(51, 50, 50) 10px;
+  padding: 10px 20px;
+  margin-right: 10px;
+  font-size: 20px;
+  font-weight: 400;
+  text-align: center;
+  justify-content: center;
+ }
+ 
+.btn-outline:hover {
+  background-color: slategrey;
+}
+ 
+.btn-outline:active,.btn-outline:focus{
+  background-color:rgb(167, 190, 212);
+}
+
+
+.datetime-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 50px;
+}
+
+.datetime-label {
+  font-weight: 600;
+  margin-right: 10px;
+}
+
+.datetime-input {
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  padding: 8px;
+  font-size: 16px;
+  width: 200px;
+  box-shadow: 0 0 5px rgba(0, 0, 0, 0.1);
+  transition: border-color 0.3s ease;
+}
+
+.datetime-input:focus {
+  outline: none;
+}

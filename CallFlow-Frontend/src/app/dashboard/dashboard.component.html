@@ -1,0 +1,471 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+  <title>Network Dashboard</title>
+</head>
+
+<body>
+  <!-- ====================== INPUT FORM - ALWAYS VISIBLE ====================== -->
+<div class="container my-4">
+
+  <form #form="ngForm" (ngSubmit)="onSubmit()" class="card p-4 shadow-sm">
+    <div class="toolbar row g-3 align-items-end">
+      <div class="col-md-4">
+
+        <label>Upload MSISDN File</label>
+        <input type="file" class="form-control"  (change)="onFileSelected($event)" accept=".xlsx, .xls" />
+      </div>
+    <div class="col-md-3">
+
+      <label class="form-label fw-bold" >From</label>
+      <input type="datetime-local" class="form-control" name="start_date" [(ngModel)]="start_date" required />
+    </div>
+    <div class="col-md-3">
+
+      <label class="form-label fw-bold">To</label>
+      <input type="datetime-local" class="form-control" name="end_date" [(ngModel)]="end_date" required />
+    </div>
+    <div class="col-md-2">
+      
+      <button class="submit-btn" type="submit" [disabled]="form.invalid || smartcareLoading">{{ smartcareLoading ? 'Loading...' : 'Submit' }}</button>
+    </div>
+    </div>
+  </form>
+</div>  
+
+<!-- ====================== LOADING STATE ====================== -->
+<div class="container text-center py-5" *ngIf="smartcareLoading">
+  <div class="spinner-border text-primary" role="status" style="width: 4rem; height: 4rem;">
+    <span class="visually-hidden">Loading...</span>
+  </div>
+  <p class="mt-4 fs-4 text-muted">Loading Smartcare data... This may take 30–60 seconds.</p>
+</div>
+
+<!-- ====================== ERROR STATE ====================== -->
+<div class="container" *ngIf="smartcareError && !smartcareLoading">
+  <div class="alert alert-danger text-center py-4">
+    <h4><i class="bi bi-exclamation-triangle"></i> Error Loading Data</h4>
+    <p class="mb-3">{{ smartcareError }}</p>
+    <button class="btn btn-warning btn-lg" (click)="onSubmit()">Retry</button>
+  </div>
+</div>
+
+
+
+<!-- ====================== FULL DASHBOARD (Only shown after Smartcare success) ====================== -->
+<div class="container" *ngIf="smartcareLoaded && !smartcareLoading && !smartcareError">
+
+  <!-- Account Info Cards -->
+  <div class="cards-container my-5">
+    <h3 class="cards-container-header mb-4">Account Info</h3>
+
+    <div class="row g-4 align-items-stretch">
+
+      <!-- Subscriber & Handset Info -->
+      <div class="col-lg-4 col-md-6">
+        <div class="custom-box h-100 p-4 shadow-sm rounded">
+          <div class="d-flex align-items-center mb-3">
+            <span class="icon-circle me-3"><i class="bi bi-person-fill fs-3"></i></span>
+            <h5 class="mb-0">Subscriber & Handset Info</h5>
+          </div>
+          <hr>
+          <div class="row">
+            <div class="col-6">
+              <p><strong>MSISDN</strong><br>{{ smartcare_data?.MSISDN?.[0] || 'N/A' }}</p>
+              <p><strong>IMSI</strong><br>{{ smartcare_data?.IMSI?.[0] || 'N/A' }}</p>
+              <p><strong>IMEI</strong><br>{{ smartcare_data?.IMEI?.[0] || 'N/A' }}</p>
+            </div>
+            <div class="col-6">
+              <p><strong>Brand</strong><br>{{ smartcare_data?.IMEI_Brand?.[0] || 'N/A' }}</p>
+              <p><strong>Model</strong><br>{{ smartcare_data?.IMEI_Model?.[0] || 'N/A' }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sites & Core Info -->
+      <div class="col-lg-5 col-md-6">
+        <div class="custom-box h-100 p-4 shadow-sm rounded">
+          <div class="d-flex align-items-center mb-3">
+            <span class="icon-circle me-3"><i class="bi bi-phone-fill fs-3"></i></span>
+            <h5 class="mb-0">Sites & Core Info</h5>
+          </div>
+          <hr>
+          <div class="row text-center">
+            <div class="col-4">
+              <p class="cell-wrap"><strong>Sites</strong><br>{{ (smartcare_data?.site_name | join:', ') || 'N/A' }}</p>
+              <p class="cell-wrap"><strong>MME</strong><br>{{ (smartcare_data?.MME_Name | join:', ') || 'N/A' }}</p>
+              <p class="cell-wrap"><strong>SGW/PGW</strong><br>{{ (smartcare_data?.SGW_PGW_NAME | join:', ') || 'N/A' }}</p>
+            </div>
+            <div class="col-4">
+              <p class="cell-wrap"><strong>Cells</strong><br>{{ (smartcare_data?.cell_name | join:', ') || 'N/A' }}</p>
+              <p class="cell-wrap"><strong>RAT</strong><br>{{ smartcare_data?.RAT?.[0] || 'N/A' }}</p>
+              <p class="cell-wrap"><strong>TAC</strong><br>{{ smartcare_data?.TAC?.[0] || 'N/A' }}</p>
+            </div>
+            <div class="col-4">
+              <p class="cell-wrap"><strong>AAA Client</strong><br>{{ smartcare_data?.AAA_CLIENT_IP?.[0] || 'N/A' }}</p>
+              <p class="cell-wrap"><strong>VPCRF</strong><br>{{ smartcare_data?.VPCRF_NAME?.[0] || 'N/A' }}</p>
+              <p class="cell-wrap"><strong>OCS</strong><br>{{ smartcare_data?.OCS_NAME?.[0] || 'N/A' }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Account Health -->
+      <div class="col-lg-3 col-md-12">
+        <div class="custom-box h-100 p-4 shadow-sm rounded text-center d-flex flex-column">
+          <div class="flex-grow-1">
+            <div class="d-flex align-items-center justify-content-center mb-3">
+              <span class="icon-circle me-3"><i class="bi bi-activity fs-3"></i></span>
+              <h5 class="mb-0">Account Health</h5>
+            </div>
+            <hr>
+            <p class="text-danger fs-4 fw-bold">Issues Suspected</p>
+          </div>
+          <button class="btn btn-outline-danger mt-auto">View Summary</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+<!-- Main Tabs -->
+<div class="tabs-container mt-5 text-center">
+    <div class="btn-group custom-tab-group" role="group">
+      <button type="button" class="btn custom-tab"
+              [ngClass]="{ 'active-tab': selectedCategoryTab === 'Tickets' }"
+              (click)="selectTab('Tickets')">Tickets</button>
+      <button type="button" class="btn custom-tab"
+              [ngClass]="{ 'active-tab': selectedCategoryTab === 'Probs' }"
+              (click)="selectTab('Probs')">Probs</button>
+      <button type="button" class="btn custom-tab"
+              [ngClass]="{ 'active-tab': selectedCategoryTab === 'Network' }"
+              (click)="selectTab('Network')">Network</button>
+    </div>
+  </div>
+<!-- Network Sub-tabs -->
+ <div class="sub-tabs-container mt-4 text-center" *ngIf="selectedCategoryTab === 'Network'">
+    <div class="btn-group flex-wrap justify-content-center" role="group">
+      <button type="button" class="btn custom-subtab m-1"
+              *ngFor="let subtab of ['GGSN','DNS','GIFW','SBG','BGF','IMS','MME','Transmission','Radio (15 min)','Radio (Hourly)']"
+              [ngClass]="{ 'active-subtab': selectedCategorySubTab === subtab }"
+              (click)="selectSubTab(subtab)">
+        {{ subtab }}
+      </button>
+    </div>
+  </div>
+<div  class="kpis-container mt-3" >
+
+ 
+
+  <div class="chart-grid mt-4">
+
+  <!-- Probs -->
+  <ng-container *ngIf="selectedCategoryTab === 'Probs' " >
+
+    
+  <div class="loading-wrapper" *ngIf="smartcare_enterprise_kpis_data.length === 0 &&  smartcare_quality_kpis_data.length === 0">
+    <div class="spinner"></div>
+    <p class="loading-message">Data is retrieving, please wait...</p>
+  </div>
+
+   <div class="row location-cards-container">
+    <div class="col" *ngFor="let entry of location_info | keyvalue">
+      <div class="card location-card">
+        <div class="card-body text-center">
+          <i class="bi bi-geo-alt icon" style="color: red;"></i>
+          <h5 class="card-title">{{ entry.key | titlecase }}</h5>
+          <!-- Display each item in the array -->
+          <ng-container *ngIf="entry.value && entry.value.length > 0;">
+            <ul class="list-unstyled mb-0">
+              <li *ngFor="let item of entry.value">{{ item }}</li>
+            </ul>
+          </ng-container>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <br>
+
+  
+  <div class="chart-item" *ngFor="let config of smartcare_enterprise_kpis_chartConfigs">
+      <app-areachart-1
+        [chartType]="'line'"
+        [chartTitle]="config.chartTitle"
+        [chartData]="config.chartData"
+        [yAxisLabel]=""
+        [unit]="''">
+      </app-areachart-1>
+    </div>
+
+    <div class="chart-item" *ngFor="let config of smartcare_quality_kpis_chartConfigs">
+      <app-areachart-1
+        [chartType]="'line'"
+        [chartTitle]="config.chartTitle"
+        [chartData]="config.chartData"
+        [yAxisLabel]=""
+        [timeUnit]="'day'"
+        [unit]="''">
+      </app-areachart-1>
+    </div>
+  </ng-container>
+
+
+  <!-- Remedy Tickets -->
+  <ng-container *ngIf="selectedCategoryTab === 'Tickets'" >
+
+  <div  *ngIf="dataSource && dataSource.data.length > 0; else noTickets">
+
+  <div class="row remedy-cards-container">
+  <div class="col" *ngFor="let entry of remedy_status_count | keyvalue">
+    <div class="card status-card" [ngClass]="entry.key">
+      <div class="card-body text-center">
+        <i class="bi bi-check-circle icon"></i>
+        <h5 class="card-title">{{ entry.key | titlecase }}</h5>
+        <p class="card-text">{{ entry.value }}</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+     <div class="mat-elevation-z8">
+
+        <!-- 🔍 Search box -->
+        <mat-form-field appearance="outline" style="width: 100%;">
+          <mat-label>Search</mat-label>
+          <input matInput (keyup)="applyTicketsSearchFilter($event)" placeholder="Search incidents" />
+        </mat-form-field>
+
+        <div class="table-container">
+          <table mat-table [dataSource]="dataSource" matSort>
+          
+            <!-- Define columns dynamically -->
+            <ng-container *ngFor="let column of displayedRemedyColumns" [matColumnDef]="column">
+              <th mat-header-cell *matHeaderCellDef mat-sort-header> {{ column }} </th>
+              <td mat-cell *matCellDef="let row"> {{ row[column] }} </td>
+            </ng-container>
+          
+            <tr mat-header-row *matHeaderRowDef="displayedRemedyColumns"></tr>
+            <tr mat-row *matRowDef="let row; columns: displayedRemedyColumns;"></tr>
+          </table>
+        </div>
+
+        <!-- 📄 Pagination -->
+        <mat-paginator [pageSizeOptions]="[10, 25, 50, 100]" showFirstLastButtons>
+        </mat-paginator>
+
+     </div>
+
+   </div>
+
+ </ng-container>
+
+ <ng-template #noTickets>
+  <div class="no-tickets-message">
+    No Tickets available on these sites during the selected interval.
+  </div>
+</ng-template>
+
+
+
+  <!-- GGSN -->
+  <ng-container *ngIf="selectedCategorySubTab === 'GGSN' && selectedCategoryTab === 'Network' " >
+    
+    
+    <div class="loading-wrapper" *ngIf="splunk_data.length === 0">
+      <div class="spinner"></div>
+      <p class="loading-message">Data is retrieving, please wait...</p>
+    </div>
+
+    <div class="chart-item" *ngFor="let config of ggsnKpis_chartConfigs">
+      <app-areachart-1
+        [chartTitle]="config.chartTitle"
+        [chartData]="config.chartData"
+        [yAxisLabel]=""
+        [unit]="'%'"
+        [minY]="0"
+        [maxY]="10000">
+      </app-areachart-1>
+    </div>
+  </ng-container>
+
+  <!-- DNS -->
+  <ng-container *ngIf="selectedCategorySubTab === 'DNS' && selectedCategoryTab === 'Network' ">
+    <div class="chart-item" *ngFor="let config of dnsKpis_chartConfigs">
+      <app-areachart-1
+        [chartTitle]="config.chartTitle"
+        [chartData]="config.chartData"
+        [yAxisLabel]=""
+        [unit]="'%'"
+        [minY]="0"
+        [maxY]="10000">
+      </app-areachart-1>
+    </div>
+  </ng-container>
+
+  <!-- GiFW -->
+  <ng-container *ngIf="selectedCategorySubTab === 'GIFW' && selectedCategoryTab === 'Network' ">
+    <div class="chart-item" *ngFor="let config of gifwKpis_chartConfigs">
+      <app-areachart-1
+        [chartTitle]="config.chartTitle"
+        [chartData]="config.chartData"
+        [yAxisLabel]=""
+        [unit]="'%'"
+        [minY]="0"
+        [maxY]="10000">
+      </app-areachart-1>
+    </div>
+  </ng-container>
+  
+  <!-- MSC -->
+  <ng-container *ngIf="selectedCategorySubTab === 'MSC' && selectedCategoryTab === 'Network' ">
+    <div class="chart-item" *ngFor="let config of mscKpis_chartConfigs">
+      <app-areachart-1
+        [chartTitle]="config.chartTitle"
+        [chartData]="config.chartData"
+        [yAxisLabel]=""
+        [unit]="'%'"
+        [minY]="0"
+        [maxY]="10000">
+      </app-areachart-1>
+    </div>
+  </ng-container>
+
+  
+  <!-- SBG -->
+  <ng-container *ngIf="selectedCategorySubTab === 'SBG' && selectedCategoryTab === 'Network' ">
+    <div class="chart-item" *ngFor="let config of sbgKpis_chartConfigs">
+      <app-areachart-1
+        [chartTitle]="config.chartTitle"
+        [chartData]="config.chartData"
+        [yAxisLabel]=""
+        [unit]="'%'"
+        [minY]="0"
+        [maxY]="10000">
+      </app-areachart-1>
+    </div>
+  </ng-container>
+  
+  <!-- BGF -->
+  <ng-container *ngIf="selectedCategorySubTab === 'BGF' && selectedCategoryTab === 'Network' ">
+    <div class="chart-item" *ngFor="let config of bgfKpis_chartConfigs">
+      <app-areachart-1
+        [chartTitle]="config.chartTitle"
+        [chartData]="config.chartData"
+        [yAxisLabel]=""
+        [unit]="'%'"
+        [minY]="0"
+        [maxY]="10000">
+      </app-areachart-1>
+    </div>
+  </ng-container>
+
+  
+  <!-- IMS -->
+  <ng-container *ngIf="selectedCategorySubTab === 'IMS' && selectedCategoryTab === 'Network' ">
+    <div class="chart-item" *ngFor="let config of imsKpis_chartConfigs">
+      <app-areachart-1
+        [chartTitle]="config.chartTitle"
+        [chartData]="config.chartData"
+        [yAxisLabel]=""
+        [unit]="'%'"
+        [minY]="0"
+        [maxY]="10000">
+      </app-areachart-1>
+    </div>
+  </ng-container>
+
+  
+  <!-- IMS -->
+  <ng-container *ngIf="selectedCategorySubTab === 'MME' && selectedCategoryTab === 'Network' ">
+    <div class="chart-item" *ngFor="let config of mmeKpis_chartConfigs">
+      <app-areachart-1
+        [chartTitle]="config.chartTitle"
+        [chartData]="config.chartData"
+        [yAxisLabel]=""
+        [unit]="'%'"
+        [minY]="0"
+        [maxY]="10000">
+      </app-areachart-1>
+    </div>
+  </ng-container>
+  
+
+  <!-- Transmission | Viavi -->
+  <ng-container *ngIf="selectedCategorySubTab === 'Transmission' && selectedCategoryTab === 'Network' " >
+    
+    
+    <div class="loading-wrapper" *ngIf="viavi_data.length === 0">
+      <div class="spinner"></div>
+      <p class="loading-message">Data is retrieving, please wait...</p>
+    </div>
+
+    <div class="chart-item" *ngFor="let config of viavi_chartConfigs">
+      <app-areachart-1
+        [chartTitle]="config.chartTitle"
+        [chartData]="config.chartData"
+        [yAxisLabel]=""
+        [unit]="''">
+      </app-areachart-1>
+    </div>
+  </ng-container>
+
+
+  <!-- NPP 15 min -->
+  <ng-container *ngIf="selectedCategorySubTab === 'Radio (15 min)' && selectedCategoryTab === 'Network' ">
+    
+    <div class="loading-wrapper" *ngIf="npp_data.length === 0">
+      <div class="spinner"></div>
+      <p class="loading-message">Data is retrieving, please wait...</p>
+    </div>
+
+    <div class="chart-item"  *ngFor="let config of npp_chartConfigs">
+      <app-areachart-1
+        [chartTitle]="config.chartTitle"
+        [chartData]="config.chartData"
+        [yAxisLabel]=""
+        [unit]="''">
+      </app-areachart-1>
+    </div>
+  </ng-container>
+  
+  <!-- NPP Hourly -->
+  <ng-container *ngIf="selectedCategorySubTab === 'Radio (Hourly)' && selectedCategoryTab === 'Network' ">
+    
+    <div class="loading-wrapper" *ngIf="npp_hourly_data.length === 0">
+      <div class="spinner"></div>
+      <p class="loading-message">Data is retrieving, please wait...</p>
+    </div>
+
+  <div *ngIf="npp_hourly_chartConfigs?.length > 0; else noNppHourlyData">
+    <div class="chart-item" *ngFor="let config of npp_hourly_chartConfigs">
+      <app-areachart-1
+        [chartTitle]="config.chartTitle"
+        [chartData]="config.chartData"
+        [yAxisLabel]=""
+        [unit]="''"
+        >
+      </app-areachart-1>
+    </div>
+  </div>
+  </ng-container>
+
+  <ng-template #noNppHourlyData>
+    <p class="no-data-message">No data returned</p>
+  </ng-template>
+  
+
+  
+</div>
+
+</div>
+
+</div>
+
+
+</body>
+</html>

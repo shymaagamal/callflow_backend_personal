@@ -1,0 +1,176 @@
+body {
+    background-color: #fff;
+    font-family: "Inter", sans-serif; /* Fallback font for better compatibility */
+  }
+  
+  /* Styling for <h1> links */
+  h1 > a {
+    text-decoration: none;
+    color: #fff !important;
+  }
+  
+  /* Intro section styling */
+  .intro-section {
+    background-image: url("/callflow-portal/assets/login.png");
+    background-size: cover;
+    background-repeat: no-repeat;
+    background-position: center;
+    min-height: 100vh; /* Ensures section takes up at least the full viewport height */
+    display: flex;
+    flex-direction: column;
+    justify-content: center; /* Center content vertically */
+    color: #ffffff;
+  }
+  
+  /* Responsive padding adjustments */
+  @media (max-width: 991px) {
+    .intro-section {
+      padding-left: 50px;
+      padding-right: 50px;
+    }
+  }
+  
+  @media (max-width: 767px) {
+    .intro-section {
+      padding: 28px;
+    }
+  }
+    
+  /* Intro content wrapper styling */
+  .intro-content-wrapper {
+    width: 410px;
+    max-width: 100%;
+    margin: auto; /* Center content horizontally */
+  }
+  
+  .intro-content-wrapper .intro-title {
+    font-size: 2.5rem; /* Use rem for responsive font sizes */
+    font-weight: bold;
+    margin-bottom: 1rem;
+  }
+  
+  .intro-content-wrapper .intro-text {
+    font-size: 1.2rem; /* Use rem for responsive font sizes */
+    line-height: 1.37;
+  }
+  
+  /* Form section styling */
+  .form-section {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  
+  @media (max-width: 767px) {
+    .form-section {
+      padding: 35px;
+    }
+  }
+  
+  /* Login wrapper styling */
+  .login-wrapper {
+    width: 300px;
+    max-width: 100%;
+  }
+  
+  @media (max-width: 575px) {
+    .login-wrapper {
+      width: 100%;
+    }
+  }
+  
+  /* Styling for form controls within login wrapper */
+  .login-wrapper .form-control {
+    border: 0;
+    border-bottom: 1px solid #e7e7e7;
+    border-radius: 0;
+    font-size: 14px;
+    font-weight: bold;
+    padding: 15px 10px;
+    margin-bottom: 7px;
+  }
+  
+  /* Login title styling */
+  .login-title {
+    text-align: center;
+    font-size: 1.875rem; /* Use rem for responsive font sizes */
+    font-weight: bold;
+    margin-bottom: 1.875rem; /* Use rem for consistent spacing */
+  }
+  
+  /* Login button styling */
+  .login-btn {
+    background-color: #000;
+    font-weight: bold;
+    color: #fff;
+    border-radius: 20px;
+  }
+  
+  .login-btn:hover {
+    background-color: transparent;
+    color: #ec4310;
+    border-width: 2px;
+    border-color: #ec4310;
+  }
+  
+  /* Focus styling for form controls */
+  .form-control:focus {
+    box-shadow: none; /* Removes default box-shadow for form controls */
+  }
+  
+  .input-group:focus-within i {
+    color: #ec4310; /* Highlight icon color on focus */
+  }
+  
+  .input-group:focus-within .form-control {
+    border-color: #ec4310; /* Highlight input border on focus */
+    box-shadow: none; /* Removes default box-shadow for focused input */
+  }
+  
+  .form-group:focus-within .form-label {
+    color: #ec4310; /* Change label color on focus */
+  }
+  .container-fluid{margin: 0!important}
+  .brand-wrapper{
+    padding: 25px;
+  }
+
+
+
+
+
+
+
+  html, body {
+    height: 100%;
+    margin: 0;
+  }
+  
+  .container-fluid {
+    height: 100%;
+  }
+  
+  .form-group {
+    width: 100%;
+  }
+  
+  button {
+    align-self: flex-start; /* Align button to the left */
+  }
+  .img-VF{
+  width: 100%;
+  height: 100%;
+  margin-left: 2%;
+object-fit: cover; 
+  }
+  .img-VF2{
+    height: 40%;
+  }
+  .form-group.position-relative {
+    position: relative;
+  }
+  
+input:hover{
+    border: 1.7px solid #00B0CA;
+}
+  

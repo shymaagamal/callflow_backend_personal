@@ -1,0 +1,18 @@
+<div class="job-status" [class.row]="layout === 'row'" [class.card]="layout === 'card'">
+  <div class="job-status-header">
+    <div class="job-status-icon" [attr.data-system]="system">
+      <i class="pi" [ngClass]="iconClass"></i>
+    </div>
+    <span class="job-status-label">{{ label }}</span>
+    <span class="job-status-badge" [attr.data-status]="statusKey">{{ statusLabel }}</span>
+  </div>
+
+  <div class="job-status-step" *ngIf="status !== 'FAILED'">{{ step || 'Waiting to start...' }}</div>
+  <div class="job-status-step error" *ngIf="status === 'FAILED'">{{ error || 'Failed' }}</div>
+
+  <div class="job-status-bar-bg">
+    <div class="job-status-bar-fill" [attr.data-system]="system" [style.width.%]="progress"></div>
+  </div>
+
+  <div class="job-status-pct">{{ progress }}%</div>
+</div>

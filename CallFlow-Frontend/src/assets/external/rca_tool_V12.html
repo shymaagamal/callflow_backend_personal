@@ -1,0 +1,4363 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network RCA Tool v4.0 - Evidence-Weighted Scoring</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@300;400;600;700;900&display=swap"
+        rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script
+        src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <style>
+        /* [Keep all the same CSS styles from previous version] */
+        :root {
+            --bg:           #f8fafc;           /* very light gray - Vodafone clean bg */
+            --surface:      #ffffff;           /* white cards */
+            --surface2:     #f1f5f9;           /* slightly darker for contrast */
+            --border:       #e2e8f0;           /* soft gray borders */
+            --accent:       #E60000;           /* main Vodafone red */
+            --accent2:      #C40000;           /* darker red for hover/gradient end */
+
+            --danger:       #E60000;           /* same as accent now */
+            --warn:         #f59e0b;
+            --ok:           #10b981;
+            --text:         #1f2937;
+            --dim:          #6b7280;
+            
+            --font-mono:    'Share Tech Mono', monospace;
+            --font-main:    'Exo 2', sans-serif;
+            --font-mono: 'Share Tech Mono', monospace;
+            --font-main: 'Exo 2', sans-serif;
+            --radius-sm:    6px;
+            --radius-md:    8px;
+            --radius-lg:    12px;
+            --sp-xs: 4px;
+            --sp-sm: 8px;
+            --sp-md: 12px;
+            --sp-lg: 16px;
+            --sp-xl: 24px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-main);
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+            font-size: 14px;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #app {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            background: var(--bg);
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            padding: var(--sp-md) var(--sp-xl);
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            gap: var(--sp-md);
+            flex-shrink: 0;
+        }
+
+        .header-logo {
+            font-size: 32px;
+            line-height: 1;
+        }
+
+        .header-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--danger);
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header-sub {
+            font-size: 12px;
+            color: var(--dim);
+            font-family: var(--font-mono);
+        }
+
+        .header-status {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: var(--sp-sm);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--ok);
+            box-shadow: 0 0 8px var(--ok);
+        }
+
+        .status-label {
+            font-size: 12px;
+            font-family: var(--font-mono);
+            color: var(--dim);
+        }
+
+        .main {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+            min-height: 0;
+        }
+
+        .sidebar {
+            width: 420px;
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            padding: var(--sp-lg);
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: var(--sp-lg);
+            flex-shrink: 0;
+        }
+
+        .panel-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: var(--sp-sm);
+            font-family: var(--font-mono);
+            display: flex;
+            align-items: center;
+            gap: var(--sp-sm);
+        }
+
+        .panel-title::before {
+            content: '▶';
+            color: var(--accent);
+            font-size: 10px;
+        }
+
+        .path-input-group {
+            background: var(--surface2);
+            border-radius: var(--radius-md);
+            padding: var(--sp-md);
+            border: 1px solid var(--border);
+            transition: all 0.2s;
+        }
+
+        .path-input-group:hover {
+            border-color: var(--accent);
+            box-shadow: 0 0 10px rgba(0, 200, 255, 0.1);
+        }
+
+        .path-label {
+            font-size: 11px;
+            color: var(--accent);
+            margin-bottom: var(--sp-sm);
+            font-family: var(--font-mono);
+            display: flex;
+            align-items: center;
+            gap: var(--sp-xs);
+        }
+
+        .file-input-wrapper {
+            display: flex;
+            gap: var(--sp-sm);
+            margin-bottom: var(--sp-sm);
+        }
+
+        .file-input {
+            flex: 1;
+            padding: var(--sp-sm);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text);
+            font-family: var(--font-mono);
+            font-size: 12px;
+        }
+
+        .file-input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .browse-btn {
+            padding: var(--sp-sm) var(--sp-md);
+            background: linear-gradient(135deg, var(--surface), var(--surface2));
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text);
+            font-size: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: var(--sp-xs);
+            white-space: nowrap;
+            transition: all 0.2s;
+        }
+
+        .browse-btn:hover {
+            background: var(--surface2);
+            border-color: var(--accent);
+            color: var(--accent);
+            transform: translateY(-1px);
+        }
+
+        .selected-files {
+            margin-top: var(--sp-sm);
+            max-height: 150px;
+            overflow-y: auto;
+            background: var(--surface);
+            border-radius: var(--radius-sm);
+            padding: var(--sp-sm);
+            font-size: 11px;
+            font-family: var(--font-mono);
+            border: 1px solid var(--border);
+        }
+
+        .selected-file-item {
+            display: flex;
+            align-items: center;
+            padding: 6px 0;
+            border-bottom: 1px dotted var(--border);
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .selected-file-item:last-child {
+            border-bottom: none;
+        }
+
+        .file-badge {
+            font-size: 9px;
+            padding: 2px 6px;
+            border-radius: 10px;
+            margin-right: var(--sp-sm);
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            color: white;
+            text-transform: uppercase;
+            min-width: 35px;
+            text-align: center;
+            font-weight: 600;
+        }
+
+        .file-badge.filter {
+            background: linear-gradient(135deg, var(--warn), #ff8800);
+        }
+
+        .file-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            color: var(--text);
+        }
+
+        .file-size {
+            color: var(--dim);
+            font-size: 9px;
+            margin-left: var(--sp-sm);
+            font-family: var(--font-mono);
+        }
+
+        .config-section {
+            background: var(--surface2);
+            border-radius: var(--radius-md);
+            padding: var(--sp-md);
+            border: 1px solid var(--border);
+        }
+
+        .config-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: var(--sp-md);
+        }
+
+        .config-label {
+            font-size: 11px;
+            color: var(--dim);
+            margin-bottom: var(--sp-xs);
+            font-family: var(--font-mono);
+            display: flex;
+            align-items: center;
+            gap: var(--sp-xs);
+        }
+
+        .input-field {
+            width: 100%;
+            padding: var(--sp-sm);
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text);
+            font-family: var(--font-mono);
+            font-size: 12px;
+            margin-bottom: var(--sp-sm);
+            transition: all 0.2s;
+        }
+
+        .input-field:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(0, 200, 255, 0.1);
+        }
+
+        .input-field:hover {
+            border-color: var(--accent);
+        }
+
+        .run-btn-wrap {
+            margin-top: auto;
+            padding-top: var(--sp-lg);
+        }
+
+        .run-btn {
+            width: 100%;
+            padding: var(--sp-md);
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            border: none;
+            border-radius: var(--radius-md);
+            color: white;
+            font-weight: 700;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-family: var(--font-main);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .run-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+            transition: left 0.5s;
+        }
+
+        .run-btn:hover:not(:disabled)::before {
+            left: 100%;
+        }
+
+        .run-btn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(0, 200, 255, 0.4);
+        }
+
+        .run-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            background: var(--dim);
+        }
+
+        .content {
+            flex: 1;
+            overflow-y: auto;
+            padding: var(--sp-xl);
+            background: var(--bg);
+        }
+
+        .welcome {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--dim);
+            text-align: center;
+        }
+
+        .welcome-icon {
+            font-size: 80px;
+            margin-bottom: var(--sp-lg);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+
+            50% {
+                transform: scale(1.1);
+                opacity: 0.8;
+            }
+        }
+
+        .welcome-title {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: var(--sp-md);
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .welcome-desc {
+            max-width: 500px;
+            line-height: 1.6;
+            color: var(--dim);
+        }
+
+        .progress-wrap {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .progress-title {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: var(--sp-xl);
+            color: var(--accent);
+        }
+
+        .progress-bar-outer {
+            width: 100%;
+            height: 8px;
+            background: var(--surface2);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: var(--sp-md);
+            border: 1px solid var(--border);
+        }
+
+        .progress-bar-inner {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent), var(--accent2));
+            transition: width 0.3s;
+            border-radius: 4px;
+        }
+
+        .progress-step {
+            font-size: 14px;
+            color: var(--dim);
+            margin-bottom: var(--sp-lg);
+            font-family: var(--font-mono);
+        }
+
+        .progress-log {
+            width: 100%;
+            height: 250px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: var(--sp-md);
+            overflow-y: auto;
+            font-family: var(--font-mono);
+            font-size: 11px;
+        }
+
+        .log-line {
+            padding: 4px 0;
+            border-bottom: 1px dotted var(--border);
+            color: var(--text);
+            animation: fadeIn 0.3s;
+        }
+
+        .log-line.error {
+            color: var(--danger);
+        }
+
+        .log-line.success {
+            color: var(--ok);
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-5px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .tab-bar {
+            display: flex;
+            gap: var(--sp-sm);
+            border-bottom: 1px solid var(--border);
+            padding-bottom: var(--sp-sm);
+            margin-bottom: var(--sp-lg);
+            flex-wrap: wrap;
+        }
+
+        .tab-btn {
+            padding: var(--sp-sm) var(--sp-lg);
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--dim);
+            transition: all 0.2s;
+        }
+
+        .tab-btn:hover {
+            color: var(--accent);
+            border-color: var(--border);
+        }
+
+        .tab-btn.active {
+            background: var(--surface2);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.5s;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .results {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .summary-row {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: var(--sp-lg);
+            margin-bottom: var(--sp-xl);
+        }
+
+        .summary-card {
+            background: linear-gradient(135deg, var(--surface2), var(--surface));
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: var(--sp-lg);
+            text-align: center;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+
+        .summary-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+            border-color: var(--accent);
+        }
+
+        .summary-card.danger {
+            border-color: var(--danger);
+        }
+
+        .summary-card.warn {
+            border-color: var(--warn);
+        }
+
+        .summary-card.info {
+            border-color: var(--accent);
+        }
+
+        .sc-label {
+            font-size: 11px;
+            color: var(--dim);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: var(--sp-sm);
+        }
+
+        .sc-value {
+            font-size: 48px;
+            font-weight: 700;
+            font-family: var(--font-mono);
+            line-height: 1;
+        }
+
+        .sc-value.danger {
+            color: var(--danger);
+        }
+
+        .sc-value.warn {
+            color: var(--warn);
+        }
+
+        .sc-value.info {
+            color: var(--accent);
+        }
+
+        .sc-trend {
+            font-size: 11px;
+            margin-top: var(--sp-sm);
+            color: var(--dim);
+        }
+
+        .section-hdr {
+            display: flex;
+            align-items: center;
+            gap: var(--sp-md);
+            margin: var(--sp-xl) 0 var(--sp-lg);
+        }
+
+        .section-hdr-title {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--accent);
+            white-space: nowrap;
+        }
+
+        .section-hdr-line {
+            height: 1px;
+            background: linear-gradient(90deg, var(--border), transparent);
+            flex: 1;
+        }
+
+        .suspects-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: var(--sp-md);
+            margin-bottom: var(--sp-xl);
+        }
+
+        .suspect-card {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: var(--sp-md);
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+
+        .suspect-card:hover {
+            transform: translateY(-3px);
+            border-color: var(--accent);
+            box-shadow: 0 5px 15px rgba(0, 200, 255, 0.2);
+        }
+
+        .suspect-card.primary {
+            border-left: 4px solid var(--danger);
+        }
+
+        .suspect-card.secondary {
+            border-left: 4px solid var(--warn);
+        }
+
+        .suspect-card.tertiary {
+            border-left: 4px solid var(--accent);
+        }
+
+        .suspect-type {
+            font-size: 10px;
+            color: var(--dim);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .suspect-name {
+            font-size: 20px;
+            font-weight: 700;
+            margin: var(--sp-xs) 0;
+        }
+
+        .suspect-score {
+            font-size: 14px;
+            color: var(--accent);
+            font-family: var(--font-mono);
+        }
+
+        .suspect-evidence {
+            font-size: 11px;
+            color: var(--dim);
+            margin-top: var(--sp-sm);
+        }
+
+        .suspect-stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: var(--sp-xs);
+            margin-top: var(--sp-sm);
+            font-size: 10px;
+            color: var(--dim);
+        }
+
+        .ticket-badge {
+            background: var(--danger);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .ticket-badge:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 10px var(--danger);
+        }
+
+        .ticket-details {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: var(--sp-md);
+            margin: var(--sp-sm) 0;
+        }
+
+        .ticket-field {
+            display: grid;
+            grid-template-columns: 180px 1fr;
+            gap: var(--sp-sm);
+            padding: var(--sp-xs) 0;
+            border-bottom: 1px dotted var(--border);
+        }
+
+        .ticket-field:last-child {
+            border-bottom: none;
+        }
+
+        .ticket-label {
+            color: var(--accent);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .ticket-value {
+            color: var(--text);
+            font-size: 12px;
+            word-break: break-word;
+        }
+
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.95);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background: var(--surface2);
+            border: 2px solid var(--accent);
+            border-radius: var(--radius-lg);
+            width: 90%;
+            max-width: 1200px;
+            max-height: 90vh;
+            overflow-y: auto;
+            padding: var(--sp-xl);
+            position: relative;
+        }
+
+        .modal-close {
+            position: absolute;
+            top: var(--sp-md);
+            right: var(--sp-md);
+            font-size: 24px;
+            cursor: pointer;
+            color: var(--dim);
+            z-index: 10;
+        }
+
+        .modal-close:hover {
+            color: var(--danger);
+        }
+
+        .modal-title {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--accent);
+            margin-bottom: var(--sp-lg);
+            padding-right: 30px;
+        }
+
+        .node-cards {
+            display: flex;
+            flex-direction: column;
+            gap: var(--sp-sm);
+        }
+
+        .node-card {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+
+        .node-card-header {
+            display: flex;
+            align-items: center;
+            padding: var(--sp-md);
+            cursor: pointer;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
+            transition: all 0.2s;
+        }
+
+        .node-card-header:hover {
+            background: var(--surface2);
+        }
+
+        .node-card-icon {
+            font-size: 20px;
+            margin-right: var(--sp-sm);
+        }
+
+        .node-card-name {
+            font-weight: 600;
+            flex: 1;
+        }
+
+        .anomaly-count {
+            font-size: 12px;
+            font-family: var(--font-mono);
+            margin-right: var(--sp-md);
+            padding: 2px 8px;
+            border-radius: 12px;
+            background: var(--surface);
+        }
+
+        .anomaly-count.critical {
+            color: var(--danger);
+            border: 1px solid var(--danger);
+        }
+
+        .anomaly-count.anomaly {
+            color: var(--warn);
+            border: 1px solid var(--warn);
+        }
+
+        .chevron {
+            font-size: 12px;
+            color: var(--dim);
+            transition: transform 0.3s;
+        }
+
+        .node-card-body {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+            background: var(--surface);
+        }
+
+        .node-card-body.open {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .kpi-item {
+            padding: var(--sp-sm) var(--sp-md);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: var(--sp-sm);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .kpi-item:hover {
+            background: var(--surface2);
+        }
+
+        .kpi-severity {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .kpi-severity.critical {
+            background: var(--danger);
+            box-shadow: 0 0 8px var(--danger);
+        }
+
+        .kpi-severity.anomaly {
+            background: var(--warn);
+            box-shadow: 0 0 8px var(--warn);
+        }
+
+        .kpi-name {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            min-width: 120px;
+        }
+
+        .kpi-value {
+            font-weight: 600;
+        }
+
+        .chain-card {
+            background: linear-gradient(135deg, rgba(0, 200, 255, 0.1), rgba(0, 128, 255, 0.05));
+            border: 1px solid var(--accent);
+            border-radius: var(--radius-lg);
+            padding: var(--sp-md);
+            margin-bottom: var(--sp-md);
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .chain-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 200, 255, 0.2);
+        }
+
+        .chain-site {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--accent);
+            margin-bottom: var(--sp-sm);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .chain-evidence {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: var(--sp-sm);
+            margin-top: var(--sp-sm);
+        }
+
+        .evidence-item {
+            background: var(--surface2);
+            border-radius: var(--radius-sm);
+            padding: var(--sp-sm);
+            text-align: center;
+        }
+
+        .evidence-label {
+            color: var(--dim);
+            font-family: var(--font-mono);
+            font-size: 9px;
+            text-transform: uppercase;
+        }
+
+        .evidence-value {
+            font-size: 20px;
+            font-weight: 700;
+        }
+
+        .chart-container {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: var(--sp-lg);
+            margin-bottom: var(--sp-lg);
+            height: 400px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+
+        .export-row {
+            padding: var(--sp-md) var(--sp-xl);
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+            display: flex;
+            gap: var(--sp-sm);
+            justify-content: flex-end;
+            flex-shrink: 0;
+        }
+
+        .btn {
+            padding: var(--sp-sm) var(--sp-lg);
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: var(--surface);
+            color: var(--text);
+            transition: all 0.2s;
+        }
+
+        .btn:hover {
+            background: var(--surface2);
+            border-color: var(--accent);
+        }
+
+        .btn-outline {
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+
+        .btn-outline:hover {
+            background: var(--accent);
+            color: white;
+        }
+
+        .btn-danger {
+            border-color: var(--danger);
+            color: var(--danger);
+        }
+
+        .btn-danger:hover {
+            background: var(--danger);
+            color: white;
+        }
+
+        .kpi-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+
+        .kpi-table th {
+            text-align: left;
+            padding: var(--sp-sm);
+            background: var(--surface);
+            font-size: 11px;
+            color: var(--dim);
+            font-family: var(--font-mono);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .kpi-table td {
+            padding: var(--sp-sm);
+            border-bottom: 1px solid var(--border);
+            font-size: 12px;
+        }
+
+        .kpi-table tr:hover td {
+            background: var(--surface);
+        }
+
+        .flag-badge {
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 600;
+            display: inline-block;
+        }
+
+        .flag-CRITICAL {
+            background: rgba(255, 60, 90, 0.2);
+            color: var(--danger);
+            border: 1px solid var(--danger);
+        }
+
+        .flag-ANOMALY {
+            background: rgba(255, 170, 0, 0.2);
+            color: var(--warn);
+            border: 1px solid var(--warn);
+        }
+
+        .flag-NODE_TYPE {
+            background: rgba(0, 200, 255, 0.2);
+            color: var(--accent);
+            border: 1px solid var(--accent);
+            font-family: var(--font-mono);
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--surface);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--accent);
+        }
+
+        .tooltip {
+            position: relative;
+            display: inline-block;
+        }
+
+        .tooltip .tooltip-text {
+            visibility: hidden;
+            background: var(--surface);
+            color: var(--text);
+            text-align: center;
+            padding: 5px 10px;
+            border-radius: var(--radius-sm);
+            position: absolute;
+            z-index: 1;
+            bottom: 125%;
+            left: 50%;
+            transform: translateX(-50%);
+            opacity: 0;
+            transition: opacity 0.3s;
+            border: 1px solid var(--border);
+            font-size: 11px;
+            white-space: nowrap;
+        }
+
+        .tooltip:hover .tooltip-text {
+            visibility: visible;
+            opacity: 1;
+        }
+
+        .stats-badge {
+            display: flex;
+            align-items: center;
+            gap: var(--sp-xs);
+            background: var(--surface);
+            padding: 2px 6px;
+            border-radius: 12px;
+            font-size: 10px;
+        }
+
+        .ticket-stats {
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--sp-md);
+            margin-top: var(--sp-md);
+        }
+
+        .filter-section {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: var(--sp-md);
+            margin-bottom: var(--sp-lg);
+        }
+
+        .filter-title {
+            color: var(--accent);
+            font-size: 12px;
+            font-weight: 600;
+            margin-bottom: var(--sp-sm);
+        }
+
+        .filter-tag {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 4px 12px;
+            font-size: 11px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            margin-right: var(--sp-sm);
+            margin-bottom: var(--sp-sm);
+        }
+
+        .filter-tag .remove {
+            color: var(--danger);
+            cursor: pointer;
+            margin-left: 4px;
+        }
+
+        .kpi-chart-controls {
+            display: flex;
+            gap: var(--sp-md);
+            margin-bottom: var(--sp-md);
+            flex-wrap: wrap;
+        }
+
+        .kpi-chart-controls select {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: var(--sp-sm);
+            border-radius: var(--radius-sm);
+            font-family: var(--font-mono);
+        }
+
+        .date-range-info {
+            color: var(--accent);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            margin-top: var(--sp-sm);
+            text-align: center;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="app">
+        <header class="header">
+            <div class="header-logo">📡</div>
+            <div>
+                <div class="header-title">Network RCA Tool v3.3</div>
+                <div class="header-sub">Advanced Site Scoring • Evidence-Weighted v20</div>
+            </div>
+            <div class="header-status">
+                <div class="status-dot" id="status-dot"></div>
+                <div class="status-label" id="hdr-status">READY</div>
+            </div>
+        </header>
+
+        <div class="main">
+            <aside class="sidebar">
+                <div class="panel-title">Step 1 — Select Files</div>
+
+                <!-- KPI Files Section -->
+                <!-- <div class="path-input-group">
+                <div class="path-label">
+                    <span>📊 KPI Files</span>
+                    <span class="tooltip">
+                        <span>ⓘ</span>
+                        <span class="tooltip-text">CSV or Excel files with network KPIs</span>
+                    </span>
+                </div>
+                <div class="file-input-wrapper">
+                    <input type="text" id="kpi-path" class="file-input" placeholder="Click Browse to select files" readonly value="">
+                    <button class="browse-btn" onclick="document.getElementById('kpi-file-input').click()">
+                        <span>📂</span> Browse
+                    </button>
+                </div>
+                <div id="kpi-file-list" class="selected-files">
+                    <div style="color: var(--dim); text-align: center; padding: 8px;">No KPI files selected</div>
+                </div>
+            </div>
+             -->
+                <div class="path-input-group">
+                    <div class="path-label">
+                        <span>📊 KPI Files</span>
+                        <span class="tooltip">
+                            <span>ⓘ</span>
+                            <span class="tooltip-text">CSV or Excel files with network KPIs</span>
+                        </span>
+                    </div>
+
+                    <div class="file-input-wrapper">
+                        <input type="text" id="kpi-path" class="file-input" readonly value="Files loaded automatically">
+                    </div>
+
+                    <div id="kpi-file-list" class="selected-files">
+                        <div style="color: var(--dim); text-align:center; padding:8px;">
+                            Loading files...
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Filter File Section -->
+                <div class="path-input-group">
+                    <div class="path-label">
+                        <span>🗺️ Filter File</span>
+                        <span class="tooltip">
+                            <span>ⓘ</span>
+                            <span class="tooltip-text">Excel with MME, DNS, SGSN, DSC sheets</span>
+                        </span>
+                    </div>
+                    <!-- <div class="file-input-wrapper">
+                        <input type="text" id="filter-path" class="file-input" placeholder="Click Browse to select file"
+                            readonly value="">
+                        <button class="browse-btn" onclick="document.getElementById('filter-file-input').click()">
+                            <span>📂</span> Browse
+                        </button>
+                    </div> -->
+                    <div class="file-input-wrapper">
+                    <input type="text"
+                            id="filter-path"
+                            class="file-input"
+                            readonly
+                            value="File loaded automatically">
+                    </div>
+                    <div id="filter-file-list" class="selected-files">
+                        <div style="color: var(--dim); text-align: center; padding: 8px;">No filter file selected</div>
+                    </div>
+                </div>
+
+                <!-- Threshold File Section (optional) -->
+                <div class="path-input-group">
+                    <div class="path-label">
+                        <span>📋 Threshold File</span>
+                        <span class="tooltip">
+                            <span>ⓘ</span>
+                            <span class="tooltip-text">Excel with KPI thresholds (optional)</span>
+                        </span>
+                    </div>
+                    <!-- <div class="file-input-wrapper">
+                        <input type="text" id="threshold-path" class="file-input"
+                            placeholder="Click Browse to select file" readonly value="">
+                        <button class="browse-btn" onclick="document.getElementById('threshold-file-input').click()">
+                            <span>📂</span> Browse
+                        </button>
+                    </div> -->
+                    <div class="file-input-wrapper">
+                    <input type="text"
+                            id="threshold-path"
+                            class="file-input"
+                            readonly
+                            value="Optional file loaded automatically">
+                    </div>
+                    <div id="threshold-file-list" class="selected-files">
+                        <div style="color: var(--dim); text-align: center; padding: 8px;">No threshold file selected
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel-title">Step 2 — Complaint Period</div>
+                <div class="config-section">
+                    <div class="config-grid">
+                        <div>
+                            <div class="config-label">📅 Start</div>
+                            <input type="datetime-local" id="ts-start" class="input-field" readonly>
+                        </div>
+                        <div>
+                            <div class="config-label">📅 End</div>
+                            <input type="datetime-local" id="ts-end" class="input-field" readonly>
+                        </div>
+                    </div>
+                    <div class="config-label">📊 Baseline</div>
+                    <select id="baseline-method" class="input-field">
+                        <option value="2h_before">2 Hours Before</option>
+                        <option value="yesterday">Yesterday Same Time</option>
+                        <option value="auto" selected>Auto (recommended)</option>
+                    </select>
+                    <div class="config-label">🔍 Sensitivity</div>
+                    <select id="sensitivity" class="input-field">
+                        <option value="strict">Strict</option>
+                        <option value="normal" selected>Normal</option>
+                        <option value="relaxed">Relaxed</option>
+                    </select>
+                </div>
+
+                <div class="run-btn-wrap">
+                    <button class="run-btn" id="run-btn" onclick="startAnalysis()" disabled>
+                        ⚡ Analyze Root Cause
+                    </button>
+                </div>
+            </aside>
+
+            <main class="content" id="content">
+                <div class="welcome" id="welcome-screen">
+                    <div class="welcome-icon">🔭</div>
+                    <div class="welcome-title">Advanced Correlation Engine</div>
+                    <div class="welcome-desc">
+                        Select KPI files and optionally a filter file, then set the complaint period
+                        and click "Analyze Root Cause" to start the dynamic correlation analysis.
+                        <br><br>
+                        <span style="color: var(--accent);">✓ All node types visible (MME, GGSN, SGSN, DNS, DRA,
+                            NPP)</span><br>
+                        <span style="color: var(--accent);">✓ TX KPIs correlated to sites for enhanced
+                            scoring</span><br>
+                        <span style="color: var(--accent);">✓ Tickets automatically matched to sites using numeric
+                            IDs</span><br>
+                        <span style="color: var(--accent);">✓ Site scoring based on subscriber count, intensity, KPI
+                            severity, and tickets</span>
+                    </div>
+                </div>
+
+                <div class="progress-wrap" id="progress-screen" style="display:none">
+                    <div class="progress-title" id="prog-title">Analyzing...</div>
+                    <div class="progress-bar-outer">
+                        <div class="progress-bar-inner" id="prog-bar" style="width:0%"></div>
+                    </div>
+                    <div class="progress-step" id="prog-step"></div>
+                    <div class="progress-log" id="prog-log"></div>
+                </div>
+
+                <div id="results-screen" style="display:none;">
+                    <div class="tab-bar" id="tab-bar"></div>
+                    <div id="tab-panels"></div>
+                </div>
+            </main>
+        </div>
+
+        <div class="export-row" id="export-row" style="display:none">
+            <button class="btn btn-outline" onclick="exportToExcel()">
+                <span>📊</span> Export to Excel
+            </button>
+            <button class="btn btn-outline" onclick="exportToCSV()">
+                <span>📄</span> Export to CSV
+            </button>
+            <!-- <button class="btn btn-danger" onclick="resetAnalysis()">
+                <span>🔄</span> New Analysis
+            </button> -->
+        </div>
+    </div>
+
+    <!-- Modal for detailed view -->
+    <div class="modal-overlay" id="detail-modal" onclick="if(event.target === this) closeModal()">
+        <div class="modal-content">
+            <span class="modal-close" onclick="closeModal()">&times;</span>
+            <div class="modal-title" id="modal-title"></div>
+            <div id="modal-body"></div>
+        </div>
+    </div>
+
+    <!-- KPI Chart Modal -->
+    <div class="modal-overlay" id="kpi-chart-modal" onclick="if(event.target === this) closeKPIChartModal()">
+        <div class="modal-content" style="width: 95%; max-width: 1400px;">
+            <span class="modal-close" onclick="closeKPIChartModal()">&times;</span>
+            <div class="modal-title" id="kpi-chart-title"></div>
+            <div id="kpi-chart-body">
+                <div class="kpi-chart-controls">
+                    <select id="kpi-chart-time-range" onchange="updateKPIChartTimeRange()">
+                        <option value="all">All Available Data</option>
+                        <option value="24h">Last 24 Hours</option>
+                        <option value="7d">Last 7 Days</option>
+                        <option value="30d">Last 30 Days</option>
+                    </select>
+                    <select id="kpi-chart-aggregation" onchange="updateKPIChartAggregation()">
+                        <option value="raw">Raw Data</option>
+                        <option value="hourly">Hourly Average</option>
+                        <option value="daily">Daily Average</option>
+                    </select>
+                </div>
+                <div class="date-range-info" id="kpi-chart-date-range"></div>
+                <div class="chart-container" style="height: 500px;">
+                    <canvas id="kpi-time-series-chart"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden file inputs -->
+    <input type="file" id="kpi-file-input" multiple accept=".csv,.xlsx,.xls" style="display:none">
+    <input type="file" id="filter-file-input" accept=".csv,.xlsx,.xls" style="display:none">
+    <input type="file" id="threshold-file-input" accept=".csv,.xlsx,.xls" style="display:none">
+
+    <script>
+
+        // ==================== ENHANCED CONFIGURATION ====================
+        const Config = {
+            NODE_PATTERNS: {
+                'MME': { kw: ['mme', 'cpuload', 'overload-protection', 's6a', 'tau'], icon: '🏛️', color: '#3498db' },
+                'GGSN': { kw: ['ggsn', 'cgw', 'cups', 'pdpsr', 'dedicatedbearer', 'npu', 'throughput'], icon: '📦', color: '#ff3c5a' },
+                'SGSN': { kw: ['sgsn', 'attach', 'pdp', 'rab', 'intra', 'sgs', 'csfb'], icon: '🏗️', color: '#ff8800' },
+                'DNS': { kw: ['dns', 'ibdns', 'queryrate', 'hitratio'], icon: '🌐', color: '#ffaa00' },
+                'DRA': { kw: ['dra', 'vpcrf', 'diameter', 'dsc'], icon: '🔄', color: '#9b59b6' },
+                'NPP': { kw: ['npp', 'cell', 'radio', 'erab', 'prb', 'L0', 'L1'], icon: '📡', color: '#00c8ff' },
+                'TX': { kw: ['tx', 'transmission', 'backhaul', 'flwid'], icon: '🔗', color: '#e74c3c' },
+                'TICKETS': { kw: ['ticket', 'incident', 'fault'], icon: '🎫', color: '#f1c40f' }
+            },
+
+            // TX specific KPIs
+            TX_KPIS: ['AVG_FD_MS', 'AVG_FDV_MS', 'ONEW_FLR_AZ', 'ONEW_FLR_ZA'],
+
+            // Sheet name to node type mapping
+            SHEET_TO_NODE_TYPE: {
+                'MME': 'MME',
+                'SGSN': 'SGSN',
+                'GGSN': 'GGSN',
+                'DNS': 'DNS',
+                'DSC': 'DRA',
+                'NPP': 'NPP'
+            },
+
+            // File name patterns for detection
+            FILE_NODE_PATTERNS: {
+                'MME': ['mme', 'part2.*mme'],
+                'SGSN': ['sgsn', 'part2.*sgsn'],
+                'GGSN': ['ggsn', 'part3'],
+                'DNS': ['dns', 'part1.*dns'],
+                'NPP': ['npp', 'part1.*npp']
+            },
+
+            // Node extraction patterns for each node type
+            NODE_EXTRACTION_PATTERNS: {
+                'MME': [
+                    { regex: /^([A-Za-z0-9\-]+)_([A-Za-z0-9\-]+(?:-v?SGSN-?[0-9]+)?)$/, kpiGroup: 1, nodeGroup: 2 },
+                    { regex: /^(Overload-Protection-[A-Za-z\-]+)_([A-Za-z0-9\-]+)$/, kpiGroup: 1, nodeGroup: 2 }
+                ],
+                'SGSN': [
+                    { regex: /^(.+)_([A-Za-z0-9\-]+(?:-v?SGSN-?[0-9]+)?)$/, kpiGroup: 1, nodeGroup: 2 }
+                ],
+                'GGSN': [
+                    { regex: /^([A-Za-z0-9]+)_([A-Za-z0-9\-]+(?:-?GGSN[0-9]*)?)$/, kpiGroup: 1, nodeGroup: 2 },
+                    { regex: /^(Throughput)_([A-Za-z0-9\-]+)$/, kpiGroup: 1, nodeGroup: 2 }
+                ],
+                'DNS': [
+                    { regex: /^([A-Za-z]+)_([A-Za-z0-9]+)_ibDns.+$/, kpiGroup: 1, nodeGroup: 2 }
+                ],
+                'DRA': [
+                    { regex: /^([A-Za-z0-9\-]+)_([A-Za-z0-9\-]+)$/, kpiGroup: 1, nodeGroup: 2 }
+                ],
+                'NPP': [
+                    { type: 'special' } // NPP - node is in Cell column
+                ]
+            },
+
+            // Threshold mapping
+            THRESHOLD_MAPPING: {
+                'MME': {
+                    'CPULOAD': { operator: '>', value: 80, severity: 'CRITICAL' },
+                    'Overload-Protection-Rejection-Newconnection': { operator: '>', value: 1000, useDeviation: true, severity: 'CRITICAL' },
+                    'Overload-Protection-Rejection-Existingconnection': { operator: '>', value: 1000, useDeviation: true, severity: 'CRITICAL' },
+                    'Attach_Failure_4G_NW': { operator: '>', value: 15, useDeviation: true, severity: 'CRITICAL' },
+                    'TAU SR': { operator: '<', value: 90, useDeviation: true, severity: 'CRITICAL' },
+                    'S6a Authentication SR': { operator: '<', value: 90, useDeviation: true, severity: 'CRITICAL' }
+                },
+                'SGSN': {
+                    'Attach_SR_2G': { operator: '<', value: 80, useDeviation: true, severity: 'CRITICAL' },
+                    'PDP_SR_2G': { operator: '<', value: 80, useDeviation: true, severity: 'CRITICAL' },
+                    'Attach_SR_3G': { operator: '<', value: 80, useDeviation: true, severity: 'CRITICAL' },
+                    'PDP_SR_3G': { operator: '<', value: 80, useDeviation: true, severity: 'CRITICAL' },
+                    'RAB_SR': { operator: '<', value: 80, useDeviation: true, severity: 'CRITICAL' },
+                    'Dedicated_Bearer_QCI1_FailureRate': { operator: '>', value: 10, useDeviation: true, severity: 'CRITICAL' }
+                },
+                'GGSN': {
+                    'PDPSR': { operator: '<', value: 90, useDeviation: true, severity: 'CRITICAL' },
+                    'CPU': { operator: '>', value: 80, severity: 'CRITICAL' },
+                    'NPU': { operator: '>', value: 80, severity: 'CRITICAL' },
+                    'DedicatedBearerSR': { operator: '<', value: 90, useDeviation: true, severity: 'CRITICAL' },
+                    'TotalDrops': { operator: '>', value: 1000, useDeviation: true, severity: 'CRITICAL' },
+                    'NoResources': { operator: '>', value: 80, useDeviation: true, severity: 'CRITICAL' },
+                    'PKTLoss': { useDeviation: true, value: 20, severity: 'ANOMALY' }
+                },
+                'DNS': {
+                    'HitRatio': { operator: '<', value: 90, useDeviation: true, severity: 'CRITICAL' },
+                    'CPU': { operator: '>', value: 80, severity: 'CRITICAL' },
+                    'QPS': { useDeviation: true, value: 20, severity: 'ANOMALY' }
+                },
+                'DRA': {
+                    'CPU': { operator: '>', value: 70, severity: 'CRITICAL' },
+                    'Memory': { operator: '>', value: 70, severity: 'CRITICAL' },
+                    'Rejections': { operator: '>', value: 1000, useDeviation: true, severity: 'CRITICAL' }
+                },
+                'NPP': {
+                    'CFR': { operator: '>', value: 0.1, useDeviation: true, severity: 'CRITICAL' },
+                    'CDR': { operator: '>', value: 0, severity: 'CRITICAL' },
+                    'Unavail_Man': { operator: '>', value: 0, severity: 'CRITICAL' },
+                    'AVG_DL_USER_THROUGHPUT': { operator: '<', value: 5, useDeviation: true, severity: 'CRITICAL' },
+                    'ERAB_Setup_SR': { operator: '<', value: 95, useDeviation: true, severity: 'CRITICAL' },
+                    'DL_PRB_Util': { operator: '>', value: 50, useDeviation: true, severity: 'ANOMALY' },
+                    'UL_PRB_Util': { operator: '>', value: 50, useDeviation: true, severity: 'ANOMALY' }
+                },
+                'TX': {
+                    'ONEW_FLR_AZ': { operator: '>', value: 1, severity: 'CRITICAL' },
+                    'ONEW_FLR_ZA': { operator: '>', value: 1, severity: 'CRITICAL' },
+                    'AVG_FD_MS': { useDeviation: true, value: 20, severity: 'ANOMALY' },
+                    'AVG_FDV_MS': { useDeviation: true, value: 20, severity: 'ANOMALY' }
+                }
+            },
+
+            // Cell pattern for extracting site from cell name
+            CELL_PATTERN: /([A-Z0-9]+)_([A-Z0-9]+)_\d+/,  // Matches L09_LJ1333_03 → LJ1333
+
+            // Route to site patterns for TX correlation
+            ROUTE_TO_SITE_PATTERNS: [
+                { pattern: /HUJ(\d+)/i, sitePrefix: 'LJ' },  // HUJ1333 → LJ1333
+                { pattern: /LJ(\d+)/i, sitePrefix: 'LJ' },   // LJ1333 → LJ1333
+                { pattern: /GD(\d+)/i, sitePrefix: 'GD' },   // GD4483 → GD4483
+                { pattern: /R(\d+)/i, sitePrefix: 'R' },     // R2674 → R2674
+                { pattern: /G(\d+)/i, sitePrefix: 'G' }      // G4124 → G4124
+            ],
+
+            TIMESTAMP_COLS: ['DATETIME_ID', 'timestamp', 'time', 'PERIOD_TIMESTAMP', 'submit_date', 'Date', 'DateTime', 'Timestamp', 'created_date', 'Created_Date'],
+            SUBSCRIBER_COLS: ['msisdn', 'imsi', 'subscriber_id', 'sub_id', 'MSISDN', 'IMSI'],
+            CELL_COLS: ['cell_name', 'Cell', 'cell', 'CELL_NAME', 'cell_id', 'CELL_ID'],
+
+            TICKET_ID_FIELDS: ['incident_number', 'ticket_number', 'incident_id', 'ticket_id', 'Ticket_ID', 'ID', 'id', 'number', 'Number']
+        };
+
+        // ==================== STATE MANAGEMENT ====================
+        const AppState = {
+            kpiFiles: [],
+            filterFile: null,
+            thresholdFile: null,
+            datasets: {},
+            filterData: {},
+            thresholdData: {},
+            rawData: {},
+
+            nodeMap: {
+                MME: new Set(),
+                GGSN: new Set(),
+                SGSN: new Set(),
+                DNS: new Set(),
+                DRA: new Set(),
+                cells: new Set(),
+                sites: new Set(),
+                cellToSite: new Map(),
+                siteToCells: new Map(),
+                numericIdToSite: new Map()  // Maps numeric ID (e.g. "1333") to canonical site name
+            },
+
+            // Separate storage for TX anomalies correlated to sites
+            txAnomalies: [],  // Will store { site, route, kpi, value, baseline, severity }
+
+            cellSubscribers: new Map(),
+            siteSubscribers: new Map(),
+
+            tickets: [],
+            filteredTickets: [],
+            anomalies: [],
+
+            subscriberToNodes: new Map(),
+            nodeToSubscribers: new Map(),
+            nodeToRecords: new Map(),
+            nodeToSubscriberRecords: new Map(),
+            nodeToKpiIssues: new Map(),
+
+            correlationResults: null,
+            charts: {},
+
+            currentKPIChart: {
+                nodeType: null,
+                instance: null,
+                kpiName: null,
+                data: null,
+                chart: null
+            }
+        };
+
+        // ==================== HELPER FUNCTIONS ====================
+        function getTicketId(ticket) {
+            for (const field of Config.TICKET_ID_FIELDS) {
+                if (ticket[field] !== undefined && ticket[field] !== null && ticket[field] !== '') {
+                    return String(ticket[field]);
+                }
+            }
+            return 'No ID';
+        }
+
+        // Extract numeric site ID from any string (e.g., "LJ1333" -> "1333")
+        function extractNumericSiteId(s) {
+            if (!s) return null;
+            const matches = String(s).match(/\d{3,}/g);
+            if (!matches) return null;
+            const longest = matches.reduce((a, b) => b.length >= a.length ? b : a);
+            return longest.replace(/^0+(\d)/, '$1'); // strip leading zeros
+        }
+
+        // ==================== FILE HANDLING ====================
+        // document.getElementById('kpi-file-input').addEventListener('change', function (e) {
+        //     AppState.kpiFiles = Array.from(e.target.files);
+        //     updateKPIFileList();
+        //     updateRunButton();
+        // });
+
+        // document.getElementById('filter-file-input').addEventListener('change', function (e) {
+        //     AppState.filterFile = e.target.files[0] || null;
+        //     updateFilterFileList();
+        //     updateRunButton();
+        // });
+
+        // document.getElementById('threshold-file-input').addEventListener('change', function (e) {
+        //     AppState.thresholdFile = e.target.files[0] || null;
+        //     updateThresholdFileList();
+        //     updateRunButton();
+        // });
+    // async function callAPI() {
+
+    //     const payload = {
+    //         start_date: "2026-03-14T14:30",
+    //         end_date: "2026-03-14T15:00",
+    //     };
+
+    //     console.log("🚀 Calling API with:", payload);
+
+    //     try {
+    //         // const response_date = await fetch("http://127.0.0.1:8051/callflow/api/root-cause_date", {
+    //         //     method: "GET",
+    //         // });
+    //         // console.log('response_date',response_date)
+
+    //         const response = await fetch("https://10.30.30.177/callflow/api/root-cause", {
+    //             method: "POST",
+    //             headers: {
+    //                 "Content-Type": "application/json"
+    //             },
+    //             body: JSON.stringify(payload)
+    //         });
+
+    //         const data = await response.json();
+
+    //         console.log("✅ API Response:", data);
+
+    //         document.getElementById('ts-start').value = formatDateForInput(data.start_date);
+    //         document.getElementById('ts-end').value = formatDateForInput(data.end_date);
+    //         handleApiResponse(data);
+
+    //     } catch (error) {
+    //         console.error("❌ API Error:", error);
+    //     }
+    // }
+    
+    function formatDateForInput(dateString) {
+    if (!dateString) return '';
+
+    // Convert to Date object
+    const date = new Date(dateString);
+
+    const pad = (n) => n.toString().padStart(2, '0');
+
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+async function handleApiResponse(data) {
+     console.log("Processing data...", data);
+
+if (!data) {
+    document.getElementById('kpi-file-list').innerHTML = "❌ Failed to load files";
+}
+
+    try {
+
+        // 👇 حسب شكل الـ API response عندك
+        const files = data.files || data; 
+
+        console.log("📂 Files from API:", files);
+
+        // KPI Files
+        AppState.kpiFiles = await loadFiles(files.kpi || []);
+        console.log("✅ KPI Files loaded:", AppState.kpiFiles);
+
+        // Filter File
+        AppState.filterFile = (await loadFiles(files.filter || []))[0] || null;
+        console.log("✅ Filter File loaded:", AppState.filterFile);
+
+        // Threshold File
+        AppState.thresholdFile = (await loadFiles(files.threshold || []))[0] || null;
+        console.log("✅ Threshold File loaded:", AppState.thresholdFile);
+
+        // 🔥 تحديث UI
+        updateKPIFileList();
+        updateFilterFileList();
+        updateThresholdFileList();
+        updateRunButton();
+
+    } catch (error) {
+        console.error("❌ Error processing API response:", error);
+    }
+}
+
+// window.onload = function () {
+//     callAPI();
+// };
+window.addEventListener('message', function (event) {
+    if (event.data.type === 'ROOT_CAUSE_PAYLOAD') {
+      console.log('📥 Received payload from Angular:', event.data.data);
+
+      // Use the real payload instead of hardcoded dates
+      const payload = event.data.data;
+
+      // Call the API with real data
+      callAPIWithPayload(payload);
+    }
+  });
+
+  // New function that accepts payload
+  async function callAPIWithPayload(payload) {
+    console.log("🚀 Calling API with real payload:", payload);
+
+    try {
+      const response = await fetch("https://10.30.30.177/callflow/api/root-cause", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)   // ← use real payload
+      });
+
+      const data = await response.json();
+      console.log("✅ API Response:", data);
+
+      document.getElementById('ts-start').value = formatDateForInput(data.start_date);
+      document.getElementById('ts-end').value = formatDateForInput(data.end_date);
+
+      handleApiResponse(data);   // your existing function
+    } catch (error) {
+      console.error("❌ API Error:", error);
+      document.getElementById('kpi-file-list').innerHTML = "❌ Failed to load files from backend";
+    }
+  }
+        async function loadFiles(fileList){
+            console.log("Files to load:", fileList);
+
+            if(!fileList || fileList.length === 0)
+                return [];
+
+            const result = [];
+
+            for(const file of fileList){
+
+                const response = await fetch(
+                "https://10.30.30.177" + file.url);
+
+                const blob = await response.blob();
+
+                const jsFile = new File([blob], file.name);
+
+                result.push(jsFile);
+            }
+
+            return result;
+        }
+        function updateKPIFileList() {
+            const listElement = document.getElementById('kpi-file-list');
+            const pathElement = document.getElementById('kpi-path');
+
+            if (AppState.kpiFiles.length === 0) {
+                listElement.innerHTML = '<div style="color: var(--dim); text-align: center; padding: 8px;">No KPI files selected</div>';
+                pathElement.value = '';
+                return;
+            }
+
+            let html = '';
+            AppState.kpiFiles.forEach(file => {
+                const filename = typeof file === "string" ? file : file.name;
+
+                const fileType = detectFileTypeFromName(filename);
+                const typeColor = Config.NODE_PATTERNS[fileType]?.color || '#95a5a6';
+                html += `
+            <div class="selected-file-item">
+                <span class="file-badge" style="background: ${typeColor}">${fileType}</span>
+                <span class="file-name">${filename}</span>
+                
+            </div>
+        `;
+            });
+
+            listElement.innerHTML = html;
+            pathElement.value = AppState.kpiFiles.length + ' file(s) selected';
+        }
+
+        function detectFileTypeFromName(filename) {
+            const name = filename.toLowerCase();
+            for (const [type, config] of Object.entries(Config.NODE_PATTERNS)) {
+                if (config.kw.some(kw => name.includes(kw))) {
+                    return type;
+                }
+            }
+            return 'KPI';
+        }
+
+        function updateFilterFileList() {
+            const listElement = document.getElementById('filter-file-list');
+            const pathElement = document.getElementById('filter-path');
+
+            if (!AppState.filterFile) {
+                listElement.innerHTML = '<div style="color: var(--dim); text-align: center; padding: 8px;">No filter file selected</div>';
+                pathElement.value = '';
+                return;
+            }
+
+            // const size = formatFileSize(AppState.filterFile.size);
+            const filename = typeof AppState.filterFile === "string"
+            ? AppState.filterFile
+            : AppState.filterFile.name;
+            
+            listElement.innerHTML = `
+        <div class="selected-file-item">
+            <span class="file-badge filter">FILTER</span>
+            <span class="file-name">${filename}</span>
+            
+        </div>
+    `;
+            // pathElement.value = AppState.filterFile.name;
+            pathElement.value = filename;
+        }
+
+        function updateThresholdFileList() {
+            const listElement = document.getElementById('threshold-file-list');
+            const pathElement = document.getElementById('threshold-path');
+
+            if (!AppState.thresholdFile) {
+                listElement.innerHTML = '<div style="color: var(--dim); text-align: center; padding: 8px;">No threshold file selected</div>';
+                pathElement.value = '';
+                return;
+            }
+
+            // const size = formatFileSize(AppState.thresholdFile.size);
+            const filename = typeof AppState.thresholdFile === "string"
+            ? AppState.thresholdFile
+            : AppState.thresholdFile.name;
+
+            listElement.innerHTML = `
+        <div class="selected-file-item">
+            <span class="file-badge">THRESH</span>
+            <span class="file-name">${filename}</span>
+        </div>
+    `;
+            // pathElement.value = AppState.thresholdFile.name;
+            pathElement.value = filename;
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+        }
+
+        function updateRunButton() {
+            const runBtn = document.getElementById('run-btn');
+            runBtn.disabled = AppState.kpiFiles.length === 0;
+        }
+
+        // ==================== ADVANCED NODE TYPE DETECTION ====================
+        function detectNodeTypeFromFile(fileName, sheetName = '', columns = []) {
+            const fileNameLower = fileName.toLowerCase();
+            const sheetNameLower = sheetName.toLowerCase();
+
+            // Check sheet name mapping first
+            for (const [sheet, nodeType] of Object.entries(Config.SHEET_TO_NODE_TYPE)) {
+                if (sheetName === sheet || sheetNameLower.includes(sheet.toLowerCase())) {
+                    return nodeType;
+                }
+            }
+
+            // Check file name patterns
+            for (const [nodeType, patterns] of Object.entries(Config.FILE_NODE_PATTERNS)) {
+                for (const pattern of patterns) {
+                    if (fileNameLower.includes(pattern)) {
+                        return nodeType;
+                    }
+                }
+            }
+
+            // Check column patterns for additional confirmation
+            const colStr = columns.join(' ').toLowerCase();
+
+            if (colStr.includes('flwid') || fileNameLower.includes('tx')) return 'TX';
+            if (colStr.includes('ticket') || colStr.includes('incident')) return 'TICKETS';
+            if (colStr.includes('attach_sr') || colStr.includes('pdp_sr') || colStr.includes('rab_sr')) return 'SGSN';
+            if (colStr.includes('pdpsr') || colStr.includes('throughput') || (colStr.includes('cpu_') && colStr.includes('ggsn'))) return 'GGSN';
+            if (colStr.includes('cpuload') || colStr.includes('overload-protection')) return 'MME';
+            if (colStr.includes('qps_') || colStr.includes('hitratio') || colStr.includes('ibdns')) return 'DNS';
+            if (colStr.includes('dra_') || colStr.includes('vpcrf') || colStr.includes('dsc')) return 'DRA';
+            if (colStr.includes('cell') || colStr.includes('prb') || colStr.includes('erab')) return 'NPP';
+
+            return 'UNKNOWN';
+        }
+
+        function extractNodeAndKPI(columnName, nodeType) {
+            const result = {
+                nodeType: nodeType,
+                kpiName: columnName,
+                nodeInstance: null,
+                originalColumn: columnName
+            };
+
+            // Skip if this is a timestamp or other metadata column
+            if (Config.TIMESTAMP_COLS.includes(columnName) ||
+                Config.SUBSCRIBER_COLS.includes(columnName) ||
+                Config.CELL_COLS.includes(columnName) ||
+                columnName === 'FLWID' || columnName === 'NE_NAME') {
+                return result;
+            }
+
+            // Get patterns for this node type
+            const patterns = Config.NODE_EXTRACTION_PATTERNS[nodeType] || [];
+
+            for (const pattern of patterns) {
+                if (pattern.type === 'special') continue;
+
+                const match = columnName.match(pattern.regex);
+                if (match) {
+                    if (pattern.kpiGroup) {
+                        result.kpiName = match[pattern.kpiGroup];
+                    }
+                    if (pattern.nodeGroup) {
+                        result.nodeInstance = match[pattern.nodeGroup];
+                    }
+                    break;
+                }
+            }
+
+            // Fallback extraction
+            if (!result.nodeInstance) {
+                if (nodeType === 'MME' || nodeType === 'SGSN' || nodeType === 'GGSN' || nodeType === 'DNS') {
+                    const parts = columnName.split('_');
+                    if (parts.length > 1) {
+                        const lastPart = parts[parts.length - 1];
+                        if (lastPart.match(/[A-Za-z0-9\-]+/)) {
+                            result.nodeInstance = lastPart;
+                            result.kpiName = parts.slice(0, -1).join('_');
+                        }
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        // ==================== DATA PARSING ====================
+        async function parseFiles() {
+            addLogMessage('Starting file parsing...');
+
+            // Clear TX anomalies
+            AppState.txAnomalies = [];
+            AppState.tickets = [];
+
+            for (const file of AppState.kpiFiles) {
+                try {
+                    addLogMessage(`Parsing ${file.name}...`);
+                    const data = await parseFile(file);
+
+                    AppState.rawData[file.name] = data;
+
+                    if (file.name.toLowerCase().endsWith('.csv')) {
+                        const columns = Object.keys(data[0] || {});
+                        const nodeType = detectNodeTypeFromFile(file.name, '', columns);
+
+                        // Check if this is a TX file
+                        if (nodeType === 'TX' || file.name.toLowerCase().includes('tx') || columns.includes('FLWID')) {
+                            addLogMessage(`  → Detected as TX data (will correlate to sites)`, 'success');
+                            AppState.datasets[`${file.name}_tx`] = {
+                                type: 'TX',
+                                data: data,
+                                file: file.name,
+                                isTx: true
+                            };
+                        } else if (nodeType === 'TICKETS' || file.name.toLowerCase().includes('ticket')) {
+                            AppState.tickets.push(...data);
+                            addLogMessage(`  → Loaded ${data.length} tickets`, 'success');
+                        } else if (nodeType !== 'UNKNOWN') {
+                            AppState.datasets[file.name] = {
+                                type: nodeType,
+                                data: data,
+                                file: file.name
+                            };
+                            addLogMessage(`  → Detected as ${nodeType} (${data.length} rows)`, 'success');
+                        }
+                    } else {
+                        for (const [sheetName, sheetData] of Object.entries(data)) {
+                            const columns = Object.keys(sheetData[0] || {});
+                            const nodeType = detectNodeTypeFromFile(file.name, sheetName, columns);
+
+                            // Check if this is a TX sheet
+                            if (nodeType === 'TX' || sheetName === 'Tx' || sheetName.toLowerCase().includes('tx') || columns.includes('FLWID')) {
+                                addLogMessage(`  → Sheet ${sheetName}: TX data (will correlate to sites)`, 'success');
+                                AppState.datasets[`${file.name}_${sheetName}`] = {
+                                    type: 'TX',
+                                    data: sheetData,
+                                    file: file.name,
+                                    sheet: sheetName,
+                                    isTx: true
+                                };
+                            } else if (nodeType === 'TICKETS' || sheetName.toLowerCase().includes('ticket')) {
+                                AppState.tickets.push(...sheetData);
+                                addLogMessage(`  → Sheet ${sheetName}: Loaded ${sheetData.length} tickets`, 'success');
+                            } else if (nodeType !== 'UNKNOWN') {
+                                AppState.datasets[`${file.name}_${sheetName}`] = {
+                                    type: nodeType,
+                                    data: sheetData,
+                                    file: file.name,
+                                    sheet: sheetName
+                                };
+                                addLogMessage(`  → Sheet ${sheetName}: ${nodeType} (${sheetData.length} rows)`, 'success');
+                            }
+                        }
+                    }
+                } catch (error) {
+                    addLogMessage(`Error parsing ${file.name}: ${error.message}`, 'error');
+                }
+            }
+
+            // Parse filter file if provided
+            if (AppState.filterFile) {
+                addLogMessage(`Parsing filter file ${AppState.filterFile.name}...`);
+                try {
+                    const filterData = await parseFile(AppState.filterFile);
+
+                    for (const [sheetName, sheetData] of Object.entries(filterData)) {
+                        if (['MME', 'DNS', 'SGSN', 'DSC'].includes(sheetName)) {
+                            AppState.filterData[sheetName] = sheetData;
+                            addLogMessage(`  → Loaded filter sheet: ${sheetName} (${sheetData.length} rows)`, 'success');
+                        }
+                    }
+                } catch (error) {
+                    addLogMessage(`Error parsing filter file: ${error.message}`, 'error');
+                }
+            }
+
+            addLogMessage(`Total datasets loaded: ${Object.keys(AppState.datasets).length}`);
+            addLogMessage(`Total tickets loaded: ${AppState.tickets.length}`);
+        }
+
+        function parseFile(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+
+                reader.onload = (e) => {
+                    try {
+                        if (file.name.toLowerCase().endsWith('.csv')) {
+                            const text = e.target.result;
+                            const lines = text.split('\n').filter(l => l.trim());
+                            if (lines.length === 0) {
+                                resolve([]);
+                                return;
+                            }
+
+                            const headers = lines[0].split(',').map(h => h.trim().replace(/^["']|["']$/g, ''));
+                            const data = [];
+
+                            for (let i = 1; i < lines.length; i++) {
+                                const values = lines[i].split(',').map(v => v.trim().replace(/^["']|["']$/g, ''));
+                                if (values.length === headers.length) {
+                                    const row = {};
+                                    headers.forEach((h, idx) => {
+                                        const val = values[idx];
+                                        row[h] = isNaN(val) || val === '' ? val : Number(val);
+                                    });
+                                    data.push(row);
+                                }
+                            }
+                            resolve(data);
+                        } else {
+                            const data = new Uint8Array(e.target.result);
+                            const wb = XLSX.read(data, { type: 'array' });
+                            const result = {};
+
+                            wb.SheetNames.forEach(sheetName => {
+                                const ws = wb.Sheets[sheetName];
+                                const json = XLSX.utils.sheet_to_json(ws);
+
+                                const processed = json.map(row => {
+                                    const newRow = {};
+                                    Object.entries(row).forEach(([key, val]) => {
+                                        newRow[key] = (typeof val === 'string' && !isNaN(val) && val !== '') ? Number(val) : val;
+                                    });
+                                    return newRow;
+                                });
+
+                                result[sheetName] = processed;
+                            });
+
+                            resolve(result);
+                        }
+                    } catch (err) {
+                        reject(err);
+                    }
+                };
+
+                reader.onerror = (err) => reject(err);
+
+                if (file.name.toLowerCase().endsWith('.csv')) {
+                    reader.readAsText(file);
+                } else {
+                    reader.readAsArrayBuffer(file);
+                }
+            });
+        }
+
+        // ==================== FILTER PROCESSING ====================
+        function processFilterFiles(startDate, endDate) {
+            addLogMessage('Processing filter files...');
+
+            AppState.nodeMap = {
+                MME: new Set(),
+                GGSN: new Set(),
+                SGSN: new Set(),
+                DNS: new Set(),
+                DRA: new Set(),
+                cells: new Set(),
+                sites: new Set(),
+                cellToSite: new Map(),
+                siteToCells: new Map(),
+                numericIdToSite: new Map()
+            };
+
+            AppState.cellSubscribers.clear();
+            AppState.siteSubscribers.clear();
+
+            for (const [sheetName, data] of Object.entries(AppState.filterData)) {
+                const filteredData = filterByTimeRange(data, startDate, endDate);
+
+                if (sheetName === 'MME') {
+                    processMMEFilter(filteredData);
+                } else if (sheetName === 'DNS') {
+                    processDNSFilter(filteredData);
+                } else if (sheetName === 'SGSN') {
+                    processSGSNFilter(filteredData);
+                } else if (sheetName === 'DSC') {
+                    processDSCFilter(filteredData);
+                }
+            }
+
+            extractSitesFromCells();
+            aggregateSubscribersToSites();
+
+            addLogMessage(`Filter processing complete:`, 'success');
+            addLogMessage(`  • MME: ${AppState.nodeMap.MME.size} nodes`);
+            addLogMessage(`  • GGSN: ${AppState.nodeMap.GGSN.size} nodes`);
+            addLogMessage(`  • SGSN: ${AppState.nodeMap.SGSN.size} nodes`);
+            addLogMessage(`  • DNS: ${AppState.nodeMap.DNS.size} nodes`);
+            addLogMessage(`  • DRA: ${AppState.nodeMap.DRA.size} nodes`);
+            addLogMessage(`  • Cells: ${AppState.nodeMap.cells.size}`);
+            addLogMessage(`  • Sites: ${AppState.nodeMap.sites.size}`);
+        }
+
+        function filterTickets() {
+            AppState.filteredTickets = AppState.tickets.filter(ticket => {
+                let isRelevant = false;
+
+                // Check cell fields
+                const cellFields = ['cell_name', 'CELL_NAME', 'cell', 'Cell'];
+                for (const field of cellFields) {
+                    if (ticket[field]) {
+                        const cell = String(ticket[field]);
+                        if (AppState.nodeMap.cells.has(cell)) {
+                            isRelevant = true;
+                            break;
+                        }
+                        const site = extractSiteFromCell(cell);
+                        if (site && AppState.nodeMap.sites.has(site)) {
+                            isRelevant = true;
+                            break;
+                        }
+                    }
+                }
+
+                // Check site fields with numeric ID matching
+                if (!isRelevant) {
+                    const siteFields = ['site', 'Site', 'SITE'];
+                    for (const field of siteFields) {
+                        if (ticket[field]) {
+                            const site = String(ticket[field]);
+                            // Direct match
+                            if (AppState.nodeMap.sites.has(site)) {
+                                isRelevant = true;
+                                break;
+                            }
+                            // Numeric ID match
+                            const numId = extractNumericSiteId(site);
+                            if (numId && AppState.nodeMap.numericIdToSite.has(numId)) {
+                                isRelevant = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Check node fields
+                if (!isRelevant) {
+                    const nodeFields = ['node_name', 'NE_NAME', 'Node', 'NE'];
+                    for (const field of nodeFields) {
+                        if (ticket[field]) {
+                            const node = String(ticket[field]);
+                            if (AppState.nodeMap.MME.has(node) || AppState.nodeMap.GGSN.has(node) ||
+                                AppState.nodeMap.SGSN.has(node) || AppState.nodeMap.DNS.has(node) ||
+                                AppState.nodeMap.DRA.has(node)) {
+                                isRelevant = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                return isRelevant;
+            });
+
+            addLogMessage(`Filtered tickets: ${AppState.filteredTickets.length} of ${AppState.tickets.length}`);
+        }
+
+        function filterByTimeRange(data, startDate, endDate) {
+            if (!startDate && !endDate) return data;
+
+            const start = startDate ? new Date(startDate) : null;
+            const end = endDate ? new Date(endDate) : null;
+
+            return data.filter(row => {
+                for (const col of Config.TIMESTAMP_COLS) {
+                    if (row[col]) {
+                        const ts = new Date(row[col]);
+                        if (!isNaN(ts)) {
+                            if (start && ts < start) return false;
+                            if (end && ts > end) return false;
+                            return true;
+                        }
+                    }
+                }
+                return true;
+            });
+        }
+
+        function processMMEFilter(data) {
+            data.forEach(row => {
+                if (row.MME_Name) AppState.nodeMap.MME.add(String(row.MME_Name));
+                if (row.SGW_SGSN_NAME) AppState.nodeMap.GGSN.add(String(row.SGW_SGSN_NAME));
+
+                const cellName = findCellColumn(row);
+                if (cellName) {
+                    addCell(cellName);
+
+                    const subscriber = findSubscriberColumn(row);
+                    if (subscriber) {
+                        if (!AppState.cellSubscribers.has(cellName)) {
+                            AppState.cellSubscribers.set(cellName, new Set());
+                        }
+                        AppState.cellSubscribers.get(cellName).add(String(subscriber));
+                    }
+                }
+            });
+        }
+
+        function processDNSFilter(data) {
+            data.forEach(row => {
+                if (row.DNS_Server_Name) AppState.nodeMap.DNS.add(String(row.DNS_Server_Name));
+
+                // Register SITE_NAME from DNS filter
+                if (row.SITE_NAME && String(row.SITE_NAME).trim()) {
+                    const siteName = String(row.SITE_NAME).trim();
+                    AppState.nodeMap.sites.add(siteName);
+                    const numId = extractNumericSiteId(siteName);
+                    if (numId) AppState.nodeMap.numericIdToSite.set(numId, siteName);
+                }
+
+                const cellName = findCellColumn(row);
+                if (cellName) {
+                    addCell(cellName);
+
+                    const subscriber = findSubscriberColumn(row);
+                    if (subscriber) {
+                        if (!AppState.cellSubscribers.has(cellName)) {
+                            AppState.cellSubscribers.set(cellName, new Set());
+                        }
+                        AppState.cellSubscribers.get(cellName).add(String(subscriber));
+                    }
+                }
+            });
+        }
+
+        function processSGSNFilter(data) {
+            data.forEach(row => {
+                if (row.SGSN_MME_NAME) AppState.nodeMap.SGSN.add(String(row.SGSN_MME_NAME));
+
+                const cellName = findCellColumn(row);
+                if (cellName) {
+                    addCell(cellName);
+
+                    const subscriber = findSubscriberColumn(row);
+                    if (subscriber) {
+                        if (!AppState.cellSubscribers.has(cellName)) {
+                            AppState.cellSubscribers.set(cellName, new Set());
+                        }
+                        AppState.cellSubscribers.get(cellName).add(String(subscriber));
+                    }
+                }
+            });
+        }
+
+        function processDSCFilter(data) {
+            data.forEach(row => {
+                if (row.DRA_NAME) AppState.nodeMap.DRA.add(String(row.DRA_NAME));
+                if (row.VPCRF_NAME) AppState.nodeMap.DRA.add(String(row.VPCRF_NAME));
+
+                const cellName = findCellColumn(row);
+                if (cellName) {
+                    addCell(cellName);
+
+                    const subscriber = findSubscriberColumn(row);
+                    if (subscriber) {
+                        if (!AppState.cellSubscribers.has(cellName)) {
+                            AppState.cellSubscribers.set(cellName, new Set());
+                        }
+                        AppState.cellSubscribers.get(cellName).add(String(subscriber));
+                    }
+                }
+            });
+        }
+
+        function findCellColumn(row) {
+            for (const col of Config.CELL_COLS) {
+                if (row[col] !== undefined && row[col] !== null && row[col] !== '') {
+                    return String(row[col]);
+                }
+            }
+            return null;
+        }
+
+        function findSubscriberColumn(row) {
+            for (const col of Config.SUBSCRIBER_COLS) {
+                if (row[col] !== undefined && row[col] !== null && row[col] !== '') {
+                    return String(row[col]);
+                }
+            }
+            return null;
+        }
+
+        function addCell(cellName) {
+            if (!cellName) return;
+            AppState.nodeMap.cells.add(cellName);
+
+            const site = extractSiteFromCell(cellName);
+            if (site) {
+                AppState.nodeMap.cellToSite.set(cellName, site);
+
+                if (!AppState.nodeMap.siteToCells.has(site)) {
+                    AppState.nodeMap.siteToCells.set(site, new Set());
+                }
+                AppState.nodeMap.siteToCells.get(site).add(cellName);
+
+                // Register numeric ID mapping
+                const numId = extractNumericSiteId(site);
+                if (numId && !AppState.nodeMap.numericIdToSite.has(numId)) {
+                    AppState.nodeMap.numericIdToSite.set(numId, site);
+                }
+            }
+        }
+
+        function extractSiteFromCell(cellName) {
+            const match = String(cellName).match(Config.CELL_PATTERN);
+            return match ? match[2] || match[1] : null;
+        }
+
+        function extractSiteFromRoute(routeName) {
+            if (!routeName) return null;
+
+            const routeStr = String(routeName);
+
+            // Try each pattern
+            for (const { pattern, sitePrefix } of Config.ROUTE_TO_SITE_PATTERNS) {
+                const match = routeStr.match(pattern);
+                if (match) {
+                    const siteNumber = match[1];
+                    if (routeStr.includes(sitePrefix + siteNumber)) {
+                        return sitePrefix + siteNumber;
+                    }
+                    return sitePrefix + siteNumber;
+                }
+            }
+
+            // Fallback: try to extract any 3-4 digit number
+            const numberMatch = routeStr.match(/(\d{3,4})/);
+            if (numberMatch) {
+                // Try to find a matching site by numeric ID
+                const numId = numberMatch[1];
+                if (AppState.nodeMap.numericIdToSite.has(numId)) {
+                    return AppState.nodeMap.numericIdToSite.get(numId);
+                }
+                return numId;
+            }
+
+            return null;
+        }
+
+        function extractSitesFromCells() {
+            for (const cell of AppState.nodeMap.cells) {
+                const site = extractSiteFromCell(cell);
+                if (site) {
+                    AppState.nodeMap.sites.add(site);
+
+                    if (!AppState.nodeMap.siteToCells.has(site)) {
+                        AppState.nodeMap.siteToCells.set(site, new Set());
+                    }
+                    AppState.nodeMap.siteToCells.get(site).add(cell);
+
+                    if (!AppState.nodeMap.cellToSite.has(cell)) {
+                        AppState.nodeMap.cellToSite.set(cell, site);
+                    }
+                }
+            }
+        }
+
+        function aggregateSubscribersToSites() {
+            AppState.cellSubscribers.forEach((subscribers, cell) => {
+                const site = AppState.nodeMap.cellToSite.get(cell);
+                if (site) {
+                    if (!AppState.siteSubscribers.has(site)) {
+                        AppState.siteSubscribers.set(site, new Set());
+                    }
+                    subscribers.forEach(sub => AppState.siteSubscribers.get(site).add(sub));
+                }
+            });
+        }
+
+        function isServingNode(nodeType, nodeInstance) {
+            if (!nodeInstance || Object.keys(AppState.filterData).length === 0) return true;
+
+            nodeInstance = String(nodeInstance);
+
+            if (nodeType === 'NPP') {
+                if (AppState.nodeMap.cells.has(nodeInstance)) return true;
+                const site = extractSiteFromCell(nodeInstance);
+                return site ? AppState.nodeMap.sites.has(site) : false;
+            }
+            if (nodeType === 'MME') return AppState.nodeMap.MME.has(nodeInstance);
+            if (nodeType === 'GGSN') return AppState.nodeMap.GGSN.has(nodeInstance);
+            if (nodeType === 'SGSN') return AppState.nodeMap.SGSN.has(nodeInstance);
+            if (nodeType === 'DNS') return AppState.nodeMap.DNS.has(nodeInstance);
+            if (nodeType === 'DRA') return AppState.nodeMap.DRA.has(nodeInstance);
+
+            return true;
+        }
+
+        function getSubscribersForNode(nodeType, nodeInstance) {
+            if (nodeType === 'NPP') {
+                if (AppState.cellSubscribers.has(nodeInstance)) {
+                    return AppState.cellSubscribers.get(nodeInstance).size;
+                }
+                const site = extractSiteFromCell(nodeInstance);
+                if (site && AppState.siteSubscribers.has(site)) {
+                    return AppState.siteSubscribers.get(site).size;
+                }
+            }
+            return 0;
+        }
+
+        // ==================== SUBSCRIBER TRACKING ====================
+        function trackSubscriber(subscriberId, nodeType, nodeInstance) {
+            if (!subscriberId) return;
+
+            const subscriberKey = String(subscriberId).trim();
+            const nodeKey = `${nodeType}_${nodeInstance}`;
+
+            if (!AppState.subscriberToNodes.has(subscriberKey)) {
+                AppState.subscriberToNodes.set(subscriberKey, new Set());
+            }
+            AppState.subscriberToNodes.get(subscriberKey).add(nodeKey);
+
+            if (!AppState.nodeToSubscribers.has(nodeKey)) {
+                AppState.nodeToSubscribers.set(nodeKey, new Set());
+            }
+            AppState.nodeToSubscribers.get(nodeKey).add(subscriberKey);
+
+            if (!AppState.nodeToRecords.has(nodeKey)) {
+                AppState.nodeToRecords.set(nodeKey, 0);
+            }
+            AppState.nodeToRecords.set(nodeKey, AppState.nodeToRecords.get(nodeKey) + 1);
+
+            if (!AppState.nodeToSubscriberRecords.has(nodeKey)) {
+                AppState.nodeToSubscriberRecords.set(nodeKey, new Map());
+            }
+            const subscriberRecords = AppState.nodeToSubscriberRecords.get(nodeKey);
+            if (!subscriberRecords.has(subscriberKey)) {
+                subscriberRecords.set(subscriberKey, 0);
+            }
+            subscriberRecords.set(subscriberKey, subscriberRecords.get(subscriberKey) + 1);
+        }
+
+        function getInstanceIdentifier(row, nodeType, columnName = null) {
+            if (nodeType === 'NPP' && row.Cell) return String(row.Cell);
+            if (row.Cell) return String(row.Cell);
+            if (row.FLWID) return String(row.FLWID);
+            if (row.NE_NAME) return String(row.NE_NAME);
+            if (row.node_name) return String(row.node_name);
+            if (row.MME_Name) return String(row.MME_Name);
+            if (row.DNS_Server_Name) return String(row.DNS_Server_Name);
+            if (row.GGSN_Name) return String(row.GGSN_Name);
+            if (row.SGSN_Name) return String(row.SGSN_Name);
+            if (row.DRA_NAME) return String(row.DRA_NAME);
+            if (row.VPCRF_NAME) return String(row.VPCRF_NAME);
+
+            if (columnName) {
+                const extracted = extractNodeAndKPI(columnName, nodeType);
+                if (extracted.nodeInstance) return extracted.nodeInstance;
+            }
+
+            return 'Unknown';
+        }
+
+        // ==================== TX ANOMALY DETECTION ====================
+        function detectTxAnomalies(txDataset, startDate, endDate, baselineMethod, sensitivity) {
+            addLogMessage(`Processing TX data for site correlation...`);
+
+            const data = txDataset.data;
+            const sensFactor = { strict: 1.0, normal: 0.9, relaxed: 0.5 }[sensitivity] || 0.9;
+
+            const { complaintRows, baselineRows } = splitTimeSeries(
+                data, startDate, endDate, baselineMethod
+            );
+
+            const routeGroups = {};
+
+            complaintRows.forEach(row => {
+                if (!row.FLWID) return;
+                const route = String(row.FLWID);
+                if (!routeGroups[route]) {
+                    routeGroups[route] = [];
+                }
+                routeGroups[route].push(row);
+            });
+
+            const txAnomalies = [];
+
+            for (const [route, rows] of Object.entries(routeGroups)) {
+                const site = extractSiteFromRoute(route);
+
+                if (!site) {
+                    continue;
+                }
+
+                for (const kpiName of Config.TX_KPIS) {
+                    if (!(kpiName in rows[0])) continue;
+
+                    const baselineForRoute = baselineRows.filter(row => row.FLWID === route);
+
+                    const complaintAvg = rows.reduce((sum, r) => sum + (r[kpiName] || 0), 0) / rows.length;
+
+                    let baselineAvg = null;
+                    if (baselineForRoute.length > 0) {
+                        baselineAvg = baselineForRoute.reduce((sum, r) => sum + (r[kpiName] || 0), 0) / baselineForRoute.length;
+                    }
+
+                    const threshold = Config.THRESHOLD_MAPPING['TX']?.[kpiName];
+                    const result = checkThreshold(complaintAvg, baselineAvg, threshold, sensFactor);
+
+                    if (result.isAnomaly) {
+                        txAnomalies.push({
+                            site: site,
+                            route: route,
+                            kpiName: kpiName,
+                            value: complaintAvg.toFixed(3),
+                            baseline: baselineAvg ? baselineAvg.toFixed(3) : null,
+                            devPct: baselineAvg ? (((complaintAvg - baselineAvg) / Math.abs(baselineAvg)) * 100).toFixed(1) : null,
+                            severity: result.severity || 'ANOMALY',
+                            timestamp: new Date().toISOString()
+                        });
+                    }
+                }
+            }
+
+            addLogMessage(`  • Found ${txAnomalies.length} TX anomalies across ${new Set(txAnomalies.map(a => a.site)).size} sites`, 'success');
+
+            return txAnomalies;
+        }
+
+        // ==================== ENHANCED ANOMALY DETECTION ====================
+        function detectAnomalies(startDate, endDate, baselineMethod, sensitivity) {
+            addLogMessage('Detecting anomalies with advanced node extraction...');
+            AppState.anomalies = [];
+            AppState.txAnomalies = [];
+
+            AppState.subscriberToNodes.clear();
+            AppState.nodeToSubscribers.clear();
+            AppState.nodeToRecords.clear();
+            AppState.nodeToSubscriberRecords.clear();
+            AppState.nodeToKpiIssues.clear();
+
+            const sensFactor = { strict: 1.0, normal: 0.9, relaxed: 0.5 }[sensitivity] || 0.9;
+
+            // First, process TX data separately
+            for (const [name, dataset] of Object.entries(AppState.datasets)) {
+                if (dataset.isTx) {
+                    const txAnomalies = detectTxAnomalies(dataset, startDate, endDate, baselineMethod, sensitivity);
+                    AppState.txAnomalies.push(...txAnomalies);
+                }
+            }
+
+            // Then process regular node data
+            for (const [name, dataset] of Object.entries(AppState.datasets)) {
+                if (dataset.type === 'UNKNOWN' || dataset.isTx || dataset.type === 'TICKETS') continue;
+
+                addLogMessage(`Analyzing ${dataset.type} data from ${name}...`);
+
+                const { complaintRows, baselineRows } = splitTimeSeries(
+                    dataset.data, startDate, endDate, baselineMethod
+                );
+
+                addLogMessage(`  • Complaint period: ${complaintRows.length} rows`);
+                addLogMessage(`  • Baseline period: ${baselineRows.length} rows`);
+
+                const sampleRow = complaintRows[0] || {};
+                const kpiColumns = Object.keys(sampleRow).filter(col =>
+                    !Config.TIMESTAMP_COLS.includes(col) &&
+                    !Config.SUBSCRIBER_COLS.includes(col) &&
+                    !Config.CELL_COLS.includes(col) &&
+                    col !== 'FLWID' && col !== 'NE_NAME' &&
+                    typeof sampleRow[col] === 'number'
+                );
+
+                addLogMessage(`  • Found ${kpiColumns.length} KPI columns to analyze`);
+
+                const anomalies = [];
+                const nodeInstancesFound = new Set();
+
+                for (const kpiCol of kpiColumns) {
+                    const extracted = extractNodeAndKPI(kpiCol, dataset.type);
+
+                    const instanceGroups = {};
+
+                    complaintRows.forEach(row => {
+                        let instance = getInstanceIdentifier(row, dataset.type, kpiCol);
+
+                        if (instance === 'Unknown' && extracted.nodeInstance) {
+                            instance = extracted.nodeInstance;
+                        }
+
+                        if (!instanceGroups[instance]) {
+                            instanceGroups[instance] = [];
+                        }
+                        instanceGroups[instance].push(row);
+                    });
+
+                    for (const [instance, rows] of Object.entries(instanceGroups)) {
+                        if (instance === 'Unknown') continue;
+                        if (!isServingNode(dataset.type, instance)) continue;
+
+                        nodeInstancesFound.add(instance);
+
+                        const baselineForInstance = baselineRows.filter(row => {
+                            const rowInstance = getInstanceIdentifier(row, dataset.type, kpiCol);
+                            return rowInstance === instance || (extracted.nodeInstance && rowInstance === extracted.nodeInstance);
+                        });
+
+                        const complaintAvg = rows.reduce((sum, r) => sum + (r[kpiCol] || 0), 0) / rows.length;
+
+                        let baselineAvg = null;
+                        if (baselineForInstance.length > 0) {
+                            baselineAvg = baselineForInstance.reduce((sum, r) => sum + (r[kpiCol] || 0), 0) / baselineForInstance.length;
+                        }
+
+                        const threshold = getThresholdForKPI(dataset.type, extracted.kpiName);
+                        const result = checkThreshold(complaintAvg, baselineAvg, threshold, sensFactor);
+
+                        if (result.isAnomaly) {
+                            rows.forEach(row => {
+                                const subCol = findSubscriberColumn(row);
+                                if (subCol) {
+                                    trackSubscriber(row[subCol], dataset.type, instance);
+                                }
+                            });
+
+                            const nodeKey = `${dataset.type}_${instance}`;
+                            const uniqueSubs = AppState.nodeToSubscribers.has(nodeKey) ?
+                                AppState.nodeToSubscribers.get(nodeKey).size : 0;
+                            const recordCount = AppState.nodeToRecords.get(nodeKey) || 0;
+
+                            let avgRecordsPerSub = 0;
+                            if (uniqueSubs > 0 && AppState.nodeToSubscriberRecords.has(nodeKey)) {
+                                const subRecords = AppState.nodeToSubscriberRecords.get(nodeKey);
+                                let totalRecords = 0;
+                                subRecords.forEach(count => totalRecords += count);
+                                avgRecordsPerSub = totalRecords / uniqueSubs;
+                            }
+
+                            if (!AppState.nodeToKpiIssues.has(nodeKey)) {
+                                AppState.nodeToKpiIssues.set(nodeKey, new Map());
+                            }
+                            const nodeKpiIssues = AppState.nodeToKpiIssues.get(nodeKey);
+                            nodeKpiIssues.set(kpiCol, (nodeKpiIssues.get(kpiCol) || 0) + 1);
+
+                            let site = null;
+                            if (dataset.type === 'NPP') {
+                                site = AppState.nodeMap.cellToSite.get(instance) || extractSiteFromCell(instance);
+                            } else {
+                                site = extractNumericSiteId(instance);
+                                if (site && AppState.nodeMap.numericIdToSite.has(site)) {
+                                    site = AppState.nodeMap.numericIdToSite.get(site);
+                                }
+                            }
+
+                            anomalies.push({
+                                nodeType: dataset.type,
+                                kpiName: kpiCol,
+                                displayKpi: extracted.kpiName,
+                                instance: instance,
+                                site: site,
+                                complaintVal: complaintAvg.toFixed(3),
+                                baselineVal: baselineAvg ? baselineAvg.toFixed(3) : null,
+                                devPct: baselineAvg ? (((complaintAvg - baselineAvg) / Math.abs(baselineAvg)) * 100).toFixed(1) : null,
+                                threshold: result.description || 'Threshold violation',
+                                severity: result.severity || 'ANOMALY',
+                                source: name,
+                                subscribers: uniqueSubs,
+                                recordCount: recordCount,
+                                avgRecordsPerSub: avgRecordsPerSub.toFixed(1),
+                                timestamp: new Date().toISOString()
+                            });
+                        }
+                    }
+                }
+
+                AppState.anomalies.push(...anomalies);
+                addLogMessage(`  • Found ${anomalies.length} anomalies for ${dataset.type}`);
+            }
+
+            // Filter tickets after we have all site mappings
+            filterTickets();
+
+            const totalSubscribers = AppState.subscriberToNodes.size;
+            const totalNodes = AppState.nodeToSubscribers.size;
+            addLogMessage(`Subscriber tracking: ${totalSubscribers} unique subscribers across ${totalNodes} nodes`, 'success');
+        }
+
+        function getThresholdForKPI(nodeType, kpiName) {
+            if (Config.THRESHOLD_MAPPING[nodeType]) {
+                if (Config.THRESHOLD_MAPPING[nodeType][kpiName]) {
+                    return Config.THRESHOLD_MAPPING[nodeType][kpiName];
+                }
+
+                for (const [kpiPattern, threshold] of Object.entries(Config.THRESHOLD_MAPPING[nodeType])) {
+                    if (kpiName.includes(kpiPattern) || kpiPattern.includes(kpiName)) {
+                        return threshold;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        function checkThreshold(value, baseline, threshold, sensFactor = 0.9) {
+            if (!threshold) {
+                return { isAnomaly: false };
+            }
+
+            const result = {
+                isAnomaly: false,
+                severity: 'ANOMALY'
+            };
+
+            if (threshold.operator && threshold.value !== undefined) {
+                const adjustedValue = threshold.value * (threshold.severity === 'CRITICAL' ? 1 : sensFactor);
+
+                if (threshold.operator === '>' && value > adjustedValue) {
+                    result.isAnomaly = true;
+                    result.severity = threshold.severity || 'CRITICAL';
+                    result.description = `> ${threshold.value}`;
+                } else if (threshold.operator === '<' && value < adjustedValue) {
+                    result.isAnomaly = true;
+                    result.severity = threshold.severity || 'CRITICAL';
+                    result.description = `< ${threshold.value}`;
+                }
+            }
+
+            if (!result.isAnomaly && threshold.useDeviation && baseline !== null && baseline !== 0) {
+                const devPct = Math.abs(((value - baseline) / baseline) * 100);
+                if (devPct > (threshold.value || 20)) {
+                    result.isAnomaly = true;
+                    result.severity = threshold.severity || 'ANOMALY';
+                    result.description = `Deviation > ${threshold.value || 20}%`;
+                }
+            }
+
+            return result;
+        }
+
+        function splitTimeSeries(data, startDate, endDate, method) {
+            if (!startDate && !endDate) {
+                return { complaintRows: data, baselineRows: [] };
+            }
+
+            const start = startDate ? new Date(startDate) : null;
+            const end = endDate ? new Date(endDate) : null;
+
+            const sampleRow = data[0] || {};
+            let tsCol = null;
+            for (const col of Config.TIMESTAMP_COLS) {
+                if (col in sampleRow) {
+                    tsCol = col;
+                    break;
+                }
+            }
+
+            if (!tsCol) {
+                return { complaintRows: data, baselineRows: [] };
+            }
+
+            const complaintRows = data.filter(row => {
+                if (!row[tsCol]) return true;
+                const ts = new Date(row[tsCol]);
+                if (isNaN(ts)) return true;
+                if (start && ts < start) return false;
+                if (end && ts > end) return false;
+                return true;
+            });
+
+            let baselineRows = [];
+            if (start && method !== 'none') {
+                if (method === '2h_before') {
+                    const bEnd = new Date(start);
+                    const bStart = new Date(start.getTime() - 2 * 3600000);
+                    baselineRows = data.filter(row => {
+                        if (!row[tsCol]) return false;
+                        const ts = new Date(row[tsCol]);
+                        return ts >= bStart && ts < bEnd;
+                    });
+                } else if (method === 'yesterday') {
+                    const yStart = new Date(start.getTime() - 24 * 3600000);
+                    const yEnd = end ? new Date(end.getTime() - 24 * 3600000) :
+                        new Date(start.getTime() - 24 * 3600000 + 2 * 3600000);
+                    baselineRows = data.filter(row => {
+                        if (!row[tsCol]) return false;
+                        const ts = new Date(row[tsCol]);
+                        return ts >= yStart && ts <= yEnd;
+                    });
+                } else if (method === 'auto') {
+                    const bEnd = new Date(start);
+                    const bStart = new Date(start.getTime() - 2 * 3600000);
+                    baselineRows = data.filter(row => {
+                        if (!row[tsCol]) return false;
+                        const ts = new Date(row[tsCol]);
+                        return ts >= bStart && ts < bEnd;
+                    });
+
+                    if (baselineRows.length === 0) {
+                        const yStart = new Date(start.getTime() - 24 * 3600000);
+                        const yEnd = end ? new Date(end.getTime() - 24 * 3600000) :
+                            new Date(start.getTime() - 24 * 3600000 + 2 * 3600000);
+                        baselineRows = data.filter(row => {
+                            if (!row[tsCol]) return false;
+                            const ts = new Date(row[tsCol]);
+                            return ts >= yStart && ts <= yEnd;
+                        });
+                    }
+                }
+            }
+
+            return { complaintRows, baselineRows };
+        }
+
+        // ==================== TX KPI CHART FUNCTION ====================
+        function showTXKPIChart(route, kpiName, site) {
+            let txDataset = null;
+
+            for (const [name, ds] of Object.entries(AppState.datasets)) {
+                if (ds.isTx) {
+                    txDataset = ds;
+                    break;
+                }
+            }
+
+            if (!txDataset) {
+                alert('No TX data found');
+                return;
+            }
+
+            const sampleRow = txDataset.data[0];
+            let tsCol = null;
+            for (const col of Config.TIMESTAMP_COLS) {
+                if (col in sampleRow) {
+                    tsCol = col;
+                    break;
+                }
+            }
+
+            if (!tsCol) {
+                alert('No timestamp column found in TX data');
+                return;
+            }
+
+            const routeData = txDataset.data.filter(row =>
+                row.FLWID === route
+            ).sort((a, b) => new Date(a[tsCol]) - new Date(b[tsCol]));
+
+            if (routeData.length === 0) {
+                alert(`No data found for route: ${route}`);
+                return;
+            }
+
+            const timestamps = routeData.map(row => new Date(row[tsCol]));
+            const values = routeData.map(row => row[kpiName]);
+
+            AppState.currentKPIChart = {
+                nodeType: 'TX',
+                instance: route,
+                kpiName: kpiName,
+                data: {
+                    timestamps,
+                    values,
+                    rawData: routeData,
+                    tsCol
+                }
+            };
+
+            document.getElementById('kpi-chart-title').textContent = `TX - ${site} - ${route} - ${kpiName}`;
+            document.getElementById('kpi-chart-modal').style.display = 'flex';
+
+            renderKPIChart();
+        }
+
+        // ==================== FIXED CORRELATION ENGINE WITH FILTER-BASED SUBSCRIBER TRACKING ====================
+        function correlateAnomalies() {
+            addLogMessage('Correlating anomalies with filter-based subscriber tracking...');
+
+            // Get complaint period dates
+            const startDate = document.getElementById('ts-start').value;
+            const endDate = document.getElementById('ts-end').value;
+
+            // Track subscribers per cell during complaint period - USING FILTER FILE
+            const cellSubscribers = new Map(); // cell -> Set of subscribers
+            const cellRecords = new Map(); // cell -> record count
+
+            addLogMessage('Tracking subscribers from filter file during complaint period...');
+
+            // FIRST: Get all cells that are in the filter file (these are the relevant cells)
+            const relevantCells = new Set(AppState.nodeMap.cells);
+            addLogMessage(`Found ${relevantCells.size} relevant cells from filter file`);
+
+            // SECOND: Get subscriber mappings from filter file (these are the actual subscribers that were active)
+            if (AppState.cellSubscribers.size > 0) {
+                addLogMessage(`Adding ${AppState.cellSubscribers.size} cell-subscriber mappings from filter file`);
+                AppState.cellSubscribers.forEach((subs, cell) => {
+                    if (relevantCells.has(cell)) {
+                        if (!cellSubscribers.has(cell)) {
+                            cellSubscribers.set(cell, new Set());
+                        }
+                        subs.forEach(sub => {
+                            if (sub && sub !== '' && sub !== '0' && sub !== 'null') {
+                                cellSubscribers.get(cell).add(sub);
+                            }
+                        });
+                    }
+                });
+            }
+
+            // THIRD: Also check NPP data for additional subscriber activity during complaint period
+            // but only for cells that are in the filter file
+            for (const [name, dataset] of Object.entries(AppState.datasets)) {
+                if (dataset.type === 'NPP' && !dataset.isTx) {
+                    const { complaintRows } = splitTimeSeries(
+                        dataset.data, startDate, endDate, 'none'
+                    );
+
+                    addLogMessage(`  Processing ${complaintRows.length} NPP rows from complaint period`);
+
+                    complaintRows.forEach(row => {
+                        if (row.Cell) {
+                            const cell = String(row.Cell);
+
+                            // Only process cells that are in the filter file
+                            if (relevantCells.has(cell)) {
+                                // Increment record count for this cell
+                                if (!cellRecords.has(cell)) cellRecords.set(cell, 0);
+                                cellRecords.set(cell, cellRecords.get(cell) + 1);
+
+                                // Track subscribers from NPP data
+                                let subscriber = null;
+                                for (const col of Config.SUBSCRIBER_COLS) {
+                                    if (row[col] !== undefined && row[col] !== null && row[col] !== '') {
+                                        subscriber = String(row[col]).trim();
+                                        break;
+                                    }
+                                }
+
+                                if (subscriber && subscriber !== '' && subscriber !== '0' && subscriber !== 'null') {
+                                    if (!cellSubscribers.has(cell)) {
+                                        cellSubscribers.set(cell, new Set());
+                                    }
+                                    cellSubscribers.get(cell).add(subscriber);
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+
+            addLogMessage(`Found subscribers in ${cellSubscribers.size} cells after filtering`);
+
+            // Log sample of cells with subscribers
+            let sampleCount = 0;
+            cellSubscribers.forEach((subs, cell) => {
+                if (sampleCount < 5) {
+                    addLogMessage(`  Cell ${cell}: ${subs.size} subscribers`);
+                    sampleCount++;
+                }
+            });
+
+            // Aggregate subscribers and records per site
+            const siteSubscribers = new Map(); // site -> Set of subscribers
+            const siteRecords = new Map(); // site -> total records
+            const siteCells = new Map(); // site -> Set of cells
+
+            cellSubscribers.forEach((subs, cell) => {
+                const site = AppState.nodeMap.cellToSite.get(cell) || extractSiteFromCell(cell);
+                if (site) {
+                    if (!siteSubscribers.has(site)) siteSubscribers.set(site, new Set());
+                    if (!siteRecords.has(site)) siteRecords.set(site, 0);
+                    if (!siteCells.has(site)) siteCells.set(site, new Set());
+
+                    // Add all subscribers from this cell
+                    subs.forEach(sub => siteSubscribers.get(site).add(sub));
+
+                    // Add record count for this cell (from NPP data)
+                    siteRecords.set(site, siteRecords.get(site) + (cellRecords.get(cell) || 0));
+
+                    // Add cell to site's cell list
+                    siteCells.get(site).add(cell);
+                }
+            });
+
+            // Log site subscriber counts for debugging
+            addLogMessage('Site subscriber counts from filter data:');
+            siteSubscribers.forEach((subs, site) => {
+                const cells = siteCells.get(site) || new Set();
+                addLogMessage(`  Site ${site}: ${subs.size} unique subscribers across ${cells.size} cells`);
+            });
+
+            // Build site anomaly mapping from all anomalies
+            const siteAnomalies = new Map();
+            const siteCritical = new Map();
+            const siteAnomalyCount = new Map();
+            const siteKpis = new Map();
+            const siteNodeTypes = new Map();
+
+            // Process node anomalies
+            AppState.anomalies.forEach(a => {
+                let site = a.site;
+
+                if (!site && a.nodeType === 'NPP' && a.instance) {
+                    site = AppState.nodeMap.cellToSite.get(a.instance) || extractSiteFromCell(a.instance);
+                }
+
+                if (site) {
+                    if (!siteAnomalies.has(site)) siteAnomalies.set(site, []);
+                    if (!siteCritical.has(site)) siteCritical.set(site, 0);
+                    if (!siteAnomalyCount.has(site)) siteAnomalyCount.set(site, 0);
+                    if (!siteKpis.has(site)) siteKpis.set(site, new Set());
+                    if (!siteNodeTypes.has(site)) siteNodeTypes.set(site, new Set());
+
+                    siteAnomalies.get(site).push(a);
+                    if (a.severity === 'CRITICAL') siteCritical.set(site, siteCritical.get(site) + 1);
+                    else siteAnomalyCount.set(site, siteAnomalyCount.get(site) + 1);
+
+                    siteKpis.get(site).add(a.kpiName);
+                    siteNodeTypes.get(site).add(a.nodeType);
+                }
+            });
+
+            // Process TX anomalies
+            const siteTxAnomalies = new Map();
+            const siteTxCount = new Map();
+
+            AppState.txAnomalies.forEach(tx => {
+                const site = tx.site;
+                if (site) {
+                    if (!siteTxAnomalies.has(site)) {
+                        siteTxAnomalies.set(site, []);
+                        siteTxCount.set(site, 0);
+                    }
+                    siteTxAnomalies.get(site).push(tx);
+                    siteTxCount.set(site, siteTxCount.get(site) + 1);
+
+                    if (!siteCritical.has(site)) siteCritical.set(site, 0);
+                    if (!siteAnomalyCount.has(site)) siteAnomalyCount.set(site, 0);
+                    if (!siteKpis.has(site)) siteKpis.set(site, new Set());
+                    if (!siteNodeTypes.has(site)) siteNodeTypes.set(site, new Set());
+
+                    if (tx.severity === 'CRITICAL') {
+                        siteCritical.set(site, (siteCritical.get(site) || 0) + 1);
+                    } else {
+                        siteAnomalyCount.set(site, (siteAnomalyCount.get(site) || 0) + 1);
+                    }
+                    siteKpis.get(site).add(tx.kpiName);
+                    siteNodeTypes.get(site).add('TX');
+                }
+            });
+
+            // Map tickets to sites
+            const siteTickets = new Map();
+            const siteTicketCount = new Map();
+
+            AppState.filteredTickets.forEach(ticket => {
+                let ticketSite = null;
+
+                if (ticket.site || ticket.Site) {
+                    ticketSite = String(ticket.site || ticket.Site);
+                } else {
+                    const cellFields = ['cell_name', 'CELL_NAME', 'cell', 'Cell'];
+                    for (const field of cellFields) {
+                        if (ticket[field]) {
+                            const cell = String(ticket[field]);
+                            ticketSite = AppState.nodeMap.cellToSite.get(cell) || extractSiteFromCell(cell);
+                            if (ticketSite) break;
+                        }
+                    }
+                }
+
+                // Try numeric ID matching
+                if (!ticketSite) {
+                    const numId = extractNumericSiteId(ticket.description || '') ||
+                        extractNumericSiteId(ticket.cell || '') ||
+                        extractNumericSiteId(ticket.site || '');
+                    if (numId && AppState.nodeMap.numericIdToSite.has(numId)) {
+                        ticketSite = AppState.nodeMap.numericIdToSite.get(numId);
+                    }
+                }
+
+                if (ticketSite) {
+                    if (!siteTickets.has(ticketSite)) {
+                        siteTickets.set(ticketSite, []);
+                        siteTicketCount.set(ticketSite, 0);
+                    }
+                    siteTickets.get(ticketSite).push(ticket);
+                    siteTicketCount.set(ticketSite, siteTicketCount.get(ticketSite) + 1);
+                }
+            });
+
+            // ── V20 SCORING: Build per-cell subscriber frequency map from filter data ──
+            // This captures how many records (appearances/sessions) each subscriber had
+            // under each cell during the complaint window — a proxy for exposure duration.
+            const cellSubFrequency = new Map(); // cell -> Map(subscriberId -> recordCount)
+            for (const [sheetName, data] of Object.entries(AppState.filterData)) {
+                const filteredData = filterByTimeRange(data, startDate, endDate);
+                filteredData.forEach(row => {
+                    const cell = findCellColumn(row);
+                    const sub = findSubscriberColumn(row);
+                    if (!cell || !sub || !AppState.nodeMap.cells.has(cell)) return;
+                    if (!cellSubFrequency.has(cell)) cellSubFrequency.set(cell, new Map());
+                    const freqMap = cellSubFrequency.get(cell);
+                    freqMap.set(sub, (freqMap.get(sub) || 0) + 1);
+                });
+            }
+
+            // Aggregate frequency to site level
+            const siteSubFrequency = new Map(); // site -> Map(subscriberId -> totalRecords)
+            cellSubFrequency.forEach((freqMap, cell) => {
+                const site = AppState.nodeMap.cellToSite.get(cell) || extractSiteFromCell(cell);
+                if (!site) return;
+                if (!siteSubFrequency.has(site)) siteSubFrequency.set(site, new Map());
+                const sFreqMap = siteSubFrequency.get(site);
+                freqMap.forEach((count, sub) => {
+                    sFreqMap.set(sub, (sFreqMap.get(sub) || 0) + count);
+                });
+            });
+
+            // Build comprehensive site data with V20 evidence-based scoring
+            const chains = [];
+
+            // ── FILTER-FIRST: Only score sites confirmed by the filter file ──
+            // Sites with anomalies/tickets but NO subscribers from the filter are
+            // excluded — they were not confirmed as serving customers at complaint time.
+            // Sites from anomalies/tickets that ARE also in the filter are still scored.
+            const filterSites = new Set(AppState.nodeMap.sites);
+
+            // Include anomaly/ticket sites only if they overlap with the filter
+            const allSites = new Set();
+            filterSites.forEach(s => allSites.add(s));
+            // Also include anomaly/ticket sites that match filter sites (fuzzy numeric ID)
+            [...siteAnomalies.keys(), ...siteTxAnomalies.keys(), ...siteTickets.keys()].forEach(s => {
+                if (filterSites.has(s)) allSites.add(s);
+                else {
+                    // Try numeric ID cross-match
+                    const numId = extractNumericSiteId(s);
+                    if (numId && AppState.nodeMap.numericIdToSite.has(numId)) {
+                        allSites.add(AppState.nodeMap.numericIdToSite.get(numId));
+                    }
+                }
+            });
+
+            addLogMessage(`Processing ${allSites.size} filter-confirmed sites for scoring...`, 'success');
+
+            allSites.forEach(site => {
+                const siteAnomalyList = siteAnomalies.get(site) || [];
+                const siteTxList = siteTxAnomalies.get(site) || [];
+                const siteTicketList = siteTickets.get(site) || [];
+
+                // ── DIMENSION 1: Subscriber Breadth ──
+                // How many unique subscribers were under this node during the complaint time.
+                const subscriberSet = siteSubscribers.get(site) || new Set();
+                const siteSubscribers_count = subscriberSet.size;
+                // Weight: 30 pts per subscriber. Rewarded for breadth of impact.
+                const subscriberScore = siteSubscribers_count * 30;
+
+                // ── DIMENSION 2: Subscriber Frequency / Exposure ──
+                // Sum of all subscriber-record counts for this site from the filter file.
+                // High frequency = subscribers spent more time / made more attempts under
+                // this node → stronger exposure to any degradation at that node.
+                let totalFilterRecords = 0;
+                const sFreqMap = siteSubFrequency.get(site);
+                if (sFreqMap) sFreqMap.forEach(count => { totalFilterRecords += count; });
+                // Normalise: average records per subscriber (intensity proxy)
+                const subscriberFrequency = siteSubscribers_count > 0
+                    ? (totalFilterRecords / siteSubscribers_count)
+                    : 0;
+                // Weight: 15 pts per avg record/subscriber. Rewards sustained exposure.
+                const frequencyScore = subscriberFrequency * 15;
+
+                // ── DIMENSION 3: NPP KPI Degradation ──
+                // Subscriber-weighted: multiply raw KPI issues by subscriber count so
+                // a node with many impacted subs scores higher than one with few.
+                const subMultiplier = siteSubscribers_count > 0 ? Math.log10(siteSubscribers_count + 1) + 1 : 1;
+                const criticalIssues = siteCritical.get(site) || 0;
+                const anomalyIssues = siteAnomalyCount.get(site) || 0;
+                const uniqueKpis = siteKpis.get(site) || new Set();
+                // Critical KPI breach: 150 pts × sub-multiplier
+                const kpiCriticalScore = criticalIssues * 150 * subMultiplier;
+                // Anomaly KPI breach:  50 pts × sub-multiplier
+                const kpiAnomalyScore = anomalyIssues * 50 * subMultiplier;
+                // KPI diversity bonus: 40 pts per unique degraded KPI (breadth of problem)
+                const kpiDiversityScore = uniqueKpis.size * 40;
+
+                // ── DIMENSION 4: Transport (TX) Degradation ──
+                const txIssues = siteTxCount.get(site) || 0;
+                // TX issues weighted by subscriber presence (transport affects ALL subs on site)
+                const txScore = txIssues * 120 * subMultiplier;
+
+                // ── DIMENSION 5: Ticket Evidence ──
+                const tickets = siteTicketCount.get(site) || 0;
+                // Tickets are strong human-confirmed evidence: 600 pts each, no multiplier needed
+                const ticketScore = tickets * 600;
+
+                // ── DIMENSION 6: Core Node Issues (MME/SGSN/GGSN/DNS/DRA) ──
+                const coreIssues = siteAnomalyList.filter(a =>
+                    ['GGSN', 'SGSN', 'MME', 'DNS', 'DRA'].includes(a.nodeType)
+                ).length;
+                // Core node degradation: higher weight since they serve many subscribers
+                const coreScore = coreIssues * 80 * subMultiplier;
+
+                // ── CONVERGENCE MULTIPLIER ──
+                // When multiple independent evidence types point to the same node,
+                // confidence is much higher → apply a convergence boost.
+                const evidenceTypes = [
+                    siteSubscribers_count > 0,       // filter confirms subs were here
+                    criticalIssues > 0 || anomalyIssues > 0, // KPI degradation
+                    txIssues > 0,                    // transport issue
+                    tickets > 0,                     // ticket raised
+                    coreIssues > 0                   // core node issue
+                ].filter(Boolean).length;
+                // 1 type → ×1.0, 2 types → ×1.3, 3 types → ×1.6, 4+ → ×2.0
+                const convergenceMultiplier = evidenceTypes <= 1 ? 1.0 :
+                    evidenceTypes === 2 ? 1.3 :
+                        evidenceTypes === 3 ? 1.6 : 2.0;
+
+                // ── TOTAL SCORE ──
+                const rawScore = subscriberScore + frequencyScore +
+                    kpiCriticalScore + kpiAnomalyScore + kpiDiversityScore +
+                    txScore + ticketScore + coreScore;
+                const score = rawScore * convergenceMultiplier;
+
+                // Get cells for this site
+                const siteCells_list = siteCells.get(site) || new Set();
+                const cellIssues = siteAnomalyList.filter(a => a.nodeType === 'NPP').length;
+                const nodeTypes = siteNodeTypes.get(site) || new Set();
+
+                // Debug log — only for top sites to avoid DOM flood
+                if (siteSubscribers_count > 0 || tickets > 0 || criticalIssues > 0) {
+                    addLogMessage(`Score [${site}]: ${Math.round(score)} | Subs:${siteSubscribers_count} Freq:${subscriberFrequency.toFixed(1)} Crit:${criticalIssues} Anom:${anomalyIssues} TX:${txIssues} Tkt:${tickets} Conv:×${convergenceMultiplier}`, 'success');
+                }
+
+                chains.push({
+                    site,
+                    tickets: tickets,
+                    ticketList: siteTicketList,
+                    cellIssues: cellIssues,
+                    transportIssues: txIssues,
+                    coreIssues: coreIssues,
+                    criticalIssues: criticalIssues,
+                    anomalyIssues: anomalyIssues,
+                    affectedSubscribers: siteSubscribers_count,
+                    subscriberIntensity: subscriberFrequency.toFixed(1),
+                    kpiDiversity: uniqueKpis.size,
+                    nodeTypeDiversity: nodeTypes.size,
+                    nodeTypes: Array.from(nodeTypes).join(', '),
+                    txAnomalies: siteTxList,
+                    score: Math.round(score),
+                    cells: Array.from(siteCells_list),
+                    anomalyList: siteAnomalyList,
+                    convergenceTypes: evidenceTypes,
+                    // Score breakdown for display
+                    scoreBreakdown: {
+                        subscriber: Math.round(subscriberScore),
+                        frequency: Math.round(frequencyScore),
+                        kpiCritical: Math.round(kpiCriticalScore),
+                        kpiAnomaly: Math.round(kpiAnomalyScore),
+                        kpiDiversity: kpiDiversityScore,
+                        tx: Math.round(txScore),
+                        tickets: ticketScore,
+                        core: Math.round(coreScore),
+                        convergence: convergenceMultiplier
+                    }
+                });
+            });
+
+            // Sort sites by score (highest first)
+            chains.sort((a, b) => b.score - a.score);
+
+            // Detailed breakdown for top 5 only
+            chains.slice(0, 5).forEach((site, i) => {
+                const sb = site.scoreBreakdown;
+                addLogMessage(`=== #${i + 1} ${site.site} — Score: ${site.score} ===`, 'success');
+                addLogMessage(`  Subs:${site.affectedSubscribers}(${sb.subscriber}pts) Freq:${site.subscriberIntensity}(${sb.frequency}pts) KPI-Crit:${site.criticalIssues}(${sb.kpiCritical}pts) KPI-Anom:${site.anomalyIssues}(${sb.kpiAnomaly}pts) TX:${site.transportIssues}(${sb.tx}pts) Tickets:${site.tickets}(${sb.tickets}pts) Core:${site.coreIssues}(${sb.core}pts) Conv:×${sb.convergence}`, 'success');
+            });
+
+            // Build suspects list
+            const suspects = [];
+
+            // Add top sites
+            chains.forEach((site, i) => {
+                if (i < 10 || site.score > 500) {
+                    suspects.push({
+                        type: 'site',
+                        name: site.site,
+                        score: site.score,
+                        evidence: `${site.tickets} tickets, ${site.criticalIssues} critical, ${site.transportIssues} TX, ${site.affectedSubscribers} subs, ${site.convergenceTypes} evidence types`,
+                        stats: {
+                            subscribers: site.affectedSubscribers,
+                            cells: site.cells.length,
+                            tickets: site.tickets,
+                            intensity: site.subscriberIntensity,
+                            nodeTypes: site.nodeTypes,
+                            txIssues: site.transportIssues,
+                            criticalIssues: site.criticalIssues,
+                            anomalyIssues: site.anomalyIssues,
+                            kpiDiversity: site.kpiDiversity,
+                            convergenceTypes: site.convergenceTypes,
+                            scoreBreakdown: site.scoreBreakdown
+                        },
+                        tickets: site.ticketList,
+                        txAnomalies: site.txAnomalies,
+                        primary: i < 3
+                    });
+                }
+            });
+
+            suspects.sort((a, b) => b.score - a.score);
+
+            // Calculate total unique subscribers affected
+            const allAffectedSubscribers = new Set();
+            siteSubscribers.forEach(subs => {
+                subs.forEach(sub => allAffectedSubscribers.add(sub));
+            });
+
+            const detectedNodeTypes = new Set(AppState.anomalies.map(a => a.nodeType));
+            detectedNodeTypes.add('TX');
+
+            AppState.correlationResults = {
+                summary: {
+                    critical: AppState.anomalies.filter(a => a.severity === 'CRITICAL').length +
+                        AppState.txAnomalies.filter(a => a.severity === 'CRITICAL').length,
+                    anomalies: AppState.anomalies.filter(a => a.severity === 'ANOMALY').length +
+                        AppState.txAnomalies.filter(a => a.severity === 'ANOMALY').length,
+                    total: AppState.anomalies.length + AppState.txAnomalies.length,
+                    sites: chains.length,
+                    cells: AppState.nodeMap.cells.size,
+                    affectedSubscribers: allAffectedSubscribers.size,
+                    uniqueKpis: new Set([...AppState.anomalies.map(a => a.kpiName), ...AppState.txAnomalies.map(t => t.kpiName)]).size,
+                    tickets: AppState.filteredTickets.length,
+                    totalTickets: AppState.tickets.length,
+                    txAnomalies: AppState.txAnomalies.length
+                },
+                suspects: suspects.slice(0, 10),
+                chains: chains,
+                allAnomalies: AppState.anomalies,
+                txAnomalies: AppState.txAnomalies,
+                subscriberStats: {
+                    totalUnique: allAffectedSubscribers.size,
+                    sitesWithSubs: siteSubscribers.size,
+                    avgSubsPerSite: siteSubscribers.size > 0 ?
+                        (allAffectedSubscribers.size / siteSubscribers.size).toFixed(1) : 0
+                },
+                ticketsBySite: siteTickets,
+                allTickets: AppState.filteredTickets,
+                detectedNodeTypes: [...detectedNodeTypes]
+            };
+
+            addLogMessage(`Correlation complete!`, 'success');
+            addLogMessage(`  • ${AppState.correlationResults.summary.critical} critical issues`);
+            addLogMessage(`  • ${AppState.correlationResults.summary.anomalies} anomalies`);
+            addLogMessage(`  • ${AppState.correlationResults.summary.txAnomalies} TX anomalies`);
+            addLogMessage(`  • ${AppState.correlationResults.summary.affectedSubscribers} unique subscribers affected`);
+            addLogMessage(`  • ${AppState.correlationResults.summary.tickets} relevant tickets`);
+
+            // Show top 3 sites with score breakdown
+            chains.slice(0, 3).forEach((site, i) => {
+                addLogMessage(`    #${i + 1} ${site.site}: Score=${site.score} (Subs:${site.affectedSubscribers}, Crit:${site.criticalIssues}, TX:${site.transportIssues}, Tickets:${site.tickets})`, 'success');
+            });
+        }
+        // ==================== KPI CHART FUNCTIONS ====================
+        function showKPIChart(nodeType, instance, kpiName) {
+            let dataset = null;
+
+            for (const [name, ds] of Object.entries(AppState.datasets)) {
+                if (ds.type === nodeType && !ds.isTx) {
+                    const hasInstance = ds.data.some(row => {
+                        const rowInstance = getInstanceIdentifier(row, nodeType, kpiName);
+                        return rowInstance === instance ||
+                            (nodeType === 'NPP' && row.Cell === instance);
+                    });
+
+                    if (hasInstance) {
+                        dataset = ds;
+                        break;
+                    }
+                }
+            }
+
+            if (!dataset) {
+                alert(`No time series data found for ${nodeType} node: ${instance}`);
+                return;
+            }
+
+            const sampleRow = dataset.data[0];
+            let tsCol = null;
+            for (const col of Config.TIMESTAMP_COLS) {
+                if (col in sampleRow) {
+                    tsCol = col;
+                    break;
+                }
+            }
+
+            if (!tsCol) {
+                alert('No timestamp column found in data');
+                return;
+            }
+
+            const instanceData = dataset.data.filter(row => {
+                if (nodeType === 'NPP') {
+                    return row.Cell === instance;
+                } else {
+                    const rowInstance = getInstanceIdentifier(row, nodeType, kpiName);
+                    return rowInstance === instance;
+                }
+            }).sort((a, b) => new Date(a[tsCol]) - new Date(b[tsCol]));
+
+            if (instanceData.length === 0) {
+                alert(`No data found for ${instance}`);
+                return;
+            }
+
+            const timestamps = instanceData.map(row => new Date(row[tsCol]));
+            const values = instanceData.map(row => row[kpiName]);
+
+            AppState.currentKPIChart = {
+                nodeType,
+                instance,
+                kpiName,
+                data: {
+                    timestamps,
+                    values,
+                    rawData: instanceData,
+                    tsCol
+                }
+            };
+
+            document.getElementById('kpi-chart-title').textContent = `${nodeType} - ${instance} - ${kpiName}`;
+            document.getElementById('kpi-chart-modal').style.display = 'flex';
+
+            renderKPIChart();
+        }
+
+        function renderKPIChart() {
+            const ctx = document.getElementById('kpi-time-series-chart')?.getContext('2d');
+            if (!ctx || !AppState.currentKPIChart.data) return;
+
+            if (AppState.currentKPIChart.chart) {
+                AppState.currentKPIChart.chart.destroy();
+            }
+
+            const data = AppState.currentKPIChart.data;
+            const timeRange = document.getElementById('kpi-chart-time-range')?.value || 'all';
+            const aggregation = document.getElementById('kpi-chart-aggregation')?.value || 'raw';
+
+            let filteredTimestamps = [...data.timestamps];
+            let filteredValues = [...data.values];
+
+            if (timeRange !== 'all') {
+                const now = new Date();
+                const cutoff = new Date(now);
+
+                if (timeRange === '24h') {
+                    cutoff.setHours(now.getHours() - 24);
+                } else if (timeRange === '7d') {
+                    cutoff.setDate(now.getDate() - 7);
+                } else if (timeRange === '30d') {
+                    cutoff.setDate(now.getDate() - 30);
+                }
+
+                const indices = data.timestamps
+                    .map((ts, i) => ({ ts, i }))
+                    .filter(item => item.ts >= cutoff && item.ts <= now)
+                    .map(item => item.i);
+
+                filteredTimestamps = indices.map(i => data.timestamps[i]);
+                filteredValues = indices.map(i => data.values[i]);
+            }
+
+            let chartTimestamps = filteredTimestamps;
+            let chartValues = filteredValues;
+
+            if (aggregation === 'hourly' && filteredTimestamps.length > 0) {
+                const hourlyData = new Map();
+                filteredTimestamps.forEach((ts, i) => {
+                    const hourKey = new Date(ts).setMinutes(0, 0, 0);
+                    if (!hourlyData.has(hourKey)) {
+                        hourlyData.set(hourKey, { sum: 0, count: 0, ts: new Date(hourKey) });
+                    }
+                    const hourData = hourlyData.get(hourKey);
+                    hourData.sum += filteredValues[i];
+                    hourData.count++;
+                });
+
+                chartTimestamps = Array.from(hourlyData.values()).map(d => d.ts);
+                chartValues = Array.from(hourlyData.values()).map(d => d.sum / d.count);
+            } else if (aggregation === 'daily' && filteredTimestamps.length > 0) {
+                const dailyData = new Map();
+                filteredTimestamps.forEach((ts, i) => {
+                    const dayKey = new Date(ts).setHours(0, 0, 0, 0);
+                    if (!dailyData.has(dayKey)) {
+                        dailyData.set(dayKey, { sum: 0, count: 0, ts: new Date(dayKey) });
+                    }
+                    const dayData = dailyData.get(dayKey);
+                    dayData.sum += filteredValues[i];
+                    dayData.count++;
+                });
+
+                chartTimestamps = Array.from(dailyData.values()).map(d => d.ts);
+                chartValues = Array.from(dailyData.values()).map(d => d.sum / d.count);
+            }
+
+            const nodeConfig = Config.NODE_PATTERNS[AppState.currentKPIChart.nodeType] || { color: '#00c8ff' };
+
+            AppState.currentKPIChart.chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: chartTimestamps,
+                    datasets: [{
+                        label: `${AppState.currentKPIChart.kpiName} (${aggregation})`,
+                        data: chartValues,
+                        borderColor: nodeConfig.color,
+                        backgroundColor: nodeConfig.color + '20',
+                        tension: 0.1,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: `${AppState.currentKPIChart.nodeType} • ${AppState.currentKPIChart.instance} • ${AppState.currentKPIChart.kpiName}`,
+                            color: '#111827',          // very dark gray — almost black
+                            font: { 
+                                size: 16, 
+                                weight: 'bold' 
+                            },
+                            padding: { top: 10, bottom: 20 }
+                        },
+                        // legend: { labels: { color: '#c8ddf0' } }
+                        legend: {
+                            labels: {
+                                color: '#111827',      // dark labels for legend
+                                font: { 
+                                    size: 13,
+                                    weight: '500' 
+                                },
+                                boxWidth: 20,
+                                padding: 16
+                            }
+                        },
+           
+                    },
+                    scales: {
+                        x: {
+                            type: 'time',
+                            time: { unit: aggregation === 'daily' ? 'day' : 'hour' },
+                            // grid: { color: '#1a3050' },
+                            grid: { color: '#e2e8f0', lineWidth: 0.5, drawBorder: false },
+                            // ticks: { color: '#c8ddf0' }
+                            ticks: {
+                                color: '#111827',      // dark x-axis labels (dates/times)
+                                font: { 
+                                    size: 12,
+                                    weight: '500' 
+                                },
+                                maxRotation: 45,
+                                minRotation: 0
+                            }
+                        },
+                        y: {
+                            // grid: { color: '#1a3050' },
+                            grid: { color: '#e2e8f0', lineWidth: 0.8, drawBorder: false },
+                            // ticks: { color: '#c8ddf0' },
+                            ticks: {
+                                color: '#111827',      // dark y-axis numbers
+                                font: { 
+                                    size: 12,
+                                    weight: '500' 
+                                },
+                                padding: 10
+                            },
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        function updateKPIChartTimeRange() {
+            renderKPIChart();
+        }
+
+        function updateKPIChartAggregation() {
+            renderKPIChart();
+        }
+
+        function closeKPIChartModal() {
+            document.getElementById('kpi-chart-modal').style.display = 'none';
+            if (AppState.currentKPIChart.chart) {
+                AppState.currentKPIChart.chart.destroy();
+                AppState.currentKPIChart.chart = null;
+            }
+        }
+
+        // ==================== TICKET DETAIL FUNCTIONS ====================
+        function showSiteTickets(siteName) {
+            const r = AppState.correlationResults;
+            if (!r) return;
+
+            const tickets = r.ticketsBySite.get(siteName) || [];
+
+            if (tickets.length === 0) {
+                alert(`No tickets found for site: ${siteName}`);
+                return;
+            }
+
+            const modal = document.getElementById('detail-modal');
+            const modalTitle = document.getElementById('modal-title');
+            const modalBody = document.getElementById('modal-body');
+
+            modalTitle.textContent = `Tickets for Site: ${siteName} (${tickets.length})`;
+
+            let html = '<div style="display: flex; flex-direction: column; gap: var(--sp-md);">';
+
+            tickets.slice(0, 20).forEach(ticket => {
+                const ticketId = getTicketId(ticket);
+                html += `
+            <div class="chain-card" onclick='showTicketFullDetails(${JSON.stringify(ticket).replace(/'/g, "\\'")})'>
+                <div style="font-weight: 600; color: var(--accent);">${ticketId}</div>
+                <div style="font-size: 11px; color: var(--dim);">${ticket.submit_date || ticket.created_date || ''}</div>
+            </div>
+        `;
+            });
+
+            html += '</div>';
+            modalBody.innerHTML = html;
+            modal.style.display = 'flex';
+        }
+
+        function showTicketFullDetails(ticket) {
+            const modal = document.getElementById('detail-modal');
+            const modalTitle = document.getElementById('modal-title');
+            const modalBody = document.getElementById('modal-body');
+
+            const ticketId = getTicketId(ticket);
+            modalTitle.textContent = `Ticket Details: ${ticketId}`;
+
+            let html = '<div class="ticket-details">';
+
+            Object.entries(ticket).forEach(([key, value]) => {
+                if (value !== null && value !== undefined && value !== '') {
+                    html += `
+                <div class="ticket-field">
+                    <div class="ticket-label">${key}</div>
+                    <div class="ticket-value">${value}</div>
+                </div>
+            `;
+                }
+            });
+
+            html += '</div>';
+
+            modalBody.innerHTML = html;
+            modal.style.display = 'flex';
+        }
+
+        function closeModal() {
+            document.getElementById('detail-modal').style.display = 'none';
+        }
+
+        // ==================== ANALYSIS EXECUTION ====================
+        async function startAnalysis() {
+            if (AppState.kpiFiles.length === 0) {
+                alert('Please select KPI files first');
+                return;
+            }
+
+            const params = {
+                startDate: document.getElementById('ts-start').value,
+                endDate: document.getElementById('ts-end').value,
+                baselineMethod: document.getElementById('baseline-method').value,
+                sensitivity: document.getElementById('sensitivity').value
+            };
+
+            showProgress(true);
+
+            try {
+                updateProgress(10, 'Parsing files...');
+                await parseFiles();
+
+                updateProgress(30, 'Processing filters...');
+                processFilterFiles(params.startDate, params.endDate);
+
+                updateProgress(50, 'Detecting anomalies...');
+                detectAnomalies(params.startDate, params.endDate, params.baselineMethod, params.sensitivity);
+
+                updateProgress(70, 'Correlating findings...');
+                correlateAnomalies();
+
+                updateProgress(95, 'Rendering results...');
+                // Yield to browser so progress bar paints before heavy render
+                await new Promise(resolve => setTimeout(resolve, 80));
+
+                updateProgress(100, 'Analysis complete!');
+                renderResults();
+
+            } catch (error) {
+                addLogMessage(`Analysis error: ${error.message}`, 'error');
+                addLogMessage(error.stack ? error.stack.split('\n').slice(0, 3).join(' | ') : '', 'error');
+                console.error(error);
+                // Always exit the stuck state on error
+                document.getElementById('hdr-status').textContent = 'ERROR';
+                document.getElementById('status-dot').style.background = 'var(--danger)';
+                document.getElementById('prog-step').textContent = '\u26a0\ufe0f Error — check the log above, fix your inputs and try again.';
+                document.getElementById('prog-bar').style.background = 'var(--danger)';
+                document.getElementById('prog-bar').style.width = '100%';
+            }
+        }
+
+        function showProgress(show) {
+            document.getElementById('welcome-screen').style.display = show ? 'none' : 'flex';
+            document.getElementById('progress-screen').style.display = show ? 'flex' : 'none';
+            document.getElementById('results-screen').style.display = 'none';
+            document.getElementById('export-row').style.display = 'none';
+            document.getElementById('prog-log').innerHTML = '';
+            document.getElementById('prog-bar').style.width = '0%';
+            document.getElementById('hdr-status').textContent = 'ANALYZING';
+            document.getElementById('status-dot').style.background = 'var(--warn)';
+        }
+
+        function updateProgress(percent, message) {
+            document.getElementById('prog-bar').style.width = percent + '%';
+            document.getElementById('prog-step').textContent = message;
+        }
+
+        function addLogMessage(msg, type = '') {
+            const log = document.getElementById('prog-log');
+            const line = document.createElement('div');
+            line.className = `log-line ${type}`;
+            line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            log.appendChild(line);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        // ==================== RESULTS RENDERING ====================
+        function renderResults() {
+            const r = AppState.correlationResults;
+            if (!r) return;
+
+            const tabs = ['SUMMARY', 'ANOMALIES', 'CHAINS', 'TICKETS'];
+            document.getElementById('tab-bar').innerHTML = tabs.map((t, i) =>
+                `<div class="tab-btn ${i === 0 ? 'active' : ''}" onclick="switchTab(${i})">${t}</div>`
+            ).join('');
+
+            const nodeTypeCounts = {};
+            r.chains.forEach(chain => {
+                chain.nodeTypes.split(', ').forEach(type => {
+                    if (type) nodeTypeCounts[type] = (nodeTypeCounts[type] || 0) + 1;
+                });
+            });
+
+            const summaryHTML = `
+        <div class="results">
+            <div class="summary-row">
+                <div class="summary-card danger">
+                    <div class="sc-label">Critical Issues</div>
+                    <div class="sc-value danger">${r.summary.critical}</div>
+                    <div class="sc-trend">${r.summary.txAnomalies} TX issues</div>
+                </div>
+                <div class="summary-card warn">
+                    <div class="sc-label">Anomalies</div>
+                    <div class="sc-value warn">${r.summary.anomalies}</div>
+                    <div class="sc-trend">${r.subscriberStats.avgSubsPerNode} avg subs/node</div>
+                </div>
+                <div class="summary-card info">
+                    <div class="sc-label">Sites Affected</div>
+                    <div class="sc-value info">${r.summary.sites}</div>
+                    <div class="sc-trend">${r.detectedNodeTypes.join(', ')}</div>
+                </div>
+            </div>
+            
+            <div class="section-hdr">
+                <div class="section-hdr-title">🎯 Top Suspects (Enhanced Scoring)</div>
+                <div class="section-hdr-line"></div>
+            </div>
+            
+            <div class="suspects-grid">
+                ${r.suspects.slice(0, 6).map((s, i) => {
+                const stats = s.stats || {};
+
+                return `
+                    <div class="suspect-card ${i === 0 ? 'primary' : i === 1 ? 'secondary' : i === 2 ? 'tertiary' : ''}" onclick="showSiteDetails('${s.name}')">
+                        <div class="suspect-type">
+                            <span style="color: #e74c3c;">📍 SITE</span>
+                            ${stats.tickets > 0 ? `
+                                <span class="ticket-badge" onclick="event.stopPropagation(); showSiteTickets('${s.name}')" style="font-size: 10px;">
+                                    🎫 ${stats.tickets}
+                                </span>
+                            ` : ''}
+                        </div>
+                        <div class="suspect-name">${s.name}</div>
+                        <div class="suspect-score">Score: ${s.score}</div>
+                        <div class="suspect-evidence">${s.evidence}</div>
+                        <div class="suspect-stats">
+                            <span>👥 ${stats.subscribers || 0} subs</span>
+                            <span>🔁 ${stats.intensity || 0} freq</span>
+                            <span>🔴 ${stats.criticalIssues || 0}C</span>
+                            <span>🟡 ${stats.anomalyIssues || 0}A</span>
+                            <span>🔗 ${stats.txIssues || 0} TX</span>
+                            <span>📈 ${stats.kpiDiversity || 0} KPIs</span>
+                        </div>
+                    </div>
+                `}).join('')}
+            </div>
+            
+            <div class="section-hdr">
+                <div class="section-hdr-title">📊 Sites Ranked by Impact Score</div>
+                <div class="section-hdr-line"></div>
+            </div>
+            
+            <div class="node-cards">
+                ${r.chains.slice(0, 10).map(chain => `
+                    <div class="chain-card" onclick="showSiteDetails('${chain.site}')">
+                        <div class="chain-site">
+                            <span>📍 Site: ${chain.site}</span>
+                            ${chain.tickets > 0 ? `
+                                <span class="ticket-badge" onclick="event.stopPropagation(); showSiteTickets('${chain.site}')">
+                                    🎫 ${chain.tickets}
+                                </span>
+                            ` : ''}
+                        </div>
+                        <div style="display: flex; gap: var(--sp-md); margin-top: var(--sp-sm); flex-wrap: wrap;">
+                            <span title="Subscribers">👥 ${chain.affectedSubscribers}</span>
+                            <span title="Sub Frequency (avg records/sub)">🔁 ${chain.subscriberIntensity}</span>
+                            <span style="color: var(--danger);" title="Critical">🔴 ${chain.criticalIssues}</span>
+                            <span style="color: var(--warn);" title="Anomalies">🟡 ${chain.anomalyIssues}</span>
+                            <span style="color: #e74c3c;" title="TX Issues">🔗 ${chain.transportIssues}</span>
+                            <span title="Total Score">🎯 ${chain.score}</span>
+                        </div>
+                        ${chain.txAnomalies && chain.txAnomalies.length > 0 ? `
+                            <div style="margin-top: var(--sp-sm); font-size: 11px; color: var(--dim); background: var(--surface); padding: var(--sp-sm); border-radius: var(--radius-sm);">
+                                <span style="color: #e74c3c; font-weight: 600;">TX Issues:</span> 
+                                ${chain.txAnomalies.map(tx => `${tx.kpiName} (${tx.value})`).join(', ')}
+                            </div>
+                        ` : ''}
+                    </div>
+                `).join('')}
+                ${r.chains.length > 10 ? `<div style="text-align: center; padding: var(--sp-md); color: var(--dim);">+ ${r.chains.length - 10} more sites</div>` : ''}
+            </div>
+        </div>
+    `;
+
+            const anomaliesHTML = `
+        <div class="results">
+            <h3 style="color: var(--accent); margin-bottom: var(--sp-md);">Node Anomalies</h3>
+            <table class="kpi-table">
+                <thead>
+                    <tr>
+                        <th>Node Type</th>
+                        <th>Instance</th>
+                        <th>Site</th>
+                        <th>KPI</th>
+                        <th>Value</th>
+                        <th>Baseline</th>
+                        <th>Dev %</th>
+                        <th>Severity</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${r.allAnomalies.map(a => `
+                        <tr onclick="showKPIChart('${a.nodeType}', '${a.instance}', '${a.kpiName}')" style="cursor: pointer;">
+                            <td><span style="color: ${Config.NODE_PATTERNS[a.nodeType]?.color || 'inherit'};">${a.nodeType}</span></td>
+                            <td>${a.instance}</td>
+                            <td>${a.site || '-'}</td>
+                            <td>${a.displayKpi || a.kpiName}</td>
+                            <td>${a.complaintVal}</td>
+                            <td>${a.baselineVal || '-'}</td>
+                            <td>${a.devPct ? a.devPct + '%' : '-'}</td>
+                            <td><span class="flag-badge flag-${a.severity}">${a.severity}</span></td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+            
+            ${r.txAnomalies && r.txAnomalies.length > 0 ? `
+            <h3 style="color: #e74c3c; margin: var(--sp-xl) 0 var(--sp-md);">TX Anomalies (Correlated to Sites - click to view chart)</h3>
+            <table class="kpi-table">
+                <thead>
+                    <tr>
+                        <th>Site</th>
+                        <th>Route</th>
+                        <th>KPI</th>
+                        <th>Value</th>
+                        <th>Baseline</th>
+                        <th>Dev %</th>
+                        <th>Severity</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${r.txAnomalies.map(tx => `
+                        <tr onclick="showTXKPIChart('${tx.route}', '${tx.kpiName}', '${tx.site}')" style="cursor: pointer;">
+                            <td><span style="color: #e74c3c;">📍 ${tx.site}</span></td>
+                            <td>${tx.route}</td>
+                            <td>${tx.kpiName}</td>
+                            <td>${tx.value}</td>
+                            <td>${tx.baseline || '-'}</td>
+                            <td>${tx.devPct ? tx.devPct + '%' : '-'}</td>
+                            <td><span class="flag-badge flag-${tx.severity}">${tx.severity}</span></td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        ` : ''}
+        </div>
+    `;
+
+            const chainsHTML = `
+        <div class="results">
+            <h3 style="color: var(--accent); margin-bottom: var(--sp-md);">Site Correlation Chains with Score Breakdown</h3>
+            ${r.chains.map(chain => `
+                <div class="chain-card" onclick="showSiteDetails('${chain.site}')">
+                    <div class="chain-site">
+                        <span>📍 Site: ${chain.site}</span>
+                        ${chain.tickets > 0 ? `
+                            <span class="ticket-badge" onclick="event.stopPropagation(); showSiteTickets('${chain.site}')">
+                                🎫 ${chain.tickets}
+                            </span>
+                        ` : ''}
+                    </div>
+                    <div class="chain-evidence">
+                        <div class="evidence-item">
+                            <div class="evidence-label">Subscribers</div>
+                            <div class="evidence-value" style="color: var(--accent)">${chain.affectedSubscribers}</div>
+                        </div>
+                        <div class="evidence-item">
+                            <div class="evidence-label">Sub Freq</div>
+                            <div class="evidence-value">${chain.subscriberIntensity}</div>
+                        </div>
+                        <div class="evidence-item">
+                            <div class="evidence-label">Critical</div>
+                            <div class="evidence-value" style="color: var(--danger)">${chain.criticalIssues}</div>
+                        </div>
+                        <div class="evidence-item">
+                            <div class="evidence-label">Anomalies</div>
+                            <div class="evidence-value" style="color: var(--warn)">${chain.anomalyIssues}</div>
+                        </div>
+                        <div class="evidence-item">
+                            <div class="evidence-label">TX Issues</div>
+                            <div class="evidence-value" style="color: #e74c3c;">${chain.transportIssues}</div>
+                        </div>
+                        <div class="evidence-item">
+                            <div class="evidence-label">Total Score</div>
+                            <div class="evidence-value" style="color: var(--accent)">${chain.score}</div>
+                        </div>
+                    </div>
+                    <div style="margin-top: var(--sp-sm); font-size: 11px; color: var(--dim); display: flex; gap: var(--sp-md); flex-wrap: wrap;">
+                        <span>📡 Cells: ${chain.cells.length}</span>
+                        <span>🏛️ Core: ${chain.coreIssues}</span>
+                        <span>🔧 Node types: ${chain.nodeTypes}</span>
+                        <span>📈 KPIs: ${chain.kpiDiversity}</span>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+
+            const ticketsHTML = `
+        <div class="results">
+            <h2 style="color: var(--accent); margin-bottom: var(--sp-md);">Relevant Tickets (${r.allTickets.length} of ${AppState.tickets.length} total)</h2>
+            ${r.allTickets.length === 0 ? `
+                <div style="text-align: center; padding: var(--sp-xl); color: var(--dim);">
+                    No tickets found for the filtered nodes/sites.
+                </div>
+            ` : `
+                <div style="display: flex; flex-direction: column; gap: var(--sp-md);">
+                    ${r.allTickets.slice(0, 20).map(ticket => {
+                const ticketId = getTicketId(ticket);
+                return `
+                            <div class="chain-card" onclick='showTicketFullDetails(${JSON.stringify(ticket).replace(/'/g, "\\'")})' style="cursor: pointer;">
+                                <div style="font-weight: 600; color: var(--accent);">${ticketId}</div>
+                                <div style="font-size: 11px; color: var(--dim);">${ticket.submit_date || ticket.created_date || ''}</div>
+                            </div>
+                        `;
+            }).join('')}
+                    ${r.allTickets.length > 20 ? `
+                        <div style="text-align: center; padding: var(--sp-md); color: var(--dim);">
+                            + ${r.allTickets.length - 20} more tickets
+                        </div>
+                    ` : ''}
+                </div>
+            `}
+        </div>
+    `;
+
+            const panels = [summaryHTML, anomaliesHTML, chainsHTML, ticketsHTML];
+            document.getElementById('tab-panels').innerHTML = panels.map((html, i) =>
+                `<div class="tab-content ${i === 0 ? 'active' : ''}" id="tab-${i}">${html}</div>`
+            ).join('');
+
+            document.getElementById('progress-screen').style.display = 'none';
+            document.getElementById('results-screen').style.display = 'block';
+            document.getElementById('export-row').style.display = 'flex';
+            document.getElementById('hdr-status').textContent = 'COMPLETE';
+            document.getElementById('status-dot').style.background = 'var(--ok)';
+        }
+
+        // ==================== DETAIL VIEW FUNCTIONS ====================
+        function showSiteDetails(site) {
+            const r = AppState.correlationResults;
+            if (!r) return;
+
+            const chain = r.chains.find(c => c.site === site);
+            if (!chain) return;
+
+            document.getElementById('modal-title').textContent = `Site: ${site}`;
+
+            const filteredData = r.allAnomalies.filter(a => a.site === site);
+            const txData = r.txAnomalies.filter(tx => tx.site === site);
+            const siteTickets = r.ticketsBySite.get(site) || [];
+
+            let bodyHTML = `
+        <div style="margin-bottom: var(--sp-md); padding: var(--sp-md); background: var(--surface2); border-radius: var(--radius-md);">
+            <h3 style="color: var(--accent); margin-bottom: var(--sp-sm);">Site Impact Summary</h3>
+            <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--sp-md);">
+                <div>
+                    <div style="color: var(--dim);">Subscribers</div>
+                    <div style="font-size: 24px; font-weight: bold;">${chain.affectedSubscribers}</div>
+                </div>
+                <div>
+                    <div style="color: var(--dim);">Intensity</div>
+                    <div style="font-size: 24px; font-weight: bold;">${chain.subscriberIntensity}</div>
+                </div>
+                <div>
+                    <div style="color: var(--dim);">Tickets</div>
+                    <div style="font-size: 24px; font-weight: bold; color: var(--danger);">${chain.tickets}</div>
+                </div>
+                <div>
+                    <div style="color: var(--dim);">Total Score</div>
+                    <div style="font-size: 24px; font-weight: bold; color: var(--accent);">${chain.score}</div>
+                </div>
+            </div>
+            <div style="margin-top: var(--sp-md); display: flex; gap: var(--sp-md); flex-wrap: wrap;">
+                <span style="color: var(--danger);">🔴 Critical: ${chain.criticalIssues}</span>
+                <span style="color: var(--warn);">🟡 Anomalies: ${chain.anomalyIssues}</span>
+                <span style="color: #e74c3c;">🔗 TX: ${chain.transportIssues}</span>
+                <span>📡 Cells: ${chain.cells.length}</span>
+                <span>📈 KPIs: ${chain.kpiDiversity}</span>
+                <span>🔧 Node types: ${chain.nodeTypes}</span>
+            </div>
+            ${siteTickets.length > 0 ? `
+                <div style="margin-top: var(--sp-md);">
+                    <span class="ticket-badge" onclick="showSiteTickets('${site}')" style="cursor: pointer; font-size: 12px; padding: 4px 12px;">
+                        View all ${siteTickets.length} tickets
+                    </span>
+                </div>
+            ` : ''}
+        </div>
+    `;
+
+            if (txData.length > 0) {
+                bodyHTML += `
+            <h3 style="color: #e74c3c; margin: var(--sp-lg) 0 var(--sp-md);">TX Anomalies (click to view chart)</h3>
+            <table class="kpi-table" style="margin-bottom: var(--sp-lg);">
+                <thead>
+                    <tr>
+                        <th>Route</th>
+                        <th>KPI</th>
+                        <th>Value</th>
+                        <th>Baseline</th>
+                        <th>Dev %</th>
+                        <th>Severity</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${txData.map(tx => `
+                        <tr onclick="showTXKPIChart('${tx.route}', '${tx.kpiName}', '${tx.site}')" style="cursor: pointer;">
+                            <td>${tx.route}</td>
+                            <td>${tx.kpiName}</td>
+                            <td>${tx.value}</td>
+                            <td>${tx.baseline || '-'}</td>
+                            <td>${tx.devPct ? tx.devPct + '%' : '-'}</td>
+                            <td><span class="flag-badge flag-${tx.severity}">${tx.severity}</span></td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        `;
+            }
+
+            bodyHTML += `
+        <h3 style="color: var(--accent); margin: var(--sp-lg) 0 var(--sp-md);">Node Anomalies (click to view chart)</h3>
+        <table class="kpi-table">
+            <thead>
+                <tr>
+                    <th>Node Type</th>
+                    <th>Instance</th>
+                    <th>KPI</th>
+                    <th>Value</th>
+                    <th>Baseline</th>
+                    <th>Dev %</th>
+                    <th>Severity</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${filteredData.map(a => `
+                    <tr onclick="showKPIChart('${a.nodeType}', '${a.instance}', '${a.kpiName}')" style="cursor: pointer;">
+                        <td>${a.nodeType}</td>
+                        <td>${a.instance}</td>
+                        <td>${a.displayKpi || a.kpiName}</td>
+                        <td>${a.complaintVal}</td>
+                        <td>${a.baselineVal || '-'}</td>
+                        <td>${a.devPct ? a.devPct + '%' : '-'}</td>
+                        <td><span class="flag-badge flag-${a.severity}">${a.severity}</span></td>
+                    </tr>
+                `).join('')}
+            </tbody>
+        </table>
+    `;
+
+            document.getElementById('modal-body').innerHTML = bodyHTML;
+            document.getElementById('detail-modal').style.display = 'flex';
+        }
+
+        // ==================== UI INTERACTIONS ====================
+        function switchTab(index) {
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            document.querySelectorAll('.tab-btn')[index].classList.add('active');
+            document.getElementById('tab-' + index).classList.add('active');
+        }
+
+        // ==================== EXPORT FUNCTIONS ====================
+        function exportToExcel() {
+            if (!AppState.correlationResults) return;
+
+            const wb = XLSX.utils.book_new();
+
+            // Site summary with V20 score breakdown
+            const siteData = AppState.correlationResults.chains.map(c => ({
+                'Site': c.site,
+                'Score': c.score,
+                'Convergence Types': c.convergenceTypes || '',
+                'Convergence Multiplier': c.scoreBreakdown?.convergence || 1,
+                'Subscribers': c.affectedSubscribers,
+                'Sub Frequency (avg records/sub)': c.subscriberIntensity,
+                'Score: Subscriber Breadth': c.scoreBreakdown?.subscriber || 0,
+                'Score: Sub Frequency': c.scoreBreakdown?.frequency || 0,
+                'Critical Issues': c.criticalIssues,
+                'Score: KPI Critical': c.scoreBreakdown?.kpiCritical || 0,
+                'Anomalies': c.anomalyIssues,
+                'Score: KPI Anomaly': c.scoreBreakdown?.kpiAnomaly || 0,
+                'KPI Diversity': c.kpiDiversity,
+                'Score: KPI Diversity': c.scoreBreakdown?.kpiDiversity || 0,
+                'TX Issues': c.transportIssues,
+                'Score: TX': c.scoreBreakdown?.tx || 0,
+                'Tickets': c.tickets,
+                'Score: Tickets': c.scoreBreakdown?.tickets || 0,
+                'Core Issues': c.coreIssues,
+                'Score: Core': c.scoreBreakdown?.core || 0,
+                'Node Types': c.nodeTypes,
+                'Cells': c.cells.length
+            }));
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(siteData), 'Site Summary');
+
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(AppState.correlationResults.allAnomalies), 'Node Anomalies');
+
+            if (AppState.txAnomalies.length > 0) {
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(AppState.txAnomalies), 'TX Anomalies');
+            }
+
+            if (AppState.filteredTickets.length > 0) {
+                XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(AppState.filteredTickets), 'Filtered Tickets');
+            }
+
+            const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+            XLSX.writeFile(wb, `RCA_Report_${timestamp}.xlsx`);
+        }
+
+        function exportToCSV() {
+            if (!AppState.correlationResults?.allAnomalies.length) return;
+
+            const headers = ['NodeType', 'Instance', 'Site', 'KPI', 'Value', 'Baseline', 'Dev%', 'Severity'];
+            const rows = AppState.correlationResults.allAnomalies.map(a =>
+                [a.nodeType, a.instance, a.site || '', a.displayKpi || a.kpiName, a.complaintVal, a.baselineVal || '', a.devPct || '', a.severity]
+            );
+
+            const csvContent = [headers, ...rows]
+                .map(row => row.map(cell => `"${cell}"`).join(','))
+                .join('\n');
+
+            const blob = new Blob([csvContent], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'anomalies.csv';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // function resetAnalysis() {
+        //     AppState.kpiFiles = [];
+        //     AppState.filterFile = null;
+        //     AppState.thresholdFile = null;
+        //     AppState.datasets = {};
+        //     AppState.filterData = {};
+        //     AppState.rawData = {};
+        //     AppState.tickets = [];
+        //     AppState.filteredTickets = [];
+        //     AppState.anomalies = [];
+        //     AppState.txAnomalies = [];
+        //     AppState.cellSubscribers.clear();
+        //     AppState.siteSubscribers.clear();
+        //     AppState.subscriberToNodes.clear();
+        //     AppState.nodeToSubscribers.clear();
+        //     AppState.nodeToRecords.clear();
+        //     AppState.nodeToSubscriberRecords.clear();
+        //     AppState.nodeToKpiIssues.clear();
+        //     AppState.correlationResults = null;
+
+        //     document.getElementById('kpi-file-input').value = '';
+        //     document.getElementById('filter-file-input').value = '';
+        //     document.getElementById('threshold-file-input').value = '';
+
+        //     updateKPIFileList();
+        //     updateFilterFileList();
+        //     updateThresholdFileList();
+
+        //     document.getElementById('welcome-screen').style.display = 'flex';
+        //     document.getElementById('progress-screen').style.display = 'none';
+        //     document.getElementById('results-screen').style.display = 'none';
+        //     document.getElementById('export-row').style.display = 'none';
+        //     document.getElementById('hdr-status').textContent = 'READY';
+        //     document.getElementById('status-dot').style.background = 'var(--ok)';
+
+        //     updateRunButton();
+
+        //     closeModal();
+        //     closeKPIChartModal();
+        // }
+
+        // Initialize
+        console.log('Enhanced RCA Tool v3.3 initialized with advanced site scoring');
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,19 @@
+<div class="failure-rate-list">
+  <!-- Title -->
+  <h3 class="list-title">{{ title }}</h3>
+
+  <!-- Failure Rate Cards -->
+  <div class="cards-container">
+    <app-progress-bar
+      *ngFor="let rate of failureRates"
+      [clusterName]="rate.clusterName"
+      [location]="rate.location"
+      [failureRate]="rate.failureRate"
+      [users]="rate.users"
+      [cells]="rate.cells"
+      [tacs]="rate.tacs"
+      [anomaly]="rate.anomaly"
+      [highlighted]="rate.highlighted || false">
+    </app-progress-bar>
+  </div>
+</div>
