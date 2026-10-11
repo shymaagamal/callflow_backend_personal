@@ -121,4 +121,5 @@ MME--> nE
     * Deviation rate (%) compared to previous day
 5. Trigger alarm if:
    * Total rejections > threshold
-   * Deviation rate > threshold   
+   * Deviation rate > threshold  
+   
