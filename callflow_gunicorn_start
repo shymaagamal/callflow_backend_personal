@@ -1,0 +1,28 @@
+#!/bin/bash
+
+NAME="callflow"
+DJANGODIR=/home/AutomationProjects/CallFlowTool/backend/callflow_portal
+USER=root
+GROUP=root
+WORKERS=3
+BIND=unix:/home/AutomationProjects/CallFlowTool/backend/run/callflow_gunicorn.sock
+DJANGO_SETTINGS_MODULE=callflow_portal.settings
+DJANGO_WSGI_MODULE=callflow_portal.wsgi
+LOGLEVEL=error
+TIMEOUT=100080
+
+cd $DJANGODIR
+source ../portalenv/bin/activate
+
+export DJANGO_SETTINGS_MODULE=$DJANGO_SETTINGS_MODULE
+export PYTHONPATH=$DJANGODIR:$PYTHONPATH
+
+exec gunicorn ${DJANGO_WSGI_MODULE}:application \
+  --name $NAME \
+  --workers $WORKERS \
+  --timeout $TIMEOUT \
+  --user=$USER \
+  --group=$GROUP \
+  --bind=$BIND \
+  --log-level=$LOGLEVEL \
+  --log-file=-

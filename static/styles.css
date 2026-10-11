@@ -1,0 +1,266 @@
+/* ----------  General Body Styling  ---------- */
+body {
+    font-family: 'Arial', sans-serif; /* Sets the font family for the entire body */
+    height: 100vh; /* Sets the height to cover the entire viewport */
+    margin: 0; /* Removes default margin */
+    display: flex; /* Enables flexbox layout for body elements */
+    flex-direction: row; /* Aligns children elements (like sidebars) horizontally */
+    overflow: hidden; /* Hides any overflow content */
+}
+
+h2 {
+    margin-top: 20px; /* Adds margin at the top of h2 elements */
+    text-align: center; /* Centers the text horizontally */
+}
+
+/* ----------  Logo Image Styling  ---------- */
+.sidebar .image {
+    min-width: 60px; /* Sets a minimum width for the image container */
+    display: flex; /* Enables flexbox for aligning items */
+    align-items: center; /* Centers content vertically */
+    transition: all 0.5s ease; /* Smooth transition for all properties */
+}
+
+.sidebar .image-text img {
+    width: 50px; /* Sets the width of the logo image */
+    border-radius: 6px; /* Rounds the corners of the image */
+    transition: all 0.5s ease; /* Smooth transition for all properties */
+}
+
+.sidebar header .image-text {
+    display: flex; /* Enables flexbox layout */
+    align-items: center; /* Centers items vertically */
+}
+
+/* ----------  Text Beside Logo Styling  ---------- */
+header .image-text .header-text {
+    display: flex; /* Enables flexbox for text alignment */
+    flex-direction: column; /* Stacks text vertically */
+}
+
+.header-text .name {
+    font-weight: 600; /* Sets bold font weight for the name */
+}
+
+.header-text .profession {
+    font-weight: -2px; /* Possibly incorrect, usually positive values are used for font-weight */
+}
+
+/* -----------  Toggle Button Styling  ----------- */
+.btn {
+    position: absolute; /* Positions the button absolutely within its parent */
+    top: 15px; /* Positions the button 15px from the top */
+    left: 250px; /* Positions the button 250px from the left */
+    height: 25px; /* Sets the button height */
+    width: 25px; /* Sets the button width */
+    text-align: center; /* Centers text within the button */
+    background: red; /* Sets background color */
+    color: #ddd; /* Sets text color */
+    border-radius: 8px; /* Rounds the button corners */
+    justify-content: center; /* Centers content horizontally */
+    transform: translateX(-50%) rotate(180deg); /* Moves the button to the left by 50% and rotates it 180 degrees */
+    cursor: pointer; /* Changes cursor to pointer on hover */
+    transition: all 0.5s ease; /* Smooth transition for all properties */
+}
+
+.btn.click {
+    left: 45px; /* Changes position when clicked */
+    transform: translateY(-50%); /* Transforms position vertically */
+    transition: all 0.5s ease; /* Smooth transition for all properties */
+}
+
+.btn span {
+    color: white; /* Sets color of the icon within the button */
+    font-size: 25px; /* Sets font size of the icon */
+}
+
+/*  ---------------------------------------------------------------------- */
+/*  ----------------------  Sidebar Section Styling  ----------------------------- */
+/*  ---------------------------------------------------------------------- */
+
+.sidebar {
+    width: 240px; /* Sets the sidebar width */
+    flex-shrink: 0; /* Prevents the sidebar from shrinking */
+    padding: 20px; /* Adds padding inside the sidebar */
+    background-color: #f9f9f9; /* Sets background color */
+    border-right: 1px solid #ddd; /* Adds a border to the right */
+    display: flex; /* Enables flexbox for sidebar layout */
+    flex-direction: column; /* Aligns children vertically */
+    overflow-y: auto; /* Adds vertical scrolling if content overflows */
+    max-height: 100vh; /* Sets maximum height to the full viewport height */
+    transition: all 0.5s ease; /* Smooth transition for all properties */
+}
+
+.sidebar.close {
+    width: 0px; /* Hides the sidebar when closed */
+}
+
+.sidebar.close .image-text,
+.sidebar.close .figure-controls,
+.sidebar.close .floor-controls,
+.sidebar.close .grid-toggle-section { /* Hide grid toggle button */
+    opacity: 0;
+    pointer-events: none; /* Prevent interaction when closed */
+}
+
+/*  ---------------------- Right Sidebar Styling ----------------------------- */
+#rightSideBar {
+    display: none; /* Initially hides the right sidebar */
+    position: absolute; /* Positions the sidebar absolutely */
+    right: 0; /* Aligns the sidebar to the right */
+    top: 0; /* Aligns the sidebar to the top */
+    height: auto; /* Adjusts height automatically based on content */
+    padding: 20px; /* Adds padding inside the sidebar */
+    background-color: #f9f9f9; /* Sets background color */
+    border-left: 1px solid #ddd; /* Adds a border to the left */
+    flex-direction: column; /* Aligns children vertically */
+    justify-content: flex-start; /* Aligns content to the top */
+    text-align: left; /* Aligns text to the left */
+    align-items: center; /* Centers items horizontally */
+    transition: all 0.5s ease; /* Smooth transition for all properties */
+}
+
+/* ---------- Close Button Styling for the Right Sidebar ---------- */
+.close-btn {
+    position: absolute; /* Positions the close button absolutely */
+    top: 10px; /* Positions 10px from the top */
+    right: 20px; /* Positions 20px from the right */
+    font-size: 24px; /* Sets the font size */
+    cursor: pointer; /* Changes cursor to pointer on hover */
+    color: #000; /* Sets the text color */
+    background: none; /* Removes any background */
+    border: none; /* Removes any borders */
+    outline: none; /* Removes the outline */
+}
+
+.close-btn:hover {
+    color: #ff0000; /* Changes color to red on hover */
+}
+
+/* ---------- Form Group Styling for the Right Sidebar ---------- */
+.form-group {
+    display: flex; /* Enables flexbox for form layout */
+    align-items: center; /* Aligns label and input vertically */
+    margin-bottom: 10px; /* Adds margin below each form group */
+}
+
+.form-group label {
+    width: 40%; /* Sets label width */
+    text-align: left; /* Aligns label text to the left */
+    padding-right: 10px; /* Adds space between the label and input */
+}
+
+.form-group input {
+    width: 50%; /* Sets input field width */
+    padding-left: 5px; /* Adds padding inside the input box */
+}
+
+/* ---------- Figure Name Display Styling ---------- */
+#figureNameDisplay {
+    text-align: center; /* Centers the text */
+    width: 100%; /* Ensures it takes the full width of its container */
+    margin-bottom: 20px; /* Adds margin below the figure name display */
+}
+
+/* ---------- Control Buttons Styling ---------- */
+#controls {
+    display: flex; /* Enables flexbox for control buttons layout */
+    flex-direction: column; /* Aligns buttons vertically */
+    align-items: center; /* Centers buttons horizontally */
+    width: 100%; /* Sets width to full container width */
+    margin-bottom: 20px; /* Adds margin below the controls */
+}
+
+#controls button {
+    width: 80%; /* Sets button width to 80% of container */
+    margin-bottom: 10px; /* Adds margin below each button */
+}
+
+/* ---------- Figure and Floor Controls Styling ---------- */
+.figure-controls, .floor-controls {
+    margin-top: 20px; /* Adds margin at the top */
+}
+
+.figure-controls label, .floor-controls label {
+    display: block; /* Displays labels as block elements */
+    margin-bottom: 5px; /* Adds margin below each label */
+}
+
+.figure-controls input, .floor-controls input, select {
+    width: 100%; /* Sets input fields to full width */
+    padding: 8px; /* Adds padding inside input fields */
+    margin-bottom: 10px; /* Adds margin below each input */
+    box-sizing: border-box; /* Ensures padding and border are included in width/height */
+}
+
+.grid-toggle-section {
+    margin-top: auto; /* Push this section to the bottom */
+    padding-top: 10px;
+    display: flex;
+    justify-content: center;
+}
+
+#toggleGrid {
+    width: 80%; /* Make the button take full width of the sidebar */
+    padding: 10px;
+    background-color: red; 
+    color: white;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    text-align: center;
+    border-radius: 4px;
+}
+
+#toggleGrid:hover {
+    background-color: darkred; /* Slightly darker on hover */
+}
+
+
+/* ---------- Button Styling ---------- */
+button {
+    padding: 6px; /* Adds padding inside buttons */
+    background-color: red; /* Sets background color */
+    color: white; /* Sets text color */
+    border: none; /* Removes any borders */
+    border-radius: 25px; /* Rounds the button corners */
+    font-size: 16px; /* Sets font size */
+    cursor: pointer; /* Changes cursor to pointer on hover */
+    transition: background-color 0.3s ease; /* Smooth transition for background color */
+}
+
+button:hover {
+    background-color: darkred; /* Changes background color on hover */
+}
+
+/* ---------- Specific Button Styling for #figureType ---------- */
+#figureType {
+    display: block; /* Displays the button as a block element */
+    width: 100%; /* Sets button width to full container width */
+    text-align: center; /* Centers text inside the button */
+    padding: 10px; /* Adds padding inside the button */
+    background-color: red; /* Sets background color */
+    color: white; /* Sets text color */
+    border: none; /* Removes any borders */
+    border-radius: 4px; /* Rounds the button corners */
+    cursor: pointer; /* Changes cursor to pointer on hover */
+}
+
+.hidden {
+    display: none; /* Hides elements with this class */
+}
+
+#figureType:hover {
+    background-color: darkred; /* Changes background color on hover */
+}
+
+/* ---------- 3D Container Styling ---------- */
+#container3D {
+    flex: 1; /* Allows the container to grow and fill available space */
+    height: 100vh; /* Ensures it takes full height of the viewport */
+    background-color: #f0f0f0; /* Sets background color */
+    display: flex; /* Enables flexbox layout */
+    justify-content: center; /* Centers content horizontally */
+    align-items: center; /* Centers content vertically */
+    overflow: hidden; /* Hides any overflow content */
+}
