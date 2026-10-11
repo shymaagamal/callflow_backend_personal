@@ -154,3 +154,120 @@ class NCIAnalysisAPIView(BaseCallFlowAPIView):
             request_logger.info(f"[NCI] callback POSTed to {callback_url}")
         except Exception as e:
             request_logger.error(f"[NCI] callback POST to {callback_url} failed: {e}")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RCA for a list of sites -- same analysis as the RCA tool in the frontend
+# (rca_tool_V24.html), run server-side on live NPP / Viavi / Remedy data with
+# the existing KPIAnalyzer + KPIThresholds. See service/rca_site_runner.py.
+# ─────────────────────────────────────────────────────────────────────────────
+import datetime as _dt
+
+from .service.rca_site_runner import run_rca_site_analysis, VALID_BASELINE_METHODS, DEFAULT_WINDOW_HOURS
+
+
+def _parse_dt(value):
+    if not value:
+        return None
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        raise ValueError(f"Cannot parse datetime '{value}'")
+    return parsed.to_pydatetime().replace(tzinfo=None)
+
+
+def _attach_flags(result, site_flags):
+    for site, row in result.get("sites_summary", {}).items():
+        if site in site_flags:
+            row["FLAG"] = site_flags[site]
+
+
+# @method_decorator(require_api_token, name="dispatch")
+class NCIRcaSitesAPIView(BaseCallFlowAPIView):
+    """
+    POST callflow/NCI/rca/
+    body: {
+      "site_names": [{"SITE": "LJ1333", "FLAG": "..."}, ...]   # same format as /analysis/ (plain strings also accepted)
+      "start_date": "2026-10-11 10:00",   # optional, default end_date - 3h
+      "end_date":   "2026-10-11 13:00",   # optional, default now (rounded down to the hour)
+      "baseline_method": "auto",          # auto | 2h_before | yesterday  (RCA tool default: auto)
+      "callback_url": "..."               # optional, same async contract as /analysis/
+    }
+    Response: same sites_summary fields as /analysis/ (critical_cases, minor_cases,
+    trouble_tickets, FLAG) plus status, is_degraded, rca_score, rank,
+    degraded_cells, degraded_routes; and ranking / degraded_sites lists.
+    """
+
+    def post(self, request):
+        raw = request.data.get("site_names")
+        if not raw or not isinstance(raw, list):
+            return Response({"error": "site_names (non-empty list) is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        sites, site_flags = [], {}
+        for item in raw:
+            site = str(item.get("SITE", "") if isinstance(item, dict) else item).strip()
+            if not site:
+                return Response({"error": "Each site_names item must be a site name or contain SITE"},
+                                status=status.HTTP_400_BAD_REQUEST)
+            if isinstance(item, dict) and "FLAG" in item:
+                site_flags[site] = item["FLAG"]
+            if site not in sites:
+                sites.append(site)
+
+        baseline_method = request.data.get("baseline_method", "auto")
+        if baseline_method not in VALID_BASELINE_METHODS:
+            return Response({"error": f"baseline_method must be one of {VALID_BASELINE_METHODS}"},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            end = _parse_dt(request.data.get("end_date")) or _dt.datetime.now().replace(minute=0, second=0, microsecond=0)
+            start = _parse_dt(request.data.get("start_date")) or end - _dt.timedelta(hours=DEFAULT_WINDOW_HOURS)
+            if start >= end:
+                raise ValueError("start_date must be before end_date")
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        callback_url = request.data.get("callback_url")
+        who = get_request_identity(request)
+        log_path, ts = self.get_log_file("nci_rca", "now", "now")
+        request_logger = build_request_logger(log_path, ts, who)
+        request_logger.info(f"[NCI-RCA] by {who}, sites={len(sites)}, window={start}..{end}, baseline={baseline_method}")
+
+        if not callback_url:
+            try:
+                result = run_rca_site_analysis(sites, start, end, request_logger, log_path, ts, baseline_method)
+                _attach_flags(result, site_flags)
+                return Response(_json_safe(result), status=status.HTTP_200_OK)
+            except Exception:
+                request_logger.exception("[NCI-RCA] analysis failed")
+                return Response({"error": "Internal server error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        job_id = job_manager.create_job(who=who, job_type="nci_rca")
+        threading.Thread(
+            target=self._run_and_callback,
+            args=(job_id, sites, site_flags, start, end, baseline_method, request_logger, log_path, ts, callback_url),
+            daemon=True,
+        ).start()
+        return Response({"job_id": job_id, "status": "PENDING"}, status=status.HTTP_202_ACCEPTED)
+
+    def get(self, request, job_id=None):
+        if not job_id:
+            return Response({"error": "job_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        job = job_manager.get_job(job_id)
+        if job is None:
+            return Response({"error": "job not found or expired"}, status=status.HTTP_404_NOT_FOUND)
+        return Response(job)
+
+    def _run_and_callback(self, job_id, sites, site_flags, start, end, baseline_method,
+                          request_logger, log_path, ts, callback_url):
+        import requests
+        try:
+            result = run_rca_site_analysis(sites, start, end, request_logger, log_path, ts, baseline_method, job_id=job_id)
+            _attach_flags(result, site_flags)
+            safe_result = _json_safe(result)
+            job_manager.update_job(job_id, status="DONE", step="completed", progress_percent=100, result=safe_result)
+        except Exception as e:
+            request_logger.exception(f"[NCI-RCA JOB FAILED] {job_id}: {e}")
+            job_manager.update_job(job_id, status="FAILED", step="failed", error=str(e))
+            safe_result = {"job_id": job_id, "status": "FAILED", "error": str(e)}
+        try:
+            requests.post(callback_url, json=safe_result, timeout=10)
+        except Exception as e:
+            request_logger.error(f"[NCI-RCA] callback POST to {callback_url} failed: {e}")

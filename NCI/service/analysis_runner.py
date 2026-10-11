@@ -132,14 +132,14 @@ def _normalize_remedy_output(remedy_output: dict, sites: list) -> dict:
 
 # -- Per-source fetchers ----------------------------------------------------
 
-def fetch_npp_one_site(site, window, log_path, ts):
-    cache_key = make_npp_cache_key([site], window["start"], window["end"], "hourly", entity_type="site")
+def fetch_npp_one_site(site, window, log_path, ts, resolution="hourly"):
+    cache_key = make_npp_cache_key([site], window["start"], window["end"], resolution, entity_type="site")
     cached = cache_get(cache_key)
     if cached is not None:
         return cached
 
     with _NPP_SEMAPHORE:
-        df = nppIntegration([site], window["start"], window["end"], log_path, ts, "hourly", entity_type="site")
+        df = nppIntegration([site], window["start"], window["end"], log_path, ts, resolution, entity_type="site")
 
     if not df.empty:
         cache_set(cache_key, df, ttl_seconds=NPP_CACHE_TTL)
