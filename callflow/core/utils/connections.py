@@ -17,7 +17,8 @@ def smartcareConnection(logs_file):
   connection_properties = {
       "user": settings.SMARTCARE_DB_USER,
       "password": settings.SMARTCARE_DB_PASSWORD,
-      "timeout": "1800000", 
+      "socketTimeout": "1800000",
+      "connectTimeout": "60000",
       
   }
 

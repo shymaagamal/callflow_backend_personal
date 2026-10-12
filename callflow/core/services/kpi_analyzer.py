@@ -146,34 +146,43 @@ class KPIAnalyzer:
         config_list: List[Dict[str, Any]],
         kpi_name: str = ""
     ) -> Tuple[bool, List[str], Dict[str, Any]]:
-        """Check absolute thresholds + deviation — return exceeded + details + insight"""
-        exceeded = False
-        details = []
-        insight = self.get_degradation_insight(current, previous, kpi_name)
-        bad_direction = "increase" if any(
-                word in kpi_name.upper()
-                for word in ['DROP', 'REJECT', 'LOSS', 'LATENCY', 'DELAY', 'CFR', 'CDR', 'FAIL', 'UNAVAIL']
-            ) else "decrease"
-        actual_direction = insight.get("direction", "stable")
-        for cond in config_list:
-            # Absolute threshold
-            if cond['type'] == 'threshold' and cond.get('value') is not None:
-                thres_value = cond['value']
-                op = cond['operator']
-                if (op == '>' and current > thres_value) or (op == '<' and current < thres_value):
-                    if actual_direction != ("decrease" if bad_direction == "increase" else "increase"):
-                        exceeded = True
-                        details.append(f"Threshold {op} {thres_value} exceeded: {current:.2f}")
+        """Determine whether a KPI is abnormal using the SAME rule as the RCA HTML
+        tool (rca_threshold.check_threshold — the single source of truth).
 
-            # Deviation
-            elif cond['type'] == 'deviation' and cond.get('value') is not None:
-                dev_thresh_value = cond['value']
-                op = cond['operator']
-                dev_info = self.calculate_deviation_rate(current, previous, dev_thresh_value)
-                if dev_info['exceeds']:
-                    exceeded = True
-                    details.append(f"Deviation exceeded: {dev_info['percentage']}% {dev_info['direction']}")
+        Absolute + directional-deviation + AND/OR + sensitivity factor + count/
+        improving/zero guards + legacy useDeviation are all handled by the port.
+        The severity label / deviation percentage / message still come from the
+        existing get_degradation_insight (the backend config has no per-rule
+        severity), and are enriched with the RCA threshold context.
+        """
+        from ..orchestration.analyzers.rca_threshold import (
+            check_threshold, rule_from_config, DEFAULT_SENS_FACTOR,
+        )
 
+        insight = dict(self.get_degradation_insight(current, previous, kpi_name))
+
+        # Match RCA: a value with no meaningful baseline uses None (not 0.0), and
+        # RCA skips zero-complaint rows unless there was a positive baseline.
+        baseline = previous if (previous is not None and float(previous) != 0) else None
+        if float(current) < 0.001 and not (baseline is not None and float(baseline) > 0.5):
+            insight["reason"] = None
+            return False, [], insight
+
+        rule = rule_from_config(config_list)
+        result = check_threshold(current, baseline, rule, sens_factor=DEFAULT_SENS_FACTOR)
+
+        exceeded = bool(result.get("is_anomaly"))
+        details: List[str] = []
+        if exceeded:
+            details.append(result.get("description") or f"{result.get('reason', 'threshold')} breach")
+
+        # Expose the RCA context so the Summary/details popup can reproduce it.
+        insight["reason"] = result.get("reason")
+        insight["threshold_operator"] = rule.get("operator")
+        insight["threshold_value"] = rule.get("value")
+        insight["dev_direction"] = rule.get("devDev")
+        insight["dev_pct_limit"] = rule.get("devPct")
+        insight["baseline"] = baseline
         return exceeded, details, insight
     # ==================== STEP 2:Calculate Deviation Rate ====================
     def calculate_deviation_rate(self, curr: float, prev: float, dev_thresh: Optional[float]
@@ -282,11 +291,15 @@ class KPIAnalyzer:
 
         site_mapping = load_site_mapping() if entity_type == "cell" else {}
         affected_cells_details: Dict[str, Any] = {}
-        for entity in npp_df[entity_col].unique():
+        # One groupby pass (sort=False preserves first-appearance order, i.e. the
+        # same order as the old npp_df[entity_col].unique()) instead of scanning
+        # the whole frame with a boolean mask once per unique entity. Same rows
+        # per entity, same values -> identical result, O(rows) not O(cells*rows).
+        for entity, cell_data in npp_df.groupby(entity_col, sort=False):
             site_name = get_site_name(entity, site_mapping) if entity_type == "cell" else entity
-            cell_data = npp_df[npp_df[entity_col] == entity]
-            curr_data = cell_data[cell_data['DATETIME_ID'].between(current_start, current_end)]
-            prev_data = cell_data[cell_data['DATETIME_ID'].between(prev_start, prev_end)]
+            _dt = cell_data['DATETIME_ID']
+            curr_data = cell_data[_dt.between(current_start, current_end)]
+            prev_data = cell_data[_dt.between(prev_start, prev_end)]
 
             if curr_data.empty:
                 continue
@@ -351,8 +364,10 @@ class KPIAnalyzer:
             logger.warning("No Viavi thresholds available")
             return {"affected_sites_count": 0, "affected_sites_list": [], "affected_sites_details": {}}
         affected_sites_details: Dict[str, Any] = {}
-        for flwid in viavi_df['FLWID'].unique():
-            site_data = viavi_df[viavi_df['FLWID'] == flwid]
+        # One groupby pass (sort=False preserves the old FLWID.unique() order)
+        # instead of a full-frame boolean mask per unique FLWID. Identical rows
+        # and values per site -> identical result, O(rows) not O(sites*rows).
+        for flwid, site_data in viavi_df.groupby('FLWID', sort=False):
             curr_data = site_data[site_data['PERIOD_TIMESTAMP'].between(current_start, current_end)]
             prev_data = site_data[site_data['PERIOD_TIMESTAMP'].between(prev_start, prev_end)]
 

@@ -94,7 +94,7 @@ def _to_python_string(value):
     return value
 
 
-def run_single_query(query_name: str, query_template: str, params: dict, log_path: str, request_logger, max_retries: int = 5):
+def run_single_query(query_name: str, query_template: str, params: dict, log_path: str, request_logger, max_retries: int = 1):
     """
     Runs ONE query against a connection borrowed from the pool, returns it
     when done (or invalidates it if the connection itself errored), and
@@ -143,12 +143,13 @@ def run_single_query(query_name: str, query_template: str, params: dict, log_pat
 
             cursor = conn.cursor()
             query = query_template.format(**params)
-
+            print(f"[{query_name}] {query} -> {attempt_start:.2f}s")
             request_logger.info(
                 f"\n===== FINAL SQL ({query_name}) =====\n"
                 f"{query}\n"
                 f"====================================="
             )
+            
             cursor.execute(query)
             raw_results = cursor.fetchall()
 
@@ -268,38 +269,57 @@ def execute_smartcare_queries(
     log_path: str = None,
     request_logger=None,
     max_workers: int = DEFAULT_MAX_WORKERS,
+    runner=None,
     ) -> pd.DataFrame:
 
     """
-    Runs every query in queries_dict SEQUENTIALLY -- one at a time, each
-    borrowing its own connection slot from the pool, running to completion,
-    and releasing it before the next query starts.
-    """
-    request_logger = request_logger or _fallback_logger(log_path)
-    pool = get_smartcare_pool()
-    final_data = []
+    Runs every query in ``queries_dict`` CONCURRENTLY -- each query opens its own
+    isolated connection (see run_single_query, "Separated Tunnel for each Query"),
+    so they are independent and safe to overlap. Previously they ran one-at-a-time,
+    which made the Smartcare stage take the SUM of every query (45-120s each) and
+    dominate the whole pipeline; now it takes roughly the MAX.
 
-    overall_start = time.perf_counter()
-    request_logger.info(
-        f"[SMARTCARE] running {len(queries_dict)} queries sequentially"
+    Ordering is preserved (results are gathered back in ``queries_dict`` order) so
+    the concatenated DataFrame is byte-identical to the old sequential output. The
+    first query runs on the calling thread to start the JVM once before fanning the
+    rest out (concurrent cold JVM starts would race on jpype.startJVM()).
+
+    Public signature is unchanged except for an optional injectable ``runner``
+    (used only by tests); production callers are unaffected.
+    """
+    from ._parallel import run_in_order
+
+    request_logger = request_logger or _fallback_logger(log_path)
+    run_one = runner or (
+        lambda item: run_single_query(item[0], item[1], params, log_path, request_logger)
     )
 
-    print("========== LOG PATH ==========")
-    print(log_path)
-    print("==============================")
+    items = list(queries_dict.items())
+    if not items:
+        return pd.DataFrame()
 
-    for name, template in queries_dict.items():
-        try:
-            df = run_single_query(name, template, params, log_path, request_logger)
-            if not df.empty:
-                final_data.append(df)
-        except Exception:
-            request_logger.exception(f"[SMARTCARE] unexpected error running {name}")
+    workers = max(1, min(max_workers, len(items)))
+    overall_start = time.perf_counter()
+    request_logger.info(
+        f"[SMARTCARE] running {len(items)} queries in parallel "
+        f"(1 warm-up starts the JVM, then up to {workers} concurrent)"
+    )
+
+    def _on_error(item, exc):
+        request_logger.exception(f"[SMARTCARE] unexpected error running {item[0]}: {exc}")
+
+    ordered = run_in_order(items, run_one, max_workers=workers,
+                           first_sync=True, on_error=_on_error)
+
+    # Gather non-empty frames in the ORIGINAL query order (identical to the old
+    # sequential concatenation).
+    final_data = [df for (_item, df) in ordered
+                  if df is not None and not getattr(df, "empty", True)]
 
     total_elapsed = time.perf_counter() - overall_start
     request_logger.info(
-        f"[SMARTCARE] {len(final_data)}/{len(queries_dict)} queries returned data "
-        f"in {total_elapsed:.2f}s total (sequential)"
+        f"[SMARTCARE] {len(final_data)}/{len(items)} queries returned data "
+        f"in {total_elapsed:.2f}s wall time (parallel; was the SUM sequentially)"
     )
 
     if not final_data:
