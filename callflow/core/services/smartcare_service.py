@@ -290,7 +290,7 @@ def process_smartcare_data(nodes_data: pd.DataFrame, complain_type: str, ts: str
     else:
         # ==================== DATA PROCESSING (Existing) ====================
         
-        data, site_counts, cell_counts, suspected_sgw, suspected_cells_raw = smartcareOutput_Aggregated(
+        data, site_counts, cell_counts, suspected_sgw  = smartcareOutput_Aggregated(
             nodes_data, log_path, complain_type, ts
         )
         # logger.info(f"cellsName from process_smartcare_data are {data['cell_name']} ")
@@ -415,73 +415,63 @@ def calculate_top_remedy_with_subs(metrics: dict, remedy_output: dict):
         )[:10]
     )
     return top_10_remedy_output
-def smartcareOutput_Aggregated(data, logs_file,complain_type,timestamp):
-  suspected_cells = []
-  suspected_sites = []
-  suspected_sgw = []
-  suspected_cells_raw = []
-  cell_counts = 0
-  site_counts = 0
-
-  try:
-    if data is None or data.empty:
-            return data, site_counts, cell_counts, suspected_sgw
-
-    required_cols = ['cell_name', 'SGW_SGSN_NAME']
-    for col in required_cols:
-            if col not in data.columns:
-                raise KeyError(f"Missing required column: {col}")
-    
-    data = data.dropna(subset=['cell_name'])
-    data['cell_name'] = data['cell_name'].astype(str).str.strip()
-    data['SGW_SGSN_NAME'] = data['SGW_SGSN_NAME'].astype(str).str.strip()
-    if data.empty:
-            return data, site_counts, cell_counts, suspected_sgw
-
-    
-      # __________ CELL COUNTS ___________ 
-    cell_counts = data['cell_name'].value_counts().to_dict()
-    suspected_cells_raw = data['cell_name'].unique().tolist()
-    logger.info(f"cellsName from smartcare Aggregated are {data['cell_name']} ")
-    
-   
-
-    suspected_cells = tuple(suspected_cells_raw)
-      # -------- SITE LOGIC --------
-        # Example cell_name: L26_LU3909_11
-        # We want: LU3909 → LU3909 → LU3909 (normalized)
-   
-    data =process_sitename(data,'cell_name',logs_file)
-      # ________ Site COUNTS ______________
-    if 'modified_site_name' not in data.columns:
-        with open(logs_file, 'a') as logs_f:
-            logs_f.write('modified_site_name column missing\n')
-        site_counts = {}
-    else:
-        site_counts = data['modified_site_name'].value_counts().to_dict()
-
-      
-
-    try:
-         data.rename(columns={'SGW_SGSN_NAME':'SGW_PGW_NAME'}, inplace=True)
-    except Exception as e:
-        with open(logs_file, 'a') as logs_f:
-          logs_f.write(f'SGW rename error: {str(e)}\n')
-        
-      
-    data['SGW_PGW_NAME'] = (
-            data['SGW_PGW_NAME']
-            .str.replace('_vSGW-vPGW_', '', regex=False)
-            .str.replace('_SGW-PGW_', '', regex=False)
-        )
-    suspected_sgw = data['SGW_PGW_NAME'].value_counts().to_dict()
-
-   
-  except Exception as e:
-    with open(logs_file, 'a') as logs_f:
-      logs_f.write('Smartcare Output error : ' + str(e) + '\n')
-
-  return data, site_counts, cell_counts, suspected_sgw,suspected_cells_raw
+def smartcareOutput_Aggregated(data, logs_file, complain_type, timestamp): 
+    suspected_cells = [] 
+    suspected_sites = [] 
+    suspected_sgw = {} 
+    suspected_cells_raw = [] 
+    cell_counts = {} 
+    site_counts = {} 
+    try: 
+        if data is None or data.empty: 
+            return data, site_counts, cell_counts, suspected_sgw 
+        # Only SGW is required now; cell_name is optional 
+        if 'SGW_SGSN_NAME' not in data.columns: 
+            raise KeyError("Missing required column: SGW_SGSN_NAME") 
+        data = data.copy() 
+        data['SGW_SGSN_NAME'] = data['SGW_SGSN_NAME'].astype(str).str.strip() 
+        # ---------- Optional cell_name handling ---------- 
+        has_cell_name = 'cell_name' in data.columns 
+        if has_cell_name: 
+            data = data.dropna(subset=['cell_name']) 
+            data['cell_name'] = data['cell_name'].astype(str).str.strip() 
+            # Drop rows where cell_name became empty string after strip 
+            data = data[data['cell_name'] != ''] 
+            if not data.empty: 
+                cell_counts = data['cell_name'].value_counts().to_dict() 
+                suspected_cells_raw = data['cell_name'].unique().tolist() 
+                # suspected_cells = tuple(suspected_cells_raw) 
+                # Optional site extraction (only if cell_name exists) 
+                try: 
+                    data = process_sitename(data, 'cell_name', logs_file) 
+                    if 'modified_site_name' in data.columns: 
+                        site_counts = data['modified_site_name'].value_counts().to_dict() 
+                    else: 
+                        with open(logs_file, 'a') as logs_f: 
+                            logs_f.write('modified_site_name column missing after process_sitename\n') 
+                except Exception as e: 
+                    with open(logs_file, 'a') as logs_f: 
+                        logs_f.write(f'site processing error: {str(e)}\n') 
+        if data.empty: 
+            return data, site_counts, cell_counts, suspected_sgw 
+        # ---------- SGW / PGW processing (always) ---------- 
+        try: 
+            data.rename(columns={'SGW_SGSN_NAME': 'SGW_PGW_NAME'}, inplace=True) 
+        except Exception as e: 
+            with open(logs_file, 'a') as logs_f: 
+                logs_f.write(f'SGW rename error: {str(e)}\n') 
+        if 'SGW_PGW_NAME' in data.columns: 
+            data['SGW_PGW_NAME'] = ( 
+                data['SGW_PGW_NAME'] 
+                .str.replace('_vSGW-vPGW_', '', regex=False) 
+                .str.replace('_SGW-PGW_', '', regex=False) 
+            ) 
+            suspected_sgw = data['SGW_PGW_NAME'].value_counts().to_dict() 
+    except Exception as e: 
+        with open(logs_file, 'a') as logs_f: 
+            logs_f.write('Smartcare Output error : ' + str(e) + '\n') 
+    # return data, site_counts, cell_counts, suspected_sgw, suspected_cells_raw 
+    return data, site_counts, cell_counts, suspected_sgw 
 
 def packet_nodes( nodesdata, ts) -> dict:
     nodesdata = nodesdata.copy()
@@ -512,63 +502,95 @@ def packet_nodes( nodesdata, ts) -> dict:
     return result
         
 
-def calculate_subs_per_cell_site_handset( nodesdata, ts: str)-> dict:
-    """
-    Load master sheet, filter rows where SITE_ID is in the given list,
-    calculate affected hubs, TACs, LACs, and subscribers per hub.
-    """
-    try:
-        print('data Columns')
-        print(nodesdata.columns)
-        # subs_per_site = nodesdata.groupby('modified_site_name')['MSISDN'].nunique().to_dict()
-        
-        nodesdata = nodesdata.copy()
-        if 'modified_site_name' not in nodesdata.columns:
-            nodesdata = process_sitename(nodesdata,'cell_name',settings.OUTPUT_DIR / "logs" / "metrics.log")
-        nodesdata.loc[:, 'modified_site_name'] = nodesdata['modified_site_name'].replace('', None)
-        
-        subs_per_site = nodesdata.groupby('modified_site_name')['MSISDN'].nunique().dropna().to_dict()
-        subs_per_site_list = [
-            {
-                "label": site,
-                "value": int(count)
-            }
-            for site, count in subs_per_site.items() if pd.notna(site)
-        ]
-        print('----subs_per_site_list')
-        print(subs_per_site_list)
-        subs_per_cell = nodesdata.groupby('cell_name')['MSISDN'].nunique().dropna().to_dict()
-        subs_per_cell = [
-            {
-                "label": cell,
-                "value": int(count)
-            }
-            for cell, count in subs_per_cell.items() if pd.notna(cell)
-        ]
-        subs_per_handset_type = (
-            nodesdata.groupby('IMEI_Brand')['MSISDN'].nunique().dropna().to_dict()
-        )
-        subs_per_handset_type = [
-            {
-                "label": brand,
-                "value": int(count)
-            }
-            for brand, count in subs_per_handset_type.items() if pd.notna(brand)
-        ]
-
-        
-        logger.info(f"Basic Smartcare metrics calculated: {len(subs_per_site_list)} sites, "
-                    f"{len(subs_per_cell)} cells, {len(subs_per_handset_type)} handset types")
-
-        return {
-            'subs_per_cell':subs_per_cell,
-            'subs_per_site':subs_per_site_list,
-            'subs_per_handset_type':subs_per_handset_type,
-        }
-
-    except Exception as e:
-        logger.exception("Error calculating subs per site/cell/handsettype")
-        return {'subs_per_cell': 0, 'subs_per_site': 0, 'subs_per_handset_type': 0} 
+def calculate_subs_per_cell_site_handset(nodesdata, ts: str) -> dict: 
+    """ 
+    Calculate subscribers per site / cell / handset type. 
+    cell_name is optional — not every nodesdata payload contains it. 
+    """ 
+    try: 
+        logger.info('data Columns') 
+        logger.info(nodesdata.columns) 
+        if nodesdata is None or nodesdata.empty: 
+            return { 
+                'subs_per_cell': [], 
+                'subs_per_site': [], 
+                'subs_per_handset_type': [], 
+            } 
+        nodesdata = nodesdata.copy() 
+        # ---------- Optional cell_name / site handling ---------- 
+        subs_per_cell = [] 
+        subs_per_site_list = [] 
+        has_cell_name = 'cell_name' in nodesdata.columns 
+        if has_cell_name: 
+            # Only derive site name when we have cell_name 
+            if 'modified_site_name' not in nodesdata.columns: 
+                try: 
+                    nodesdata = process_sitename( 
+                        nodesdata, 
+                        'cell_name', 
+                        settings.OUTPUT_DIR / "logs" / "metrics.log" 
+                    ) 
+                except Exception as e: 
+                    logger.warning(f"process_sitename failed (cell_name present but processing failed): {e}") 
+            if 'modified_site_name' in nodesdata.columns: 
+                nodesdata.loc[:, 'modified_site_name'] = nodesdata['modified_site_name'].replace('', None) 
+                subs_per_site = ( 
+                    nodesdata.groupby('modified_site_name')['MSISDN'] 
+                    .nunique() 
+                    .dropna() 
+                    .to_dict() 
+                ) 
+                subs_per_site_list = [ 
+                    {"label": site, "value": int(count)} 
+                    for site, count in subs_per_site.items() 
+                    if pd.notna(site) 
+                ] 
+            # Cell-level counts (only when column exists) 
+            subs_per_cell_raw = ( 
+                nodesdata.groupby('cell_name')['MSISDN'] 
+                .nunique() 
+                .dropna() 
+                .to_dict() 
+            ) 
+            subs_per_cell = [ 
+                {"label": cell, "value": int(count)} 
+                for cell, count in subs_per_cell_raw.items() 
+                if pd.notna(cell) and str(cell).strip() != '' 
+            ] 
+        else: 
+            logger.info("cell_name column missing — skipping cell/site metrics") 
+        # ---------- Handset type (always attempted) ---------- 
+        subs_per_handset_type = [] 
+        if 'IMEI_Brand' in nodesdata.columns and 'MSISDN' in nodesdata.columns: 
+            handset_counts = ( 
+                nodesdata.groupby('IMEI_Brand')['MSISDN'] 
+                .nunique() 
+                .dropna() 
+                .to_dict() 
+            ) 
+            subs_per_handset_type = [ 
+                {"label": brand, "value": int(count)} 
+                for brand, count in handset_counts.items() 
+                if pd.notna(brand) 
+            ] 
+        logger.info( 
+            f"Basic Smartcare metrics calculated: " 
+            f"{len(subs_per_site_list)} sites, " 
+            f"{len(subs_per_cell)} cells, " 
+            f"{len(subs_per_handset_type)} handset types" 
+        ) 
+        return { 
+            'subs_per_cell': subs_per_cell, 
+            'subs_per_site': subs_per_site_list, 
+            'subs_per_handset_type': subs_per_handset_type, 
+        } 
+    except Exception as e: 
+        logger.exception("Error calculating subs per site/cell/handsettype") 
+        return { 
+            'subs_per_cell': [], 
+            'subs_per_site': [], 
+            'subs_per_handset_type': [], 
+        }  
 
 def voice_specific_aggregation(nodesdata):
     pass

@@ -299,6 +299,7 @@ def run_callflow_analysis(
     """
     sources = sources or default_sources()
     plan = build_callflow_plan(sources, timeouts)
+    logger_override.info(f"[orchestrator] running CallFlow plan with {len(plan)} tasks and plan is {plan}")
     result: PlanResult = run_plan(
         plan, context=context, max_workers=max_workers,
         progress_cb=progress_cb, on_start=on_start,

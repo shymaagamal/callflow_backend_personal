@@ -1,3 +1,5 @@
+import os
+
 import requests
 import pandas as pd
 import json
@@ -6,7 +8,7 @@ from io import StringIO
 from pathlib import Path
 from django.conf import settings
 from typing import Dict, Optional
-
+import time
 from ..utils.data_utils import process_sitename
 from ..utils.file_cache import cache_get, cache_set, make_npp_cache_key
 
@@ -23,6 +25,12 @@ def nppIntegration(
     entity_type: str = "cell",
 ):
     print(f"nppIntegration called - resolution: {resolution}, entity_type: {entity_type}")
+    print("=== PROXY ENV ===") 
+    print("http_proxy:", os.environ.get("http_proxy") or os.environ.get("HTTP_PROXY"))
+    print("https_proxy:", os.environ.get("https_proxy") or os.environ.get("HTTPS_PROXY")) 
+    print("no_proxy:", os.environ.get("no_proxy") or os.environ.get("NO_PROXY")) 
+
+ 
     if entity_type not in ("cell", "site"):
         raise ValueError(f"Invalid entity_type: {entity_type}")
     if not suspected_entities_raw:
@@ -85,7 +93,13 @@ def nppIntegration(
                 data = {"cellName": entity, "hour": hour}
             try:
                 print(f"NPP request → {entity_type}={entity}, hour={hour}, url={url}")
-                response = requests.post(url, json=data, headers=headers, timeout=10)
+                start = time.time()
+                proxis = {
+                    "http": None,
+                    "https": None
+                }
+                response = requests.post(url, json=data, headers=headers, timeout= (10,60), proxies=proxis)
+                print(f"NPP request completed in {time.time() - start:.2f}s with status {response.status_code}")
                 response.raise_for_status()
                 df = pd.read_csv(StringIO(response.text))
 
@@ -117,14 +131,14 @@ def nppIntegration(
         occ_df = occ_df.sort_values(by="DATETIME_ID")
         if "SITE_PHYSICAL" in occ_df.columns and "sitePhysical" not in occ_df.columns:
             occ_df = occ_df.rename(columns={"SITE_PHYSICAL": "sitePhysical"})
-        group_cols = ["DATETIME_ID", "Cell", "Vendor"]
+        group_cols = ["DATETIME_ID", "cell", "Vendor"]
         if "site" in occ_df.columns:
             group_cols.append("site")
         elif "sitePhysical" in occ_df.columns:
             group_cols.append("sitePhysical")
         occ_df = occ_df.groupby(group_cols).sum(numeric_only=True).reset_index()
     else:
-        print(f"No NPP data returned. Failed requests: {failed}/{attempts}")
+        logger.info(f"No NPP data returned. Failed requests: {failed}/{attempts}")
 
     if attempts and failed == attempts:
         raise RuntimeError(f"NPP integration failed for all {attempts} requests. Last error: {error_msg}")

@@ -386,6 +386,7 @@ class AnalysisOrchestratorAPIView(JobBackedAPIView):
             rf.set_data_status(base, request_id, system, rf.DATA_PROCESSING)
             try:
                 data = orig_smartcare(ctx)
+                
                 if holder is not None:
                     holder["result"] = data
                 rf.set_data_status(base, request_id, system, rf.DATA_COMPLETED)
@@ -579,6 +580,7 @@ class AnalysisOrchestratorAPIView(JobBackedAPIView):
         metrics = data.get("metrics", {}) or {}
         packet = data.get("packetNodes", {}) or {}
         handset = metrics.get("subs_per_handset_type")
+        print("smartcare metrics=%s packet=%s handset=%s inside _dash_smartcare", metrics, packet, handset)
         return {
             "handsetTypes": len(handset) if isinstance(handset, (list, dict)) else None,
             "packetCoreNodes": len(packet) if isinstance(packet, dict) else None,

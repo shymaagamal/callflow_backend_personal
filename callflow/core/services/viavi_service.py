@@ -47,15 +47,15 @@ def viaviQueries(conn, start_date, end_date, suspected_sites, logs_file, timesta
   try:
         # Execute query
     viavi_output = pd.read_sql_query(query, conn)  
-    print(f"viavi_output")
-    print(viavi_output)
+    logger.info(f"viavi_output")
+    logger.info(viavi_output)
   # Ensure expected columns (safety)
     expected_cols = ['PERIOD_TIMESTAMP', 'FLWID', 'AVG_FD_MS', 'AVG_FDV_MS', 'ONEW_FLR_AZ', 'ONEW_FLR_ZA']
     missing = [c for c in expected_cols if c not in viavi_output.columns]
     if missing:
         raise ValueError(f"Missing expected columns in Viavi result: {missing}")
 
-    print(f"Viavi query returned {len(viavi_output)} rows")
+    logger.info(f"Viavi query returned {len(viavi_output)} rows")
     # ── Persist to cache ──────────────────────────────────────────────────
     if not viavi_output.empty:
         cache_set(cache_key, viavi_output, ttl_seconds=VIAVI_CACHE_TTL)
@@ -66,7 +66,7 @@ def viaviQueries(conn, start_date, end_date, suspected_sites, logs_file, timesta
   except Exception as e:
       error_msg = f"Viavi query failed: {str(e)}"
       logger.error(error_msg, exc_info=True)
-      print(f"error msg",error_msg)
+      logger.info(f"error msg",error_msg)
       with open(logs_file, 'a') as f:
           f.write(error_msg + '\n')
           f.write(f"Query was:\n{query}\n")
