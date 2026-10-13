@@ -121,8 +121,8 @@ export interface SubmitResponse {
 @Injectable({ providedIn: 'root' })
 export class OrchestrationService {
   // Matches ApiService's base host.
-  // private apiUrl = 'http://127.0.0.1:8057';
-  private apiUrl = 'https://10.30.30.177';
+  private apiUrl = 'http://127.0.0.1:8057';
+  // private apiUrl = 'https://10.30.30.177';
 
   private base = `${this.apiUrl}/callflow/api`;
   /** NCI portal jobs (Summary opened from an NCI portal_url). Same job contract. */

@@ -252,6 +252,7 @@ export class SummaryComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit() {
+    console.log("summary component loaded")
     const nciSites = this.readNciContext();
     if (nciSites !== null) {
       this.enterNciMode(nciSites);

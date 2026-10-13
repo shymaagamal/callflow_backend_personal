@@ -23,8 +23,8 @@ import { JobPollingService, JobStatus, JobTrigger } from './job-polling.service'
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
-  private apiUrl = 'https://10.30.30.177';
-  // private apiUrl = 'http://127.0.0.1:8050';
+  // private apiUrl = 'https://10.30.30.177';
+  private apiUrl = 'http://127.0.0.1:8057';
   private base = `${this.apiUrl}/callflow/api`;
 
   constructor(private http: HttpClient, private jobs: JobPollingService) {}

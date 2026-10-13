@@ -1,0 +1,502 @@
+<div class="summary-page">
+
+  <!-- Header with Logo and Navigation Tabs -->
+  <header class="header">
+    <div class="container-fluid">
+      <div class="row align-items-center">
+        <!-- Logo -->
+        <div class="col-auto ms-2">
+          <div class="logo-circle">
+            <img src="assets/voda-icon.png" alt="icon Image">
+          </div>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <div class="col">
+          <button class="nav-tab" [class.active]="activeTab === 'summary'" (click)="setActiveTab('summary')">
+            Summary
+          </button>
+          <button class="nav-tab" [class.active]="activeTab === 'root-causes'" [class.disabled]="!isDataLoaded()"
+            [attr.title]="nciMode ? 'Not Available' : null" (click)="onRootCauseClick()">
+            Root Causes
+          </button>
+          <button class="nav-tab" [class.active]="activeTab === 'correlations'" (click)="setActiveTab('correlations')">
+            Correlations
+          </button>
+        </div>
+        
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content Area -->
+  <main *ngIf="activeTab != 'root-causes'" class="main-content">
+    <div class="container-fluid ms-5">
+      <!-- SUMMARY TAB CONTENT -->
+      <div *ngIf="activeTab === 'summary'">
+
+        <!-- Data-availability analysis progress (real backend status, not faked) -->
+        <div class="analysis-progress card p-3 mb-4" *ngIf="request_id || nciMode">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="mb-0 fs-5">
+              <span *ngIf="processing">Analysis in progress…</span>
+              <span *ngIf="!processing && overallStatus === 'COMPLETED'">✓ Analysis complete</span>
+              <span *ngIf="!processing && overallStatus === 'PARTIAL_SUCCESS'">⚠ Analysis complete (partial results)</span>
+              <span *ngIf="!processing && overallStatus === 'FAILED'">✗ Analysis failed</span>
+            </h6>
+          </div>
+
+          <div class="system-status-grid">
+            <div class="system-status-row d-flex align-items-center gap-2 mb-1" *ngFor="let row of systemRows">
+              <span [ngSwitch]="row.status" style="width:1.5rem; display:inline-block; text-align:center">
+                <span *ngSwitchCase="'COMPLETED'" style="color:#16a34a">✓</span>
+                <span *ngSwitchCase="'PROCESSING'">⏳</span>
+                <span *ngSwitchCase="'FAILED'" style="color:#dc2626">✗</span>
+                <span *ngSwitchCase="'PARTIAL'" style="color:#f59e0b">⚠</span>
+                <span *ngSwitchCase="'NOT_AVAILABLE'" style="color:#9ca3af">⊘</span>
+                <span *ngSwitchDefault style="color:#9ca3af">○</span>
+              </span>
+              <span class="fw-semibold" style="min-width:220px">{{ row.label }}</span>
+              <span class="text-muted">{{ statusText(row.status) }}</span>
+              <span class="text-danger ms-2" *ngIf="systemMessage(row)">{{ systemMessage(row) }}</span>
+            </div>
+          </div>
+
+          <!-- RCA readiness (files are a separate lifecycle from data) -->
+          <div class="rca-readiness mt-3 d-flex align-items-center gap-3 flex-wrap">
+            <span class="fw-semibold">RCA:</span>
+            <span [ngSwitch]="rcaReadiness">
+              <span *ngSwitchCase="'READY'" style="color:#16a34a">✓ {{ rcaMessage }}</span>
+              <span *ngSwitchCase="'PARTIAL'" style="color:#f59e0b">⚠ {{ rcaMessage }}</span>
+              <span *ngSwitchCase="'GENERATING'">⏳ {{ rcaMessage }}</span>
+              <span *ngSwitchCase="'FAILED'" style="color:#dc2626">✗ {{ rcaMessage }}</span>
+              <span *ngSwitchDefault class="text-muted">{{ rcaMessage }}</span>
+            </span>
+            <button class="btn btn-danger btn-sm" [disabled]="!rcaReady" (click)="onRootCauseClick()">
+              Open RCA
+            </button>
+          </div>
+        </div>
+
+        <!-- Top Statistics Cards Row -->
+        <div class="row mb-4 ">
+          <div class="stats-row">
+            <!-- Total Complaints -->
+            <div class="col-md-2">
+              <app-stat-card [title]="'Total Complaints'" [value]="cardValue('totalComplaints')"
+                [loading]="cardLoading('totalComplaints')" [unavailable]="cardUnavailable('totalComplaints')"
+                [icon]="'pi-exclamation-triangle'" [iconColor]="'#9C2AA0'" width="260px">
+              </app-stat-card>
+            </div>
+
+
+            <!-- Cells Affected -->
+            <div class="col-md-2">
+              <app-stat-card [title]="'Cells Affected'" [value]="cellsAffectedText"
+                [loading]="cardLoading('cellsAffected')" [unavailable]="cardUnavailable('cellsAffected')"
+                [icon]="'pi-sitemap'" [iconColor]="'#84cc16'" [clickable]="true" width="260px"
+                (onMoreInfoClick)="openModal('cells')">
+              </app-stat-card>
+            </div>
+
+            <!-- Cities Spanned -->
+            <div class="col-md-2">
+              <app-stat-card [title]="'Cities Spanned'" [value]="cardValue('citiesSpanned')"
+                [loading]="cardLoading('citiesSpanned')" [unavailable]="cardUnavailable('citiesSpanned')"
+                [icon]="'pi-arrow-down-left'"
+                [iconColor]="'#0891b2'" [clickable]="true" width="260px"
+                (onMoreInfoClick)="openModal('cities')">
+              </app-stat-card>
+            </div>
+
+            <!-- Handset Types -->
+            <div class="col-md-2">
+              <app-stat-card [title]="'Handset Types'" [value]="cardValue('handsetTypes')"
+                [loading]="cardLoading('handsetTypes')" [unavailable]="cardUnavailable('handsetTypes')"
+                [icon]="'pi-mobile'"
+                [iconColor]="'#dc2626'" [clickable]="true" width="260px"
+                (onMoreInfoClick)="openModal('handsets')">
+              </app-stat-card>
+            </div>
+
+            <!-- Remedy Tickets  -->
+            <div class="col-md-2">
+              <app-stat-card [title]="'Remedy Tickets'" [value]="cardValue('remedyAffected')"
+                [loading]="cardLoading('remedyAffected')" [unavailable]="cardUnavailable('remedyAffected')"
+                [icon]="'pi-users'"
+                [iconColor]="'#f59e0b'" width="260px" [RemedyTooltip]="true" [clickable]="true"
+                (onMoreInfoClick)="openModal('remedy')">
+              </app-stat-card>
+            </div>
+          </div>
+        </div>
+
+        <!-- Secondary Statistics Row -->
+        <div class="row g-3 mb-4">
+          <div class="col-md-3">
+            <div class="secondary-stat clickable-card">
+
+              <!-- first row -->
+              <div class="stat-row d-flex align-items-center gap-5">
+                <span class="stat-label">Hubs Affected</span>
+                <span class="stat-value" [ngSwitch]="cardState('hubsAffected')">
+                  <span *ngSwitchCase="'loading'" class="spinner-border spinner-border-sm" role="status"></span>
+                  <span *ngSwitchCase="'unavailable'" title="Data unavailable">—</span>
+                  <span *ngSwitchDefault>{{ cardValue('hubsAffected') }}</span>
+                </span>
+              </div>
+
+              <!-- second row -->
+              <p class="mb-0  more-info-link mt-4" style="margin-left: 30%;"
+                 *ngIf="cardState('hubsAffected') === 'loaded'" (click)="openModal('hubs')">Click for more info</p>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="secondary-stat clickable-card">
+
+              <!-- first row -->
+              <div class="stat-row d-flex align-items-center gap-5">
+                <span class="stat-label">TACs/LACs Affected</span>
+                <span class="stat-value" [ngSwitch]="cardState('tacsLacsAffected')">
+                  <span *ngSwitchCase="'loading'" class="spinner-border spinner-border-sm" role="status"></span>
+                  <span *ngSwitchCase="'unavailable'" title="Data unavailable">—</span>
+                  <span *ngSwitchDefault>{{ cardValue('tacsLacsAffected') }}</span>
+                </span>
+              </div>
+
+              <!-- second row -->
+              <p class="mb-0  more-info-link mt-4" style="margin-left: 35%;"
+                 *ngIf="cardState('tacsLacsAffected') === 'loaded'" (click)="openModal('tac/lac')">Click for more info</p>
+            </div>
+          </div>
+
+          <div class="col-md-4">
+            <div class="secondary-stat clickable-card">
+
+
+              <!-- first row -->
+              <div class="stat-row d-flex align-items-center gap-5 ">
+                <span class="stat-label">Packet Core Nodes</span>
+                <span class="stat-value" [ngSwitch]="cardState('packetCoreNodes')">
+                  <span *ngSwitchCase="'loading'" class="spinner-border spinner-border-sm" role="status"></span>
+                  <span *ngSwitchCase="'unavailable'" title="Data unavailable">—</span>
+                  <span *ngSwitchDefault>{{ cardValue('packetCoreNodes') }}</span>
+                </span>
+              </div>
+              <p class="mb-0  more-info-link mt-4" style="margin-left: 35%;"
+                 *ngIf="cardState('packetCoreNodes') === 'loaded'" (click)="openModal('nodes')">Click for more info</p>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <!-- <div class="secondary-stat clickable-card"> -->
+
+            <!-- first row -->
+            <!-- <div class="stat-row d-flex align-items-center gap-5">
+                <span class="stat-label">Remedy Tickets</span>
+                <span class="stat-value">{{ stats.remedyAffected }}</span>
+              </div> -->
+
+            <!-- second row -->
+            <!-- <p class="mb-0  more-info-link mt-4" style="margin-left: 35%;" (click)="openModal('nodes')">Click for
+                more
+                info</p> -->
+            <!-- </div> -->
+          </div>
+        </div>
+
+        <!-- Charts Row -->
+        <div class="row g-3">
+          <!-- Root Causes Section -->
+          <!-- <div class="col-lg-6">
+            <div class="chart-card">
+              <h3 class="card-title">Top 3 Root Causes</h3>
+              <div class="row">
+                <div class="col-4" *ngFor="let cause of rootCauses">
+                  <app-donut-chart [title]="cause.title" [percentage]="cause.percentage" [centerText]="cause.centerText"
+                    [centerValue]="cause.centerValue" [color]="cause.color" [cellCount]="cause.cellCount"
+                    [details]="cause.details">
+                  </app-donut-chart>
+                </div>
+              </div>
+            </div>
+          </div> -->
+
+          <!-- Abnormal KPIs Section -->
+          <div class="col-md-11 chart-card">
+
+            <!-- Header -->
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h6 class="mb-0 fs-5">Abnormal KPIs</h6>
+
+              <p-dropdown [options]="Abnormal_System" [(ngModel)]="Select_Abnormal_System"
+                placeholder="Abnormal Systems" styleClass="abnormal-dropdown" (onChange)="onAbnormalSystemChange()">
+              </p-dropdown>
+            </div>
+            <!-- FULL SCREEN LOADER -->
+            <!-- <div *ngIf="Abnormal_Kpis_chart_Loading"
+              class="loader-overlay d-flex justify-content-center align-items-center">
+              <div class="spinner-border text-danger" style="width: 4rem; height: 4rem;"></div>
+            </div> -->
+            <!-- Per-system status: each card follows its OWN analysis; the grid
+                 stays only while some system is still running. -->
+            <div *ngIf="abnormalAnyPending" class="mt-3 abnormal-status-grid">
+
+              <app-job-status-card
+                layout="card"
+                system="npp"
+                label="NPP"
+                [status]="$any(abnormalJobs.npp.status)"
+                [step]="abnormalJobs.npp.step"
+                [progress]="abnormalJobs.npp.progress"
+                [error]="abnormalJobs.npp.error">
+              </app-job-status-card>
+
+              <app-job-status-card
+                layout="card"
+                system="splunk"
+                label="Splunk"
+                [status]="$any(abnormalJobs.splunk.status)"
+                [step]="abnormalJobs.splunk.step"
+                [progress]="abnormalJobs.splunk.progress"
+                [error]="abnormalJobs.splunk.error">
+              </app-job-status-card>
+
+              <app-job-status-card
+                layout="card"
+                system="viavi"
+                label="Transmission (Viavi)"
+                [status]="$any(abnormalJobs.viavi.status)"
+                [step]="abnormalJobs.viavi.step"
+                [progress]="abnormalJobs.viavi.progress"
+                [error]="abnormalJobs.viavi.error">
+              </app-job-status-card>
+
+            </div>
+            <!-- ✅ No Data Message -->
+            <div *ngIf="No_Abnormal_Data_Message && Abnormal_Kpis_Data?.length === 0"
+              class="text-center text-muted mt-4 fs-5">
+              {{ No_Abnormal_Data_Message }}
+            </div>
+            <!-- Chart -->
+            <app-bar-chart *ngIf="Abnormal_Kpis_Data?.length > 0" [title]="''"
+              [data]="Abnormal_Kpis_Data" [yAxisLabel]="abnormalYAxisLabel" [showLegend]="false"
+              [Abnormal_KPIs_Legend]="true" Colwidth="40px" [horizontal_option]="false" [barRadius]="4"
+              [showValueAtEnd]="false" [enableAbnormalTooltip]="true">
+            </app-bar-chart>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- ROOT CAUSES TAB CONTENT -->
+      <!-- <div *ngIf="activeTab === 'root-causes'">
+        <div class="placeholder-content">
+          <i class="pi pi-info-circle" style="font-size: 3rem; color: #ccc;"></i>
+          <h3>Root Causes Analysis</h3>
+          <p>Detailed root cause analysis will be displayed here.</p>
+        </div>
+        <app-rootcause></app-rootcause>
+      </div> -->
+
+    </div>
+
+    <!-- CORRELATIONS TAB CONTENT -->
+    <div *ngIf="activeTab === 'correlations'">
+      <app-correlations [totalComplaints]="Total_Complaints" [topCell]="topcell" [topHandset]="tophandset"
+        [Abnormal_Kpis_RawData]="Abnormal_Kpis_RawData"></app-correlations>
+    </div>
+  </main>
+
+  <!-- ROOT CAUSES TAB CONTENT: only mounted once RCA files are actually ready
+       for THIS request, so it never loads a partial/other request's files. -->
+  <div [hidden]="activeTab !== 'root-causes' || !rcaReady">
+    <app-rootcause *ngIf="rcaReady" [payload]="RootCause_Payload"></app-rootcause>
+  </div>
+
+  <!-- Footer -->
+  <footer class="footer" *ngIf="activeTab != 'root-causes'">
+    <div class="container-fluid">
+      <div class="d-flex justify-content-center align-items-center gap-2 text-center">
+        <img src="assets/dataintelligance.png" alt="icon Image">
+        <span class="text-white">
+          ©2025 Data Intelligence - Vodafone Egypt
+        </span>
+      </div>
+    </div>
+  </footer>
+
+
+  <div class="simple-modal-backdrop" *ngIf="showModal" (click)="closeModal()"></div>
+
+  <!-- SIMPLE MODAL -->
+  <div class="simple-modal" *ngIf="showModal">
+
+    <div class="simple-modal-content" *ngIf="!showTacLac">
+      <!-- Body -->
+      <div class="simple-modal-body">
+        <!-- Title + Close -->
+        <div class="modal-title-row">
+          <h5 class="mb-0 fs-5">{{ modalTitle }}</h5>
+          <button class="btn-close" (click)="closeModal()"></button>
+        </div>
+
+        <div class="remedy-btn-row mt-3">
+          <p-button *ngIf="show_Remedy_Details_btn" label="Show Details" (onClick)="Remedy_Data_Details_Modal()"
+            styleClass="show-remedy-details-btn">
+          </p-button>
+        </div>
+
+        <div *ngIf="show_Packet_Nodes" class="mt-3" style="display: flex;  justify-content: flex-end;">
+          <p-dropdown [options]="Packt_Nodes" [(ngModel)]="Select_Packet_Node" placeholder="Packet Nodes"
+            styleClass="abnormal-dropdown" (onChange)="update_packct_nodes()">
+          </p-dropdown>
+        </div>
+        <div *ngIf="!showTacLac && modalNoData" class="text-center text-muted p-4 fs-5">
+          {{ modalNotAvailable ? 'Not Available' : 'No detailed data available' }}
+        </div>
+        <app-bar-chart *ngIf="!showTacLac && !modalNoData && modalData?.length" [data]="modalData" [horizontal_option]="horizontal_option"
+          [showLegend]="false" [Abnormal_KPIs_Legend]="false" [barRadius]="12" [showValueAtEnd]="true"
+          [barHeight]="'30px'">
+        </app-bar-chart>
+
+        <!-- Cells Affected: per-cell KPI details (real values/insights) -->
+        <div *ngIf="showCellDetails && cellDetailRows.length" class="cell-detail-table mt-3" style="max-height:360px; overflow:auto;">
+          <table class="table table-sm table-striped">
+            <thead>
+              <tr>
+                <th>Cell</th><th>Site</th><th>KPI</th><th>Current</th><th>Previous</th>
+                <th>Deviation %</th><th>Severity</th><th>Customers</th><th>Insight</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let r of cellDetailRows">
+                <td>{{ r.cell }}</td>
+                <td>{{ r.site }}</td>
+                <td>{{ r.kpi }}</td>
+                <td>{{ r.current }}</td>
+                <td>{{ r.previous }}</td>
+                <td>{{ r.deviation }}</td>
+                <td>{{ r.severity }}</td>
+                <td>{{ r.customers }}</td>
+                <td class="description-cell" [title]="r.message">{{ r.message }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="simple-modal-content-chart" *ngIf="showTacLac">
+      <!-- Title + Close -->
+      <div class="modal-title-row">
+        <h5 class="mb-0 fs-5 ms-3 mt-3"></h5>
+        <button class="btn-close" (click)="closeModal()"></button>
+      </div>
+      <!-- Body -->
+      <div *ngIf="modalNoData" class="text-center text-muted p-4 fs-5">
+        {{ modalNotAvailable ? 'Not Available' : 'No detailed data available' }}
+      </div>
+      <ng-container *ngIf="!modalNoData">
+        <h4 class="mb-0 fs-5 ms-3 mt-3">TAC Breakdown</h4>
+        <app-bar-chart [data]="modalDataTac" [horizontal_option]="true" [showLegend]="false"
+          [Abnormal_KPIs_Legend]="false" [barRadius]="12" [showValueAtEnd]="true" barHeight=30px>
+        </app-bar-chart>
+
+        <h4 class="mb-0 fs-5 ms-3 mt-3 ">LAC Breakdown</h4>
+        <app-bar-chart [data]="modalDataLac" [horizontal_option]="true" [showLegend]="false"
+          [Abnormal_KPIs_Legend]="false" [barRadius]="12" [showValueAtEnd]="true" barHeight=30px>
+        </app-bar-chart>
+      </ng-container>
+
+    </div>
+  </div>
+
+
+  <!-- Remedy Table Modal -->
+  <div class="modal-overlay" *ngIf="showRemedyTableModal">
+    <div class="simple-modal-content" style="max-width: 1450px;">
+
+      <!-- Header -->
+      <div class="modal-title-row mt-4 ms-3">
+        <h5 class="mb-0 fs-5">Remedy Tickets Details</h5>
+        <button class="btn-close me-3" (click)="closeRemedyTableModal()"></button>
+      </div>
+
+      <!-- Body -->
+      <div class="simple-modal-body">
+
+        <div class="card">
+
+          <p-table #dt [value]="remedyTableData" [paginator]="true" [rows]="3" [loading]="loading"
+            dataKey="incident_number" [globalFilterFields]="[
+      'incident_number',
+      'site',
+      'status',
+      'vendor',
+      'description'
+    ]" [tableStyle]="{ 'min-width': '75rem' }">
+
+            <!-- 🔎 Search -->
+            <ng-template pTemplate="caption">
+              <div style="display:flex; justify-content:flex-end;">
+                <input pInputText type="text" (input)="dt.filterGlobal($event.target.value, 'contains')"
+                  placeholder="Search tickets..." style="width:200px" />
+              </div>
+            </ng-template>
+
+            <!-- 🧾 Header -->
+            <ng-template pTemplate="header">
+              <tr>
+                <th>Incident Number</th>
+                <th>Site</th>
+                <th>Submit Date</th>
+                <th>Fault Time</th>
+                <th>status</th>
+                <th>Categorization</th>
+                <th>Impact</th>
+                <th>Vendor</th>
+                <th>Outage</th>
+                <th>Assigment Status</th>
+                <th>Type</th>
+                <th>Description</th>
+              </tr>
+            </ng-template>
+
+            <!-- 📄 Body -->
+            <ng-template pTemplate="body" let-ticket>
+              <tr>
+                <td>{{ ticket.incident_number }}</td>
+                <td>{{ ticket.site }}</td>
+                <td>{{ ticket.submit_date }}</td>
+                <td>{{ ticket.actual_fault_time | date:'short'}}</td>
+                <td>{{ ticket.status }}</td>
+                <td>{{ ticket.operational_categorization_3 }}</td>
+                <td>{{ ticket.impact }}</td>
+                <td>{{ ticket.vendor }}</td>
+                <td>{{ ticket.outage }}</td>
+                <td>{{ ticket.assigment_status }}</td>
+                <td>{{ ticket.type }}</td>
+                <td class="description-cell" [title]="ticket.description">
+                  {{ ticket.description }}
+                </td>
+              </tr>
+
+            </ng-template>
+
+            <!-- Empty Message -->
+            <ng-template pTemplate="emptymessage">
+              <tr>
+                <td colspan="6">No Remedy Tickets Found.</td>
+              </tr>
+            </ng-template>
+
+          </p-table>
+
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+</div>
