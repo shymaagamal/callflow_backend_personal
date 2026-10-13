@@ -232,6 +232,7 @@ export class SummaryComponent implements OnInit, OnDestroy {
     { label: 'OCC', value: 'OCC' },
     { label: 'PCRF', value: 'PCRF' },
     { label: 'SGSN', value: 'SGSN' },
+    { label: 'DNS', value: 'DNS' },
   ];
   // KPI data for bar chart
   kpiData = [
@@ -786,8 +787,13 @@ export class SummaryComponent implements OnInit, OnDestroy {
         this.modalColor = '#dc2626';
         this.horizontal_option = true
         this.show_Packet_Nodes = true
-        this.Select_Packet_Node = 'GGSN'
-        this.modalData = this.smartcare_data_metrics?.packetNodes?.GGSN || [];
+        {
+          // Open on the first node type that actually has data (not always GGSN).
+          const pn = this.smartcare_data_metrics?.packetNodes || {};
+          const first = this.Packt_Nodes.find(o => (pn[o.value] || []).length > 0);
+          this.Select_Packet_Node = first ? first.value : 'GGSN';
+          this.modalData = pn[this.Select_Packet_Node] || [];
+        }
         break;
       case 'tac/lac':
         this.modalTitle = 'TAC-LAC - Breakdown';
@@ -984,6 +990,9 @@ export class SummaryComponent implements OnInit, OnDestroy {
     }
     else if (systemKey === 'SGSN') {
       this.modalData = this.Packet_Nodes_Data.SGSN
+    }
+    else if (systemKey === 'DNS') {
+      this.modalData = this.Packet_Nodes_Data.DNS
     }
 
     else {

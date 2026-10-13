@@ -20,6 +20,8 @@ import os
 import re
 from datetime import datetime, timezone
 
+import pytz
+
 import pandas as pd
 
 from ..utils.trino_client import run_trino_query
@@ -33,11 +35,17 @@ def _safe_msisdns(msisdn_list):
     return [m for m in safe if m]
 
 
+# Request times are entered in local (Cairo) time -- the same wall-clock times the
+# Smartcare queries use via unix_timestamp('...'). Treating them as UTC shifted the
+# Trino window 3 hours later than the complaint window.
+_LOCAL_TZ = pytz.timezone("Africa/Cairo")
+
+
 def _epochs(start_dt: datetime, end_dt: datetime):
     if start_dt.tzinfo is None:
-        start_dt = start_dt.replace(tzinfo=timezone.utc)
+        start_dt = _LOCAL_TZ.localize(start_dt)
     if end_dt.tzinfo is None:
-        end_dt = end_dt.replace(tzinfo=timezone.utc)
+        end_dt = _LOCAL_TZ.localize(end_dt)
     return (
         int(start_dt.timestamp()),
         int(end_dt.timestamp()),
