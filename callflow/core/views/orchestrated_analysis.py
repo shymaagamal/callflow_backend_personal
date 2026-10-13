@@ -352,7 +352,14 @@ class AnalysisOrchestratorAPIView(JobBackedAPIView):
 
         def write_file_safe(system, extract, data, ctx):
             try:
-                filename, content = extract(system, data, ctx)
+                result = extract(system, data, ctx)
+                if isinstance(result, list):  # several files (Splunk: one per node)
+                    if result:
+                        rf.write_system_files(base, request_id, system, result)
+                    else:
+                        rf.mark_not_applicable(base, request_id, system)
+                    return
+                filename, content = result
                 if content is None:
                     rf.mark_not_applicable(base, request_id, system)
                 else:
@@ -386,7 +393,6 @@ class AnalysisOrchestratorAPIView(JobBackedAPIView):
             rf.set_data_status(base, request_id, system, rf.DATA_PROCESSING)
             try:
                 data = orig_smartcare(ctx)
-                
                 if holder is not None:
                     holder["result"] = data
                 rf.set_data_status(base, request_id, system, rf.DATA_COMPLETED)
@@ -580,7 +586,6 @@ class AnalysisOrchestratorAPIView(JobBackedAPIView):
         metrics = data.get("metrics", {}) or {}
         packet = data.get("packetNodes", {}) or {}
         handset = metrics.get("subs_per_handset_type")
-        print("smartcare metrics=%s packet=%s handset=%s inside _dash_smartcare", metrics, packet, handset)
         return {
             "handsetTypes": len(handset) if isinstance(handset, (list, dict)) else None,
             "packetCoreNodes": len(packet) if isinstance(packet, dict) else None,
@@ -641,18 +646,15 @@ class AnalysisOrchestratorAPIView(JobBackedAPIView):
 
     @staticmethod
     def _extract_splunk(system, data, ctx):
-        import pandas as pd
-        frames = []
+        # One file per core node (splunk_mme_kpi.csv, splunk_ggsn_kpi.csv, ...):
+        # the RCA tool detects the node type (MME/SGSN/GGSN/DSC/DNS) from the
+        # filename, so a single combined file was parsed entirely as SGSN.
+        files = []
         for node, df in (data or {}).items():
             if df is None or getattr(df, "empty", True):
                 continue
-            df = df.copy()
-            df.insert(0, "node", node)
-            frames.append(df)
-        if not frames:
-            return "splunk_kpi.csv", None
-        combined = pd.concat(frames, ignore_index=True)
-        return "splunk_kpi.csv", combined.to_csv(index=False)
+            files.append((f"splunk_{str(node).lower()}_kpi.csv", df.to_csv(index=False)))
+        return files
 
     @staticmethod
     def _extract_remedy(system, data, ctx):

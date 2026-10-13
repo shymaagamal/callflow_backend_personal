@@ -191,6 +191,22 @@ def write_system_file(base_output_dir, request_id: str, system: str,
     return fname
 
 
+def write_system_files(base_output_dir, request_id: str, system: str, files) -> List[str]:
+    """Same as write_system_file for a system that produces SEVERAL RCA files
+    (Splunk: one per core node, because the RCA tool detects the node type from
+    the filename). ``files`` = [(filename, content), ...]. The entry keeps
+    ``filename`` (first file) for compatibility and lists all in ``filenames``."""
+    names = [_safe_component(f) for f, _ in files]
+    mark_generating(base_output_dir, request_id, system)
+    for fname, (_f, content) in zip(names, files):
+        _atomic_write_bytes(request_dir(base_output_dir, request_id) / fname, content)
+    _update_system(base_output_dir, request_id, system, file=FILE_READY,
+                   filename=names[0], filenames=names)
+    logger.info("request_id=%s event=rca_file_ready system=%s files=%s",
+                request_id, system, ",".join(names))
+    return names
+
+
 def mark_file_failed(base_output_dir, request_id: str, system: str,
                      error: Optional[str] = None) -> None:
     _update_system(base_output_dir, request_id, system, file=FILE_FAILED, error=error)
@@ -304,16 +320,17 @@ def list_ready_files(base_output_dir, request_id: str) -> dict:
         for s, e in manifest.get("systems", {}).items():
             if e.get("file") != FILE_READY or not e.get("filename"):
                 continue
-            item = {
-                "name": e["filename"],
-                "url": f"/callflow/api/analysis/{request_id}/file/{e['filename']}",
-            }
-            if s in THRESHOLD_SYSTEMS:
-                threshold.append(item)
-            elif s in FILTER_SYSTEMS:
-                filt.append(item)
-            else:
-                kpi.append(item)
+            for fname in (e.get("filenames") or [e["filename"]]):
+                item = {
+                    "name": fname,
+                    "url": f"/callflow/api/analysis/{request_id}/file/{fname}",
+                }
+                if s in THRESHOLD_SYSTEMS:
+                    threshold.append(item)
+                elif s in FILTER_SYSTEMS:
+                    filt.append(item)
+                else:
+                    kpi.append(item)
     return {"request_id": request_id, "kpi": kpi, "filter": filt, "threshold": threshold}
 
 
