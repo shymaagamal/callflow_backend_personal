@@ -39,7 +39,7 @@ from .job_base import JobBackedAPIView
 from ..jobs import job_manager
 from ..orchestration.pipeline import (
     default_sources, run_callflow_analysis, TASK_SYSTEM, TASK_DEPS, FILE_SYSTEMS,
-    rollup_all, classify_overall,
+    TRINO_FRAME_KEY, rollup_all, classify_overall,
 )
 from ..orchestration import rca_files as rf
 from ..orchestration import cell_resolution as cr
@@ -413,7 +413,17 @@ class AnalysisOrchestratorAPIView(JobBackedAPIView):
         orig_get_cells = sources.get_cells
 
         def wrapped_get_cells(ctx):
-            trino_cells = orig_get_cells(ctx)  # logs the final SQL via sink
+            rf.set_data_status(base, request_id, "trino", rf.DATA_PROCESSING)
+            try:
+                trino_cells = orig_get_cells(ctx)  # logs the final SQL via sink
+            except Exception as e:
+                rf.set_data_status(base, request_id, "trino", rf.DATA_FAILED, str(e))
+                raise
+            rf.set_data_status(base, request_id, "trino", rf.DATA_COMPLETED)
+            # Raw Trino rows -> this request's RCA dir (trino_cells.csv), same
+            # writer as the other systems; no rows -> NOT_APPLICABLE.
+            write_file_safe("trino", self._extract_df_csv("trino", "cells"),
+                            ctx.get(TRINO_FRAME_KEY), ctx)
             resolution = cr.resolve_cells(trino_cells)
 
             if not resolution.resolved:
@@ -619,12 +629,12 @@ class AnalysisOrchestratorAPIView(JobBackedAPIView):
         return "smartcare_filter.csv", processed.to_csv(index=False)
 
     @staticmethod
-    def _extract_df_csv(system):
+    def _extract_df_csv(system, suffix="kpi"):
         def _extract(sysname, data, ctx):
             df = data
             if df is None or getattr(df, "empty", True):
-                return f"{sysname}_kpi.csv", None
-            return f"{sysname}_kpi.csv", df.to_csv(index=False)
+                return f"{sysname}_{suffix}.csv", None
+            return f"{sysname}_{suffix}.csv", df.to_csv(index=False)
         return _extract
 
     @staticmethod

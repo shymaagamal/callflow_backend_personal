@@ -3316,6 +3316,20 @@ function processFilterFiles(startDate, endDate) {
                             if (!AppState.cellSubscribers.has(cell)) AppState.cellSubscribers.set(cell, new Set());
                             AppState.cellSubscribers.get(cell).add(String(sub));
                         }
+                        // Trino serving-cells rows (trino_cells.csv) carry the TAC in lac_tac_dec.
+                        // The nodeMap reset above cleared what parseFiles mapped, so restore
+                        // cell->TAC and TAC->subscribers here (tacToSites is backfilled by
+                        // extractSitesFromCells below). Scoped to this sheet only.
+                        if (sheetName === '_servingCells') {
+                            const tac = String(row.lac_tac_dec ?? '').trim();
+                            if (tac && tac !== '0') {
+                                AppState.nodeMap.cellToTAC.set(cell, tac);
+                                if (sub) {
+                                    if (!AppState.nodeMap.tacToSubscribers.has(tac)) AppState.nodeMap.tacToSubscribers.set(tac, new Set());
+                                    AppState.nodeMap.tacToSubscribers.get(tac).add(String(sub));
+                                }
+                            }
+                        }
                     }
                     if (row.SITE_NAME) { const s=String(row.SITE_NAME).trim(); if(s){AppState.nodeMap.sites.add(s); const n=extractNumericSiteId(s); if(n) AppState.nodeMap.numericIdToSite.set(n,s);} }
                     if (row.MME_Name)       AppState.nodeMap.MME.add(String(row.MME_Name));

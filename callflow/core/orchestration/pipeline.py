@@ -96,7 +96,11 @@ REPORTED_SYSTEMS = ["trino", "smartcare", "npp", "splunk", "viavi", "remedy"]
 # Systems whose analysis defines COMPLETED/PARTIAL_SUCCESS/FAILED (section 22).
 ANALYSIS_SYSTEMS = ["npp", "splunk", "viavi", "remedy"]
 # Systems that produce an RCA file.
-FILE_SYSTEMS = ["smartcare", "npp", "splunk", "viavi", "remedy"]
+FILE_SYSTEMS = ["trino", "smartcare", "npp", "splunk", "viavi", "remedy"]
+
+# Per-request context key holding the raw Trino cell DataFrame, so the view can
+# write it as this request's RCA file (same pattern as customer_counts.CTX_KEY).
+TRINO_FRAME_KEY = "_trino_frame"
 
 # Static dependency map (mirrors build_callflow_plan) so consumers can log what a
 # task waited for without re-deriving the DAG.
@@ -344,6 +348,7 @@ def default_sources() -> DataSources:
             ctx["msisdn_list"], ctx["start_dt"], ctx["end_dt"],
             sql_sink=ctx.get("_trino_sql_sink"),
         )
+        ctx[TRINO_FRAME_KEY] = df  # raw rows for the request-scoped RCA file
         # Customer counts from the SAME Trino rows (no extra query). Written
         # before this task returns, so every downstream analysis sees it.
         # A counting failure must never lose the cell list.
