@@ -150,19 +150,82 @@ class SmartcareIndex:
         except Exception:
             return None
 
+        # Suffix -> Smartcare node lookup. The table mixes key casing ('sgsn06',
+        # 'ALX-GGSN_CI-10', 'RMD' vs 'rmd') and Splunk sends 'SGSN6' for 'sgsn06',
+        # so a plain .get(suffix.lower()) never matches the mixed-case keys
+        # (all GGSN nodes). Exact key first, then case-insensitive, then
+        # leading-zero-insensitive; keys that become ambiguous are skipped.
+        import re
+
+        def _zero_norm(k):
+            return re.sub(r"\d+", lambda m: str(int(m.group())), k)
+
+        def _unique_index(keyfn):
+            idx, clash = {}, set()
+            for k, v in SPLUNK_SUFFIX_TO_SMARTCARE_NODE.items():
+                nk = keyfn(str(k).lower())
+                if nk in idx and idx[nk] != v:
+                    clash.add(nk)
+                idx[nk] = v
+            return {k: v for k, v in idx.items() if k not in clash}
+
+        by_lower = _unique_index(lambda k: k)
+        by_zero = _unique_index(_zero_norm)
+
+        def lookup(suffix):
+            low = suffix.lower()
+            return (SPLUNK_SUFFIX_TO_SMARTCARE_NODE.get(suffix)
+                    or SPLUNK_SUFFIX_TO_SMARTCARE_NODE.get(low)
+                    or by_lower.get(low) or by_zero.get(_zero_norm(low)))
+
+        # Smartcare columns that can confirm (or rule out) a Splunk node type.
+        expected_cols = {
+            "MME": ("MME_Name", "SGSN_MME_NAME"), "SGSN": ("MME_Name", "SGSN_MME_NAME"),
+            "GGSN": ("SGSN_SGW_NAME", "GGSN_PGW_NAME"), "DSC": ("DRA_NAME",),
+        }
+        empty_vals = {"", "nan", "none", "<na>", "nat"}
+
+        def has_node_data(cols):
+            for c in cols:
+                series = self._prepared.get(c)
+                if series is not None and not series.str.strip().str.lower().isin(empty_vals).all():
+                    return True
+            return False
+
+        stats = {"kept": 0, "unverified": 0, "dropped_no_suffix_mapping": 0,
+                 "dropped_not_serving": 0, "dropped_error": 0}
+        dropped = []
+
         def mapper(kpi_col):
+            suffix = None
             try:
-                suffix = extract_suffix(kpi_col).lower()
-                mapped_value = SPLUNK_SUFFIX_TO_SMARTCARE_NODE.get(suffix)
+                suffix = str(extract_suffix(kpi_col) or "")
+                mapped_value = lookup(suffix)
                 if not mapped_value:
+                    stats["dropped_no_suffix_mapping"] += 1
+                    dropped.append({"kpi": kpi_col, "suffix": suffix, "reason": "no_suffix_mapping"})
                     return (None, None, None)
                 column, node_type, impacted = self.match_and_count(mapped_value)
                 if column is None:
+                    cols = expected_cols.get(str(kpi_col).split("_")[0].upper())
+                    if cols and not has_node_data(cols):
+                        # Smartcare has no data for this node type (e.g. its query
+                        # failed), so "served the complainants?" cannot be checked:
+                        # keep the alarm with unknown impact instead of hiding it.
+                        stats["unverified"] += 1
+                        return (mapped_value, None, None)
+                    stats["dropped_not_serving"] += 1
+                    dropped.append({"kpi": kpi_col, "mapped": mapped_value, "reason": "not_in_smartcare_nodes"})
                     return (None, None, None)
+                stats["kept"] += 1
                 return (mapped_value, impacted, node_type)
-            except Exception:
+            except Exception as e:
+                stats["dropped_error"] += 1
+                dropped.append({"kpi": kpi_col, "suffix": suffix, "reason": "error: %s" % e})
                 return (None, None, None)
 
+        mapper.stats = stats
+        mapper.dropped = dropped
         return mapper
 
 

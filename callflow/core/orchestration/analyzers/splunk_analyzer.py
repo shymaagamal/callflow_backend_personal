@@ -97,16 +97,22 @@ class SplunkAnalyzer:
             s.counts(alarms=sum(len(a or []) for a in alarms_by_node.values()))
 
         abnormal = []
+        mapper = None
         with slog.stage("Smartcare subscriber mapping + chart rows") as s:
             try:
+                mapper = self._subs_mapper(smartcare, ctx)
                 abnormal = ds.shape_splunk_abnormal(
                     alarms_by_node,
-                    subs_mapper=self._subs_mapper(smartcare, ctx),
+                    subs_mapper=mapper,
                     kpi_series=self._series(splunk_raw, ctx),
                 )
-                s.counts(abnormal=len(abnormal))
+                s.counts(abnormal=len(abnormal), **(getattr(mapper, "stats", None) or
+                         {"mapping": "none (no Smartcare node data) - all alarms kept"}))
             except Exception as e:
                 self.log.warning("Splunk abnormal shaping failed: %s", e)
+        for d in (getattr(mapper, "dropped", None) or []):
+            (ctx.get("request_logger") or self.log).info(
+                "[SPLUNK] request_id=%s dropped alarm %s", ctx.get("request_id"), d)
 
         abnormal_nodes = sorted(n for n, a in alarms_by_node.items() if a)
         alarm_count = sum(len(a or []) for a in alarms_by_node.values())

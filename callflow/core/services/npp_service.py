@@ -33,6 +33,7 @@ def nppIntegration(
     timestamp,
     resolution,
     entity_type: str = "cell",
+    stats: Optional[dict] = None,
 ):
     print(f"nppIntegration called - resolution: {resolution}, entity_type: {entity_type}")
     print("=== PROXY ENV ===") 
@@ -56,6 +57,8 @@ def nppIntegration(
     cached = cache_get(cache_key)
     if cached is not None:
         print(f"[NPP CACHE HIT] {len(suspected_entities)} {entity_type}s, resolution={resolution}")
+        if stats is not None:
+            stats.update(cache_hit=True, requests=0, rows=len(cached))
         return cached
 
     reference_date = pd.Timestamp("2020-01-01")
@@ -95,6 +98,9 @@ def nppIntegration(
     items = [(entity, hour) for entity in suspected_entities for hour in hours]
     attempts = len(items)
     err_lock = threading.Lock()
+    latencies = []      # seconds per completed HTTP request (for the stats summary)
+    empty = [0]
+    wall_start = time.time()
 
     def fetch_one(item):
         # Same request/parsing as the old sequential loop; raises on failure.
@@ -112,6 +118,8 @@ def nppIntegration(
         with _NPP_HTTP_SLOTS:
             response = requests.post(url, json=data, headers=headers, timeout= (10,60), proxies=proxis)
         print(f"NPP request completed in {time.time() - start:.2f}s with status {response.status_code}")
+        with err_lock:
+            latencies.append(time.time() - start)
         response.raise_for_status()
         df = pd.read_csv(StringIO(response.text))
 
@@ -128,6 +136,8 @@ def nppIntegration(
             f"columns={df.columns.tolist()}, rows={len(df)}"
         )
         if df.empty:
+            with err_lock:
+                empty[0] += 1
             return None
         df["DATETIME_ID"] = pd.to_datetime(df["DATETIME_ID"], errors="coerce")
         return df.dropna(subset=["DATETIME_ID"])
@@ -153,6 +163,17 @@ def nppIntegration(
     frames = [df for _item, df in results if df is not None]
     if frames:
         occ_df = pd.concat(frames, ignore_index=True)
+
+    if stats is not None:
+        lat = sorted(latencies)
+        stats.update(
+            cache_hit=False, entities=len(suspected_entities), hours=len(hours),
+            requests=attempts, ok=attempts - failed - empty[0], empty=empty[0], failed=failed,
+            workers=NPP_MAX_WORKERS, wall_s=round(time.time() - wall_start, 2),
+            avg_s=round(sum(lat) / len(lat), 2) if lat else None,
+            p90_s=round(lat[max(0, int(0.9 * len(lat)) - 1)], 2) if lat else None,
+            max_s=round(lat[-1], 2) if lat else None,
+        )
 
     if not occ_df.empty:
         occ_df = occ_df.sort_values(by="DATETIME_ID")

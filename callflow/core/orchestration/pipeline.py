@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
@@ -55,6 +56,7 @@ from .analyzers import NppAnalyzer
 from .analyzers import ViaviAnalyzer
 from .analyzers import RemedyAnalyzer
 from .analyzers import SplunkAnalyzer
+from .analyzers._pandas import npp_series_provider
 
 logger = logging.getLogger(__name__)
 
@@ -380,14 +382,85 @@ def default_sources() -> DataSources:
             if s
         ]
 
-    def retrieve_npp(cells, ctx):
-        qtr = ctx["query_time_range"]
+    def _npp_fetch(cells, start, end, ctx, stats=None):
         return nppIntegration(
-            cells,
-            start_date=qtr["query_start_1day"], end_date=qtr["query_end_1day"],
+            cells, start_date=start, end_date=end,
             logs_file=ctx.get("log_path", ""), timestamp=ctx.get("ts", ""),
-            resolution=ctx.get("npp_resolution", "daily"),
+            resolution=ctx.get("npp_resolution", "daily"), stats=stats,
         )
+
+    def retrieve_npp(cells, ctx):
+        # NPP is one HTTP request per cell per hour. KPIAnalyzer.analyze_npp only
+        # reads the current window and the same window 1 day earlier, so fetch
+        # just those hours (~8 per cell) instead of the whole 28h span
+        # (query_start_1day..query_end_1day) -- that span is only used to draw
+        # trend charts for AFFECTED cells, fetched in analyze_npp below.
+        qtr = ctx["query_time_range"]
+        rlog = ctx.get("request_logger", logger)
+        rid = ctx.get("request_id")
+        windows = {
+            "current": (qtr["current_start"], qtr["current_end"]),
+            "prev_1day": (qtr["prev_start_1day"], qtr["prev_end_1day"]),
+        }
+        stats = {name: {} for name in windows}
+        frames, errors = [], {}
+        t0 = time.time()
+        with ThreadPoolExecutor(max_workers=len(windows)) as ex:
+            futs = {ex.submit(_npp_fetch, cells, a, b, ctx, stats[name]): name
+                    for name, (a, b) in windows.items()}
+            for fut in as_completed(futs):
+                name = futs[fut]
+                try:
+                    df = fut.result()
+                    if df is not None and not df.empty:
+                        frames.append((name, df))
+                except Exception as e:  # one window failing must not lose the other
+                    errors[name] = str(e)
+        for name in windows:
+            rlog.info("[NPP] request_id=%s window=%s %s->%s cells=%d stats=%s error=%s",
+                      rid, name, windows[name][0], windows[name][1], len(cells),
+                      stats[name], errors.get(name))
+        if len(errors) == len(windows):
+            # same semantics as before: fail only when NOTHING could be fetched
+            raise RuntimeError(f"NPP retrieval failed for all windows: {errors}")
+        frames = [df for name in windows for (n, df) in frames if n == name]  # stable order
+        # windows are 1 day apart; drop_duplicates only matters if they ever overlap
+        out = pd.concat(frames, ignore_index=True).drop_duplicates() if frames else pd.DataFrame()
+        rlog.info("[NPP] request_id=%s retrieval done cells=%d rows=%d duration=%.1fs",
+                  rid, len(cells), len(out), time.time() - t0)
+        return out
+
+    def _npp_chart_series(npp_raw, ctx):
+        """Trend-chart provider for the NPP abnormal-KPI popup. Charts span
+        query_start_1day..query_end_1day; retrieval fetched only the analysis
+        windows, so fetch the full span once per CHARTED (affected) cell, within
+        a time budget. Past the budget (or on error) the chart uses the
+        analysis-window data instead of failing the analysis."""
+        qtr = ctx["query_time_range"]
+        rlog = ctx.get("request_logger", logger)
+        rid = ctx.get("request_id")
+        budget_s = getattr(settings, "NPP_CHART_FETCH_BUDGET_S", 120)
+        deadline = time.time() + budget_s
+        fallback = npp_series_provider(npp_raw, ctx)
+        per_cell = {}
+
+        def provider(cell, kpi):
+            if cell not in per_cell:
+                if time.time() >= deadline:
+                    rlog.info("[NPP] request_id=%s chart cell=%s full-range fetch skipped "
+                              "(budget %ss used); chart shows analysis windows", rid, cell, budget_s)
+                    per_cell[cell] = fallback
+                else:
+                    st = {}
+                    try:
+                        df = _npp_fetch([cell], qtr["query_start_1day"], qtr["query_end_1day"], ctx, st)
+                        per_cell[cell] = npp_series_provider(df, ctx) if df is not None and not df.empty else fallback
+                    except Exception as e:
+                        rlog.warning("[NPP] request_id=%s chart cell=%s full-range fetch failed: %s", rid, cell, e)
+                        per_cell[cell] = fallback
+                    rlog.info("[NPP] request_id=%s chart cell=%s stats=%s", rid, cell, st)
+            return per_cell[cell](cell, kpi)
+        return provider
 
     def retrieve_viavi(sites, ctx):
    
@@ -442,7 +515,7 @@ def default_sources() -> DataSources:
     # (unchanged) business logic and return the common result contract. The
     # pipeline only expresses the dependency; it contains no KPI math.
     def analyze_npp(npp_raw, smartcare, ctx):
-        return NppAnalyzer().analyze(npp_raw, smartcare, ctx)
+        return NppAnalyzer(series_provider=_npp_chart_series).analyze(npp_raw, smartcare, ctx)
 
     def analyze_viavi(viavi_raw, smartcare, ctx):
         return ViaviAnalyzer().analyze(viavi_raw, smartcare, ctx)
