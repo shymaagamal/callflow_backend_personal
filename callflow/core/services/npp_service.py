@@ -9,12 +9,22 @@ from pathlib import Path
 from django.conf import settings
 from typing import Dict, Optional
 import time
+import threading
 from ..utils.data_utils import process_sitename
 from ..utils.file_cache import cache_get, cache_set, make_npp_cache_key
+from ._parallel import run_in_order
 
 _SITE_MAPPING: Optional[Dict[str, str]] = None
 logger = logging.getLogger(__name__)
 NPP_CACHE_TTL = 36000
+
+# NPP requests (one per entity x hour) run in parallel inside a call.
+# NPP_MAX_WORKERS: threads per nppIntegration call.
+# NPP_MAX_CONCURRENT: cap on simultaneous NPP HTTP requests across ALL callers
+# (e.g. NCI calls nppIntegration for several sites at once), to protect the NPP server.
+NPP_MAX_WORKERS = getattr(settings, "NPP_MAX_WORKERS", 5)
+NPP_MAX_CONCURRENT = getattr(settings, "NPP_MAX_CONCURRENT", 10)
+_NPP_HTTP_SLOTS = threading.BoundedSemaphore(NPP_MAX_CONCURRENT)
 def nppIntegration(
     suspected_entities_raw,
     start_date,
@@ -81,51 +91,68 @@ def nppIntegration(
 
     occ_df = pd.DataFrame()
     failed = 0
-    attempts = 0
     error_msg = None
+    items = [(entity, hour) for entity in suspected_entities for hour in hours]
+    attempts = len(items)
+    err_lock = threading.Lock()
 
-    for entity in suspected_entities:
-        for hour in hours:
-            attempts += 1
-            if entity_type == "site":
-                data = {"site": entity, "hour": hour}
-            else:
-                data = {"cellName": entity, "hour": hour}
+    def fetch_one(item):
+        # Same request/parsing as the old sequential loop; raises on failure.
+        entity, hour = item
+        if entity_type == "site":
+            data = {"site": entity, "hour": hour}
+        else:
+            data = {"cellName": entity, "hour": hour}
+        print(f"NPP request → {entity_type}={entity}, hour={hour}, url={url}")
+        start = time.time()
+        proxis = {
+            "http": None,
+            "https": None
+        }
+        with _NPP_HTTP_SLOTS:
+            response = requests.post(url, json=data, headers=headers, timeout= (10,60), proxies=proxis)
+        print(f"NPP request completed in {time.time() - start:.2f}s with status {response.status_code}")
+        response.raise_for_status()
+        df = pd.read_csv(StringIO(response.text))
+
+        logger.info(
+            f"[NPP RESPONSE] entity_type={entity_type}, "
+            f"entity={entity}, hour={hour}, "
+            f"status={response.status_code}, "
+            f"columns={df.columns.tolist()}, "
+            f"rows={len(df)}"
+        )
+
+        print(
+            f"[NPP RESPONSE] {entity_type}={entity}, hour={hour}, "
+            f"columns={df.columns.tolist()}, rows={len(df)}"
+        )
+        if df.empty:
+            return None
+        df["DATETIME_ID"] = pd.to_datetime(df["DATETIME_ID"], errors="coerce")
+        return df.dropna(subset=["DATETIME_ID"])
+
+    def on_error(item, e):
+        nonlocal failed, error_msg
+        entity, hour = item
+        msg = f"NPP request failed for {entity_type} {entity} hour {hour}: {e}"
+        logger.error(msg)
+        with err_lock:
+            failed += 1
+            error_msg = msg
             try:
-                print(f"NPP request → {entity_type}={entity}, hour={hour}, url={url}")
-                start = time.time()
-                proxis = {
-                    "http": None,
-                    "https": None
-                }
-                response = requests.post(url, json=data, headers=headers, timeout= (10,60), proxies=proxis)
-                print(f"NPP request completed in {time.time() - start:.2f}s with status {response.status_code}")
-                response.raise_for_status()
-                df = pd.read_csv(StringIO(response.text))
-
-                logger.info(
-                    f"[NPP RESPONSE] entity_type={entity_type}, "
-                    f"entity={entity}, hour={hour}, "
-                    f"status={response.status_code}, "
-                    f"columns={df.columns.tolist()}, "
-                    f"rows={len(df)}"
-                )
-
-                print(
-                    f"[NPP RESPONSE] {entity_type}={entity}, hour={hour}, "
-                    f"columns={df.columns.tolist()}, rows={len(df)}"
-                )
-                if df.empty:
-                    continue
-                df["DATETIME_ID"] = pd.to_datetime(df["DATETIME_ID"], errors="coerce")
-                df = df.dropna(subset=["DATETIME_ID"])
-                occ_df = pd.concat([occ_df, df], ignore_index=True)
-            except Exception as e:
-                failed += 1
-                error_msg = f"NPP request failed for {entity_type} {entity} hour {hour}: {e}"
-                logger.error(error_msg)
                 with open(logs_file, "a") as f:
-                    f.write(error_msg + "\n")
+                    f.write(msg + "\n")
+            except Exception:  # a log-file problem must not abort the other requests
+                logger.warning("Could not write NPP error to %s", logs_file)
+
+    # Parallel, but results come back in the original (entity, hour) order, so
+    # the concatenated frame is identical to the old sequential loop.
+    results = run_in_order(items, fetch_one, max_workers=NPP_MAX_WORKERS,
+                           first_sync=False, on_error=on_error)
+    frames = [df for _item, df in results if df is not None]
+    if frames:
+        occ_df = pd.concat(frames, ignore_index=True)
 
     if not occ_df.empty:
         occ_df = occ_df.sort_values(by="DATETIME_ID")
