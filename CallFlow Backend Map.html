@@ -1,0 +1,1091 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>CallFlow Backend Map</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: sticky index rail on the left (desktop), one reading column on the right; diagrams and tables scroll inside their own frames. */
+:root{
+  --bg:#f4f6f8; --surface:#ffffff; --ink:#18212b; --muted:#5a6675; --rule:#d7dde4;
+  --accent:#0b6e79; --accent-soft:#e3f1f2;
+  --ok:#1f7a4d; --ok-soft:#e4f3ea; --warn:#9a5b00; --warn-soft:#fbf0dc; --bad:#b3261e; --bad-soft:#fbe6e4;
+  --code-bg:#eef1f4;
+  --f-display:"Archivo Narrow","Arial Narrow",Arial,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#11161c; --surface:#171e26; --ink:#e3e8ee; --muted:#9aa6b4; --rule:#2b3542;
+  --accent:#4fc1cb; --accent-soft:#16343a;
+  --ok:#5cc690; --ok-soft:#173326; --warn:#e6a94a; --warn-soft:#3a2d14; --bad:#f08a80; --bad-soft:#3d1d1b;
+  --code-bg:#1e2731; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#11161c; --surface:#171e26; --ink:#e3e8ee; --muted:#9aa6b4; --rule:#2b3542;
+  --accent:#4fc1cb; --accent-soft:#16343a;
+  --ok:#5cc690; --ok-soft:#173326; --warn:#e6a94a; --warn-soft:#3a2d14; --bad:#f08a80; --bad-soft:#3d1d1b;
+  --code-bg:#1e2731; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:15px/1.6 var(--f-body);margin:0}
+.wrap{display:grid;grid-template-columns:230px minmax(0,1fr);gap:40px;max-width:1240px;margin:0 auto;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:32px 80px}
+nav.toc{position:sticky;top:calc(env(safe-area-inset-top,0px) + 20px);align-self:start;max-height:calc(100vh - 40px);overflow:auto;font-size:13px}
+nav.toc .brand{font:700 13px/1.2 var(--f-display);letter-spacing:.08em;text-transform:uppercase;color:var(--accent);margin-bottom:12px}
+nav.toc ol{list-style:none;margin:0;padding:0;display:grid;gap:2px}
+nav.toc a{display:block;padding:4px 8px;border-radius:4px;color:var(--muted);text-decoration:none}
+nav.toc a:hover,nav.toc a:focus-visible{background:var(--accent-soft);color:var(--ink);outline:none}
+nav.toc .sub a{padding-left:20px;font-size:12.5px}
+main{min-width:0}
+header.hero{border-bottom:1px solid var(--rule);padding-bottom:24px;margin-bottom:8px}
+.eyebrow{font:600 12px/1 var(--f-display);letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+h1{font:700 44px/1.05 var(--f-display);margin:10px 0 12px;text-wrap:balance;letter-spacing:-.01em}
+h2{font:700 28px/1.15 var(--f-display);margin:56px 0 8px;text-wrap:balance;scroll-margin-top:20px}
+h3{font:600 20px/1.25 var(--f-display);margin:36px 0 6px;text-wrap:balance;scroll-margin-top:20px}
+h4{font:600 15px/1.3 var(--f-body);margin:22px 0 6px}
+p,li{max-width:72ch}
+p{margin:8px 0}
+.lede{font-size:16.5px;color:var(--muted);max-width:70ch}
+.meta{display:flex;flex-wrap:wrap;gap:8px 20px;margin-top:16px;font:13px/1.4 var(--f-mono);color:var(--muted)}
+.meta b{color:var(--ink);font-weight:500}
+code,.mono{font-family:var(--f-mono);font-size:.86em}
+code{background:var(--code-bg);padding:1px 5px;border-radius:3px;overflow-wrap:anywhere}
+a{color:var(--accent)}
+.tag{display:inline-block;font:600 10.5px/1 var(--f-mono);letter-spacing:.04em;padding:3px 6px;border-radius:3px;vertical-align:1px;white-space:nowrap}
+.tag.v{background:var(--ok-soft);color:var(--ok)}
+.tag.p{background:var(--warn-soft);color:var(--warn)}
+.tag.a{background:var(--code-bg);color:var(--muted)}
+.tag.b{background:var(--bad-soft);color:var(--bad)}
+.legend{display:flex;flex-wrap:wrap;gap:10px 18px;margin:18px 0 0;padding:12px 14px;background:var(--surface);border:1px solid var(--rule);border-radius:6px;font-size:13.5px}
+.legend span{display:flex;gap:8px;align-items:center}
+figure.dia{margin:16px 0 6px;background:var(--surface);border:1px solid var(--rule);border-radius:6px;overflow-x:auto;padding:16px}
+figure.dia pre.mermaid{margin:0;background:transparent;font-family:var(--f-body);white-space:pre}
+.note{font-size:14px;color:var(--muted);max-width:72ch;margin:4px 0 0}
+.note strong{color:var(--ink)}
+.tbl{overflow-x:auto;margin:12px 0;border:1px solid var(--rule);border-radius:6px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{text-align:left;vertical-align:top;padding:8px 10px;border-bottom:1px solid var(--rule)}
+th{font:600 12px/1.3 var(--f-body);text-transform:uppercase;letter-spacing:.04em;color:var(--muted);background:var(--code-bg);position:sticky;top:0}
+tr:last-child td{border-bottom:none}
+td code{white-space:normal}
+table.matrix{min-width:1500px;font-size:12.5px}
+table.matrix td:first-child{font-family:var(--f-mono);font-size:12px;white-space:nowrap}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;margin:14px 0}
+.card{background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:12px 14px;min-width:0}
+.card h4{margin:0 0 4px}
+.card p{font-size:14px;margin:4px 0}
+.finding{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;padding:12px 0;border-bottom:1px solid var(--rule)}
+.finding:last-child{border-bottom:none}
+.finding .t{font-weight:600}
+.finding p{margin:2px 0;font-size:14px}
+.findings{background:var(--surface);border:1px solid var(--rule);border-radius:6px;padding:4px 16px;margin:12px 0}
+ol.steps{padding-left:20px}
+ol.steps li{margin:6px 0}
+.kv{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 14px;font-size:14px}
+.kv dt{font-family:var(--f-mono);font-size:12.5px;color:var(--muted)}
+.kv dd{margin:0}
+@media (max-width:860px){
+  .wrap{grid-template-columns:minmax(0,1fr);gap:16px}
+  nav.toc{position:static;max-height:none;border-bottom:1px solid var(--rule);padding-bottom:12px}
+  nav.toc ol{grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+  nav.toc .sub{display:none}
+  h1{font-size:34px}
+}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+html{scroll-behavior:smooth}
+</style>
+
+<div class="wrap">
+<nav class="toc" aria-label="Contents">
+  <div class="brand">CallFlow backend</div>
+  <ol>
+    <li><a href="#structure">1. Backend structure</a></li>
+    <li class="sub"><a href="#startup">Startup and config</a></li>
+    <li class="sub"><a href="#routes">URL routing</a></li>
+    <li class="sub"><a href="#layers">Layers and files</a></li>
+    <li class="sub"><a href="#runtime">Jobs, logging, timeouts</a></li>
+    <li><a href="#diag-a">2A. Architecture</a></li>
+    <li><a href="#diag-b">2B. Module dependencies</a></li>
+    <li><a href="#diag-c">2C. API execution flows</a></li>
+    <li><a href="#diag-d">2D. Function call graph</a></li>
+    <li><a href="#diag-e">2E. Data flow</a></li>
+    <li><a href="#diag-f">2F. External integrations</a></li>
+    <li><a href="#diag-g">2G. Runtime sequences</a></li>
+    <li><a href="#analysis">3. Dependency and risk analysis</a></li>
+    <li class="sub"><a href="#bugs">Defects found</a></li>
+    <li class="sub"><a href="#perf">Performance</a></li>
+    <li class="sub"><a href="#races">Races and shared state</a></li>
+    <li class="sub"><a href="#dupes">Duplication and coupling</a></li>
+    <li class="sub"><a href="#unused">Unused and unreachable</a></li>
+    <li><a href="#matrix">4. Dependency matrix</a></li>
+    <li><a href="#explain">5. How it fits together</a></li>
+  </ol>
+</nav>
+
+<main>
+<header class="hero">
+  <div class="eyebrow">Code-verified architecture map</div>
+  <h1>CallFlow Backend Map</h1>
+  <p class="lede">How the Django backend behind the CallFlow portal, STCC and NCI starts, routes requests, runs its analysis DAG and talks to Trino, Smartcare, NPP, Splunk, Viavi and Remedy. Every relationship below was read from the source, not inferred from file names.</p>
+  <div class="meta">
+    <span>Snapshot <b>H:\Shaimaa_vodafone\callflow_backend_personal</b></span>
+    <span>Taken <b>2026-10-14</b>, includes today's NPP and Splunk fixes</span>
+    <span><b>108</b> Python modules, <b>18,269</b> lines</span>
+    <span>Frontend excluded</span>
+  </div>
+  <div class="legend" role="note">
+    <span><span class="tag v">VERIFIED</span> read directly in the code</span>
+    <span><span class="tag p">POTENTIAL</span> real code path; impact needs runtime measurement</span>
+    <span><span class="tag a">ASSUMPTION</span> depends on deployment outside the repo</span>
+    <span><span class="tag b">DEFECT</span> code does something other than what it intends</span>
+  </div>
+</header>
+
+<h2 id="structure">1. Backend structure</h2>
+<p>One Django 4.2 project (<code>callflow_portal</code>) with two installed apps that serve traffic: <code>callflow</code> (the portal API, all real code under <code>callflow/core</code>) and <code>NCI</code> (a site-level API for an external caller). Neither app defines a model; the database is used only by Django's own admin, auth and session apps. All business data comes from six external systems at request time.</p>
+
+<h3 id="startup">Entry points, startup and configuration</h3>
+<div class="tbl"><table>
+<thead><tr><th>File</th><th>What it does</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>callflow_gunicorn_start</code></td><td>Production launcher: <code>gunicorn callflow_portal.wsgi:application</code>, 3 workers, Unix socket, <code>--timeout 100080</code>, log level <code>error</code>.</td><td><span class="tag v">VERIFIED</span> No <code>--worker-class</code> or <code>--threads</code>, so workers are Gunicorn's default sync workers: one request at a time per worker.</td></tr>
+<tr><td><code>manage.py</code></td><td>Sets <code>DJANGO_SETTINGS_MODULE=callflow_portal.settings</code>, runs management commands.</td><td>Development / admin entry.</td></tr>
+<tr><td><code>callflow_portal/wsgi.py</code></td><td>Builds the WSGI app, then silences urllib3 TLS warnings and dateutil timezone warnings process-wide.</td><td>Warnings are silenced because Trino and Splunk calls use <code>verify=False</code>.</td></tr>
+<tr><td><code>callflow_portal/asgi.py</code></td><td>Standard ASGI app.</td><td><span class="tag a">ASSUMPTION</span> Not used by the Gunicorn script.</td></tr>
+<tr><td><code>callflow_portal/settings.py</code></td><td><code>load_dotenv(BASE_DIR/.env)</code> for Smartcare, Splunk and Viavi credentials; <code>from general_apis.constants import *</code> for the MSSQL server, user and driver; apps, CORS, middleware, two databases, Redis cache, data-file paths, <code>OUTPUT_DIR = BASE_DIR/callflow_output</code>.</td><td><span class="tag v">VERIFIED</span> <code>DEBUG = True</code> (line 51). No <code>REST_FRAMEWORK</code> block, so DRF defaults apply (AllowAny). No <code>LOGGING</code> block.</td></tr>
+<tr><td><code>.env</code></td><td>Keys: <code>smartcareDB_USER/PASSWORD</code>, <code>splunk_USER/PASSWORD</code>, <code>viavi_ip/port/service_name/user/password</code>, plus <code>mediation_*</code> and <code>rpa_*</code> keys that no Python file reads from the environment (the prototype hardcodes its own mediation values).</td><td><code>NCI_API_SECRET_TOKEN</code> is read by settings but not defined in <code>.env</code>.</td></tr>
+<tr><td><code>general_apis/constants.py</code></td><td><code>MACHINE = "Remote"</code>, SQL driver, MSSQL host <code>10.30.30.177</code> and its credentials, database names.</td><td>Imported at settings load, so it is part of startup.</td></tr>
+<tr><td><code>callflow/core/constants/configs.py</code></td><td>Smartcare JDBC jar path, driver class and URL.</td><td>Read when the first Smartcare connection starts the JVM.</td></tr>
+<tr><td><code>requirements.txt</code></td><td>Contains only <code>openpyxl</code>.</td><td><span class="tag v">VERIFIED</span> The real dependency set (Django, DRF, corsheaders, python-dotenv, django-redis, pandas, requests, trino, jaydebeapi, JPype1, cx_Oracle, pyodbc, mssql-django, pytz) is not pinned anywhere in the repo.</td></tr>
+</tbody></table></div>
+<p class="note"><strong>Import-time side effects.</strong> <code>utils/file_cache.py</code> creates <code>/home/AutomationProjects/CallFlowTool/backend/callflow_portal/cache_store</code> when imported (line 20), and <code>utils/trino_client.py</code> prints on import. The JVM for Smartcare is started lazily by the first <code>smartcareConnection()</code> call, not at startup.</p>
+
+<h3 id="routes">URL routing and API endpoints</h3>
+<p>Routing chain: <code>callflow_portal/urls.py</code> → <code>include("callflow.urls")</code> and <code>include("NCI.urls")</code> → <code>callflow/urls.py</code> → <code>include("callflow.core.urls")</code> and <code>include("callflow.prototype.urls")</code>. Every live route is listed below.</p>
+<div class="tbl"><table>
+<thead><tr><th>Method and path</th><th>View (file:line)</th><th>Mode</th><th>Does</th></tr></thead>
+<tbody>
+<tr><td><code>POST /callflow/api/analysis</code></td><td><code>AnalysisOrchestratorAPIView</code> (<code>core/views/orchestrated_analysis.py:61</code>)</td><td>Job, 202</td><td>Full portal analysis over the 11-task DAG.</td></tr>
+<tr><td><code>GET /callflow/api/analysis/{job_id}</code></td><td>same class, <code>JobBackedAPIView.get</code> (<code>job_base.py:86</code>)</td><td>Poll</td><td>Returns the job dict from Redis (status, systems, summary, dashboard, details, rca, result).</td></tr>
+<tr><td><code>GET /callflow/api/analysis/{request_id}/rca-status</code></td><td><code>RCAStatusAPIView</code> (<code>:674</code>)</td><td>Sync</td><td>Reads <code>rca/{id}/manifest.json</code>, returns readiness.</td></tr>
+<tr><td><code>GET /callflow/api/analysis/{request_id}/rca-files</code></td><td><code>RCAFilesAPIView</code> (<code>:684</code>)</td><td>Sync</td><td>Lists READY files bucketed as kpi / filter / threshold.</td></tr>
+<tr><td><code>GET /callflow/api/analysis/{request_id}/file/{filename}</code></td><td><code>RCAFileDownloadAPIView</code> (<code>:694</code>)</td><td>Sync</td><td>Path-safe file download for the RCA tool.</td></tr>
+<tr><td><code>POST /callflow/api/stcc/analysis</code> + <code>GET …/{job_id}</code></td><td><code>STCCAnalysisAPIView</code> (<code>core/views/stcc_analysis.py:140</code>)</td><td>Job, 202</td><td>Same DAG restricted to Trino, NPP, Viavi, Remedy.</td></tr>
+<tr><td><code>POST /callflow/api/smartcare/site-kpis</code></td><td><code>SmartcareSiteKpiAPIView</code> (<code>core/views/smartcare_site_kpi.py:12</code>)</td><td>Sync</td><td>Smartcare S1-MME and S6a site KPIs over three 12-hour windows.</td></tr>
+<tr><td><code>POST /callflow/api/npp/kpis</code></td><td><code>NppKpiAPIView</code> (<code>core/views/test_npp_kpi.py:24</code>)</td><td>Sync</td><td>Raw NPP rows for cells or sites.</td></tr>
+<tr><td><code>POST /callflow/api/viavi/kpis/</code></td><td><code>ViaviKpiAPIView</code> (<code>core/views/test_viavi_kpi.py:25</code>)</td><td>Sync</td><td>Raw Viavi rows for sites.</td></tr>
+<tr><td><code>POST /callflow/api/remedy/kpis/</code></td><td><code>RemedyKpiAPIView</code> (<code>core/views/test_remedy_ticket.py:42</code>)</td><td>Sync</td><td>Remedy tickets for sites (7-day lookback).</td></tr>
+<tr><td><code>POST /callflow/NCI/analysis/</code> + <code>GET …/{job_id}/</code></td><td><code>NCIAnalysisAPIView</code> (<code>NCI/views.py:57</code>)</td><td>Sync by default; job + callback when <code>callback_url</code> is sent</td><td>Per-site NPP, Viavi, Remedy over current, minus 1 day and minus 1 week (12-hour windows).</td></tr>
+<tr><td><code>POST /callflow/NCI/rca/</code> + <code>GET …/{job_id}/</code></td><td><code>NCIRcaSitesAPIView</code> (<code>NCI/views.py:184</code>)</td><td>Same as above</td><td>RCA-tool scoring of sites, server-side.</td></tr>
+<tr><td><code>/admin/</code></td><td>Django admin</td><td>Sync</td><td>No app models are registered.</td></tr>
+</tbody></table></div>
+<p class="note"><span class="tag v">VERIFIED</span> <code>callflow/prototype/urls.py</code> has an empty <code>urlpatterns</code>, so the prototype views and <code>apis.py</code> are imported at startup but no URL reaches them. About 30 older routes in <code>core/urls.py</code> are commented out.</p>
+
+<h3 id="layers">Layers and important files</h3>
+<div class="cards">
+  <div class="card"><h4>Views and handlers</h4>
+    <p><code>views/base.py</code>: <code>BaseCallFlowAPIView</code> with <code>parse_request_time_range</code>, <code>build_analysis_time_windows</code> (current = start − 2 h … end; previous 1 and 3 days; query span covering both), <code>get_log_file</code>, <code>log_request</code>.</p>
+    <p><code>views/job_base.py</code>: <code>JobBackedAPIView</code> with <code>post</code> → <code>build_log_context</code> → <code>create_job</code> → daemon thread <code>_run_safely</code> → <code>run_job</code>; <code>get</code> polls.</p>
+    <p><code>views/orchestrated_analysis.py</code> (705 lines) wraps every data source to stream dashboard values, details and RCA files into the job.</p></div>
+  <div class="card"><h4>Orchestration</h4>
+    <p><code>orchestration/scheduler.py</code>: generic DAG runner <code>run_plan</code> with a thread pool, per-task deadlines, failure isolation (dependents become SKIPPED).</p>
+    <p><code>orchestration/pipeline.py</code>: the CallFlow DAG (<code>build_callflow_plan</code>), <code>default_sources</code> binding tasks to services, status roll-ups.</p>
+    <p>Helpers: <code>cell_resolution</code>, <code>customer_counts</code>, <code>smartcare_index</code>, <code>dashboard_shaping</code>, <code>summary_readiness</code>, <code>rca_files</code>, <code>task_logging</code>.</p></div>
+  <div class="card"><h4>Analyzers</h4>
+    <p><code>orchestration/analyzers/</code>: <code>NppAnalyzer</code>, <code>ViaviAnalyzer</code>, <code>RemedyAnalyzer</code>, <code>SplunkAnalyzer</code> each return the common contract from <code>base.build_result</code>. <code>severity.py</code> keeps High/Increase/Medium only. <code>rca_threshold.py</code> is the threshold rule engine shared with <code>KPIAnalyzer</code>.</p></div>
+  <div class="card"><h4>Business services</h4>
+    <p><code>services/kpi_analyzer.py</code>: <code>KPIAnalyzer.analyze_npp</code>, <code>analyze_viavi</code>, <code>analyze_core_node</code> (Splunk), thresholds from <code>kpi_thresholds.KPIThresholds</code> (Python dicts).</p>
+    <p>Retrieval: <code>trino_service</code>, <code>smartcare_service</code> + <code>smartcare_query_runner</code>, <code>npp_service</code>, <code>splunk_service</code>, <code>viavi_service</code>, <code>remedy_service</code>, <code>smartcare_site_kpi_service</code>.</p></div>
+  <div class="card"><h4>Data access</h4>
+    <p><code>utils/trino_client.py</code> (Trino DB-API, cached connection), <code>utils/connections.py</code> (Smartcare JDBC via JPype, Viavi cx_Oracle), <code>utils/classes.Connection</code> (pyodbc to MSSQL), <code>connectors/connection_pool.py</code> (generic pool used by NCI only). No ORM models, serializers or repositories exist.</p></div>
+  <div class="card"><h4>Shared utilities</h4>
+    <p><code>utils/data_utils.py</code> (<code>process_sitename</code>, <code>convert_java_types</code>, <code>extract_suffix</code>), <code>utils/file_cache.py</code> (pickle cache + key builders), <code>utils/logging_utils.py</code> (<code>build_request_logger</code>, <code>get_request_identity</code>), <code>utils/site_mapping.py</code>, <code>utils/mapping_cell_name.py</code>, <code>utils/java_sanitize.py</code>, <code>services/_parallel.run_in_order</code>.</p></div>
+  <div class="card"><h4>NCI app</h4>
+    <p><code>NCI/service/analysis_runner.py</code> (<code>run_nci_analysis</code>, fetchers with file cache and pools, <code>build_site_summary</code>), <code>NCI/service/rca_site_runner.py</code> (<code>run_rca_site_analysis</code>), <code>NCI/connectors/viavi_pool.py</code>, <code>remedy_pool.py</code>, <code>NCI/utils/helpers.py</code>, <code>NCI/utils/authentication.require_api_token</code> (not applied).</p></div>
+  <div class="card"><h4>Constants</h4>
+    <p><code>constants/queries.py</code> (Smartcare HiveQL: 6 Data and 6 Voice node queries), <code>constants/endpoints.py</code> (<code>SPLUNK_ENDPOINTS</code>, <code>SPLUNK_SUFFIX_TO_SMARTCARE_NODE</code>, <code>NODE_COLUMNS_FROM_SMARTCARE</code>, <code>VIAVIE_KPIS_MAPPING</code>), <code>smartcare_sites_queries.py</code>, <code>general_constants.py</code>.</p></div>
+</div>
+
+<h3 id="runtime">Background jobs, logging, retries and timeouts</h3>
+<p><strong>Asynchronous execution.</strong> There is no Celery, cron registration, Django signal or scheduler inside the app. Long work runs in a <code>threading.Thread(daemon=True)</code> started inside the Gunicorn worker that received the POST (<code>job_base.py:70</code>, <code>NCI/views.py:117</code> and <code>:243</code>). Job state lives in Redis through Django's cache (<code>jobs/job_manager.py</code>, TTL 30 min refreshed on every update), so any worker can answer a poll. The only scheduled job is the shell script <code>scripts/clean_complain_reports.sh</code>; <span class="tag a">ASSUMPTION</span> it is run by an external cron that is not in the repo.</p>
+<p><strong>Logging.</strong> Three layers: a per-request <code>LoggerAdapter</code> writing to <code>callflow_output/logs/{prefix}.txt</code> (<code>logging_utils.build_request_logger</code>); per-request, per-system files under <code>callflow_output/rca/{request_id}/logs/{system}.log</code> (<code>task_logging.get_system_logger</code>); and module loggers. <span class="tag a">ASSUMPTION</span> With no <code>LOGGING</code> setting and Gunicorn at <code>--log-level error</code>, module-level <code>logger.info</code> lines and <code>print()</code> output are not written to any file you can read.</p>
+<div class="tbl"><table>
+<thead><tr><th>Where</th><th>Timeout</th><th>Retry</th><th>On failure</th></tr></thead>
+<tbody>
+<tr><td>Scheduler tasks (<code>pipeline.Timeouts</code>)</td><td>trino and smartcare 1800 s, retrievals 600 s, analyses 300 s</td><td>None</td><td>TIMEOUT; dependents SKIPPED. The worker thread keeps running (<code>scheduler.py:310</code>).</td></tr>
+<tr><td>Trino (<code>trino_client.run_trino_query</code>)</td><td>No query timeout set</td><td>1 retry with a fresh connection</td><td>Raises after the second failure.</td></tr>
+<tr><td>Smartcare JDBC (<code>connections.smartcareConnection</code>)</td><td>connect 60 s, socket and network 1800 s</td><td>None: <code>run_single_query(max_retries=1)</code> makes one attempt, although its docstring says it retries once</td><td>The query returns an empty DataFrame; the task still succeeds with the other queries.</td></tr>
+<tr><td>NPP HTTP (<code>npp_service.fetch_one</code>)</td><td>(10 s connect, 60 s read) per request</td><td>None</td><td>Request counted as failed; raises only if every request failed.</td></tr>
+<tr><td>NPP chart fetch (<code>pipeline._npp_chart_series</code>)</td><td>120 s budget per analysis (<code>NPP_CHART_FETCH_BUDGET_S</code>)</td><td>None</td><td>Chart falls back to the analysis-window rows.</td></tr>
+<tr><td>Splunk HTTP (<code>splunk_service.process_kpi</code>)</td><td>60 s per KPI request</td><td>None</td><td>KPI skipped; raises only if every KPI of the node failed.</td></tr>
+<tr><td>Viavi Oracle, Remedy MSSQL</td><td>No driver-level query timeout set</td><td>None (NCI invalidates the pooled connection)</td><td>Raises; the task fails.</td></tr>
+<tr><td>Trino → Smartcare cell fallback</td><td>waits 110 s for Smartcare (<code>FALLBACK_WAIT_SECONDS</code>)</td><td>n/a</td><td>Trino task fails with a clear message.</td></tr>
+<tr><td>NCI callback POST</td><td>10 s</td><td>None</td><td>Logged.</td></tr>
+<tr><td>Gunicorn worker</td><td>100,080 s (about 28 h)</td><td>n/a</td><td>Worker timeout is effectively off.</td></tr>
+</tbody></table></div>
+<p><strong>Exception handling pattern.</strong> Views turn <code>ValueError</code> into 400 and anything else into 500 (<code>job_base.post</code>, the KPI views, NCI). Inside jobs, <code>_run_safely</code> marks the job FAILED with the exception text. Inside the DAG, each task failure is isolated by the scheduler, each wrapper in <code>_build_sources</code> catches its own shaping errors and logs a <code>*_details ERROR</code> event, and services log to the per-request file and either return empty data or raise.</p>
+
+<h2 id="diag-a">2A. Backend architecture</h2>
+<figure class="dia"><pre class="mermaid">
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
+flowchart TB
+  ui["Angular portal"]
+  ext["STCC and NCI callers"]
+  subgraph GW["Gunicorn, 3 sync workers, Django 4.2 + DRF"]
+    mw["Middleware: CORS, Security, Session, CSRF, Auth"]
+    urls["URLconf: callflow_portal/urls.py"]
+    vjob["Job views: analysis, stcc/analysis"]
+    vrca["RCA views: rca-status, rca-files, file"]
+    vnci["NCI views: analysis, rca"]
+    vkpi["Sync KPI views: npp, viavi, remedy, site-kpis"]
+    thr["Daemon job thread"]
+    dag["pipeline DAG + scheduler.run_plan"]
+    ana["Analyzers + KPIAnalyzer"]
+    ncir["NCI runners"]
+    ret["Retrieval services"]
+    rcaf["rca_files + task_logging"]
+  end
+  subgraph STORE["Local state"]
+    redis[("Redis: jobs, Smartcare cache")]
+    fcache[("cache_store pickles")]
+    out[("callflow_output: logs, rca per request")]
+    data[("data: master sheet, site maps, thresholds")]
+  end
+  subgraph EXT["External systems"]
+    trino[["Trino"]]
+    sc[["Smartcare Hive JDBC"]]
+    npp[["NPP REST"]]
+    spl[["Splunk REST"]]
+    via[["Viavi Oracle"]]
+    rem[["Remedy MSSQL"]]
+  end
+  ui --> mw
+  ext --> mw
+  mw --> urls
+  urls --> vjob
+  urls --> vrca
+  urls --> vnci
+  urls --> vkpi
+  vjob --> thr
+  thr --> dag
+  dag --> ret
+  dag --> ana
+  thr --> rcaf
+  vnci --> ncir
+  ncir --> ret
+  ncir --> ana
+  vkpi --> ret
+  vjob --> redis
+  thr --> redis
+  rcaf --> out
+  vrca --> out
+  ana --> data
+  ret --> fcache
+  ret --> EXT
+</pre></figure>
+<p class="note">The portal and STCC never wait on the request thread: the view writes a job to Redis, starts a daemon thread and returns 202. That thread runs the DAG on a second thread pool, which calls the services, and pushes progress back into Redis while writing request-scoped RCA files to disk. NCI and the four thin KPI views do the same service calls inside the request, holding a sync worker for the whole run. The two Django databases are reached only by Django's own session, auth and admin apps.</p>
+
+<h2 id="diag-b">2B. File and module dependency graph</h2>
+<p>Arrows read "imports". Solid arrows are module-level imports; dashed arrows are imports inside a function (resolved when that function first runs). Derived with an AST scan of all 108 modules, then checked by hand. No import cycles exist at either level.</p>
+
+<h3>B1. Startup and routing</h3>
+<figure class="dia"><pre class="mermaid">
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
+flowchart LR
+  gun["callflow_gunicorn_start"] --> wsgi["callflow_portal/wsgi.py"]
+  manage["manage.py"] --> settings["callflow_portal/settings.py"]
+  wsgi --> settings
+  settings --> gconst["general_apis/constants.py"]
+  settings -. "ROOT_URLCONF" .-> rurls["callflow_portal/urls.py"]
+  rurls -. "include" .-> cfurls["callflow/urls.py"]
+  rurls -. "include" .-> nciurls["NCI/urls.py"]
+  cfurls -. "include" .-> coreurls["callflow/core/urls.py"]
+  cfurls -. "include" .-> protourls["callflow/prototype/urls.py (no routes)"]
+  coreurls --> vorch["views/orchestrated_analysis.py"]
+  coreurls --> vstcc["views/stcc_analysis.py"]
+  coreurls --> vsite["views/smartcare_site_kpi.py"]
+  coreurls --> vnpp["views/test_npp_kpi.py"]
+  coreurls --> vvia["views/test_viavi_kpi.py"]
+  coreurls --> vrem["views/test_remedy_ticket.py"]
+  nciurls --> nviews["NCI/views.py"]
+  protourls --> pviews["prototype/views.py"]
+  pviews --> papis["prototype/apis.py"]
+</pre></figure>
+<p class="note"><code>include()</code> takes module paths as strings, so those edges come from Django's URL resolver, not Python imports. The prototype package is loaded at startup through its <code>urls.py</code> import but exposes no route.</p>
+
+<h3>B2. Views to orchestration</h3>
+<figure class="dia"><pre class="mermaid">
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
+flowchart LR
+  vorch["views/orchestrated_analysis"] --> vbase["views/base"]
+  vorch --> jbase["views/job_base"]
+  vorch --> jm["jobs/job_manager"]
+  vorch --> pipe["orchestration/pipeline"]
+  vorch --> rcaf["orchestration/rca_files"]
+  vorch --> cres["orchestration/cell_resolution"]
+  vorch --> ds["orchestration/dashboard_shaping"]
+  vorch --> tlog["orchestration/task_logging"]
+  vorch -.-> sread["orchestration/summary_readiness"]
+  vstcc["views/stcc_analysis"] --> jbase
+  vstcc --> jm
+  vstcc --> pipe
+  vstcc --> sched["orchestration/scheduler"]
+  jbase --> vbase
+  jbase --> jm
+  jbase --> lu["utils/logging_utils"]
+  pipe --> sched
+  pipe --> anpkg["orchestration/analyzers"]
+  pipe --> cc["orchestration/customer_counts"]
+  pipe --> pd_["analyzers/_pandas"]
+  cc --> ds
+</pre></figure>
+<p class="note"><code>pipeline.py</code> is the hub: 14 module-level imports, including every retrieval service (next graph). Its docstring says the service imports are deferred, but lines 35 to 59 import them at module level, so importing the pipeline loads pandas, JPype, cx_Oracle, pyodbc and trino.</p>
+
+<h3>B3. Orchestration and analyzers to services</h3>
+<figure class="dia"><pre class="mermaid">
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
+flowchart LR
+  pipe["pipeline"] --> trs["services/trino_service"]
+  pipe --> scs["services/smartcare_service"]
+  pipe --> npps["services/npp_service"]
+  pipe --> vis["services/viavi_service"]
+  pipe --> rms["services/remedy_service"]
+  pipe --> sps["services/splunk_service"]
+  pipe --> conn["utils/connections"]
+  pipe --> cls["utils/classes"]
+  pipe --> du["utils/data_utils"]
+  pipe --> gc["constants/general_constants"]
+  nan["analyzers/npp_analyzer"] --> kpia["services/kpi_analyzer"]
+  nan --> npps
+  van["analyzers/viavi_analyzer"] --> kpia
+  van --> ep["constants/endpoints"]
+  span["analyzers/splunk_analyzer"] --> kpia
+  span --> sidx["orchestration/smartcare_index"]
+  ran["analyzers/remedy_analyzer"] --> scs
+  nan --> sev["analyzers/severity"]
+  van --> sev
+  span --> sev
+  nan --> base["analyzers/base"]
+  van --> base
+  span --> base
+  ran --> base
+  kpia --> kth["services/kpi_thresholds"]
+  kpia --> smap["utils/site_mapping"]
+  kpia -.-> rth["analyzers/rca_threshold"]
+  sidx -.-> du
+  sidx -.-> ep
+</pre></figure>
+<p class="note">Two layering inversions, neither a cycle: <code>services/kpi_analyzer</code> reaches back up into <code>orchestration/analyzers/rca_threshold</code> (dashed, inside <code>_check_thresholds</code>), and <code>remedy_analyzer</code> borrows <code>calculate_top_remedy_with_subs</code> from the Smartcare service.</p>
+
+<h3>B4. Services to data access, utilities and constants</h3>
+<figure class="dia"><pre class="mermaid">
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
+flowchart LR
+  trs["trino_service"] --> tcl["utils/trino_client"]
+  trs --> mcn["utils/mapping_cell_name"]
+  scs["smartcare_service"] --> sqr["smartcare_query_runner"]
+  scs --> q["constants/queries"]
+  scs --> fc["utils/file_cache"]
+  scs --> js["utils/java_sanitize"]
+  sqr --> conn["utils/connections"]
+  sqr --> pool["connectors/smartcare_pool (imported, not called)"]
+  sqr -.-> par["services/_parallel"]
+  sqr --> lu["utils/logging_utils"]
+  pool --> cp["connectors/connection_pool"]
+  npps["npp_service"] --> par
+  npps --> fc
+  npps --> du["utils/data_utils"]
+  sps["splunk_service"] --> ep["constants/endpoints"]
+  sps --> fc
+  vis["viavi_service"] --> fc
+  rms["remedy_service"] --> cls["utils/classes"]
+  rms --> du
+  sks["smartcare_site_kpi_service"] --> sqr
+  sks --> ssq["constants/smartcare_sites_queries"]
+  conn --> cfg["constants/configs"]
+  cfg --> gc["constants/general_constants"]
+  du --> ep
+  cls --> gac["general_apis/constants"]
+</pre></figure>
+<p class="note"><code>utils/data_utils</code> has the highest fan-in in the codebase (11 importers), followed by <code>dashboard_shaping</code> (9), <code>analyzers/base</code> and <code>views/base</code> (7 each), and <code>file_cache</code> and <code>connections</code>. <code>core/utils/classes.py</code> imports <code>general_apis/constants.py</code>, a second copy of the constants that also exists as <code>core/constants/general_constants.py</code>.</p>
+
+<h3>B5. NCI app</h3>
+<figure class="dia"><pre class="mermaid">
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
+flowchart LR
+  nv["NCI/views"] --> vbase["callflow views/base"]
+  nv --> lu["utils/logging_utils"]
+  nv --> jm["jobs/job_manager"]
+  nv --> ar["NCI/service/analysis_runner"]
+  nv --> rsr["NCI/service/rca_site_runner"]
+  nv --> auth["NCI/utils/authentication (decorator commented out)"]
+  rsr --> ar
+  rsr --> jm
+  rsr --> hlp["NCI/utils/helpers"]
+  ar --> npps["services/npp_service"]
+  ar --> vis["services/viavi_service"]
+  ar --> rms["services/remedy_service"]
+  ar --> kpia["services/kpi_analyzer"]
+  ar --> fc["utils/file_cache"]
+  ar --> vp["NCI/connectors/viavi_pool"]
+  ar --> rp["NCI/connectors/remedy_pool"]
+  ar --> hlp
+  vp --> cp["connectors/connection_pool"]
+  rp --> cp
+  vp --> conn["utils/connections"]
+  rp --> cls["utils/classes"]
+  hlp --> du["utils/data_utils"]
+</pre></figure>
+<p class="note">NCI does not use the DAG or the analyzers. It calls the same retrieval services and <code>KPIAnalyzer</code> directly, and it is the only caller of the connection pools.</p>
+
+<h2 id="diag-c">2C. API execution flows</h2>
+
+<h3>C1. POST /callflow/api/analysis (portal)</h3>
+<figure class="dia"><pre class="mermaid">
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
+flowchart TD
+  a1["POST /callflow/api/analysis"] --> a2["callflow_portal/urls.py:23 include callflow.urls"]
+  a2 --> a3["callflow/urls.py:5 include callflow.core.urls"]
+  a3 --> a4["core/urls.py:82 AnalysisOrchestratorAPIView"]
+  a4 --> a5["JobBackedAPIView.post job_base.py:57"]
+  a5 --> a6["build_log_context orchestrated_analysis.py:64"]
+  a6 --> a6a["parse_request_time_range base.py:66"]
+  a6 --> a6b["build_analysis_time_windows base.py:73"]
+  a6 --> a6c["get_log_file base.py:112"]
+  a5 --> a7["build_request_logger logging_utils"]
+  a5 --> a8["job_manager.create_job: Redis"]
+  a5 --> a9["Thread _run_safely job_base.py:101"]
+  a5 --> a10["Response 202 job_id"]
+  a9 --> b1["run_job orchestrated_analysis.py:79"]
+  b1 --> b2["rca_files.init_request + provision_threshold"]
+  b1 --> b3["_build_sources :349 wraps default_sources pipeline.py:342"]
+  b1 --> b4["run_callflow_analysis pipeline.py:282"]
+  b4 --> b5["build_callflow_plan :229, 11 tasks"]
+  b4 --> b6["scheduler.run_plan :157, 12 threads"]
+  b6 --> t1["trino_cells: fetch_cell_dataframe to Trino"]
+  b6 --> t2["smartcare: fetch_smartcare_nodes_data to Hive"]
+  b6 --> t3["splunk_retrieval: splunkIntegration x5 nodes"]
+  t1 --> t4["sites: process_sitename"]
+  t1 --> t5["npp_retrieval: nppIntegration x2 windows"]
+  t4 --> t6["viavi_retrieval: viaviQueries"]
+  t4 --> t7["remedy_retrieval: remedyTicketsData"]
+  t5 --> t8["npp_analysis: NppAnalyzer"]
+  t6 --> t9["viavi_analysis: ViaviAnalyzer"]
+  t7 --> t10["remedy_analysis: RemedyAnalyzer"]
+  t3 --> t11["splunk_analysis: SplunkAnalyzer"]
+  t2 --> t11
+  b6 --> c1["on_start / progress_cb: update_job systems, summary, rca"]
+  b1 --> c2["return result dict"]
+  c2 --> c3["_run_safely: update_job DONE with result"]
+</pre></figure>
+<p class="note">Validation errors in <code>build_log_context</code> (missing dates or MSISDNs, start after end) become 400 before any job exists. Everything else happens in the thread. Each wrapped retrieval also writes its RCA CSV and updates the manifest; each wrapped analysis streams <code>details</code> and <code>dashboard</code> into the job as soon as it finishes.</p>
+
+<h3>C2. Polling and RCA file endpoints</h3>
+<figure class="dia"><pre class="mermaid">
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
+flowchart LR
+  g1["GET analysis/job_id"] --> g2["JobBackedAPIView.get job_base.py:86"] --> g3["job_manager.get_job"] --> r1[("Redis callflow_job key")]
+  g4["GET analysis/id/rca-status"] --> g5["RCAStatusAPIView.get :677"] --> g6["rca_files.rca_status :296"] --> f1[("rca/id/manifest.json")]
+  g7["GET analysis/id/rca-files"] --> g8["RCAFilesAPIView.get :687"] --> g9["rca_files.list_ready_files :314"] --> f1
+  g10["GET analysis/id/file/name"] --> g11["RCAFileDownloadAPIView.get :697"] --> g12["rca_files.resolve_file :337"] --> f2[("rca/id/name.csv")]
+</pre></figure>
+<p class="note">All four are cheap reads. <code>resolve_file</code> rejects path traversal in both the id and the filename. Route order in <code>core/urls.py</code> puts the three multi-segment RCA routes before the generic <code>analysis/{job_id}</code> route.</p>
+
+<h3>C3. POST /callflow/api/stcc/analysis</h3>
+<figure class="dia"><pre class="mermaid">
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
+flowchart TD
+  s1["POST stcc/analysis"] --> s2["core/urls.py:94 STCCAnalysisAPIView"]
+  s2 --> s3["JobBackedAPIView.post: create_job, thread, 202"]
+  s3 --> s4["run_job stcc_analysis.py:162"]
+  s4 --> s5["stcc_plan: build_callflow_plan filtered to 8 tasks"]
+  s5 --> s6["scheduler.run_plan, 8 threads, default_sources unwrapped"]
+  s6 --> s7["trino_cells, sites, npp, viavi, remedy retrieval and analysis"]
+  s4 --> s8["build_stcc_response :91, to_json"]
+  s8 --> s9["update_job DONE result"]
+</pre></figure>
+<p class="note">STCC uses the raw <code>default_sources()</code> without the portal wrappers, so it writes no RCA files, has no Trino-to-Smartcare cell fallback and never runs Smartcare or Splunk. The comment in <code>core/urls.py:93</code> calls it synchronous; the code is job-based.</p>
+
+<h3>C4. POST /callflow/NCI/analysis/</h3>
+<figure class="dia"><pre class="mermaid">
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
+flowchart TD
+  n1["POST NCI/analysis/"] --> n2["NCI/urls.py:8 NCIAnalysisAPIView.post :72"]
+  n2 --> n3["validate site_names items SITE and FLAG"]
+  n3 --> n4["get_log_file nci now now, build_request_logger"]
+  n4 --> n5{"callback_url?"}
+  n5 -- "no, default" --> n6["run_nci_analysis analysis_runner.py:377 in the request"]
+  n5 -- "yes" --> n7["create_job, thread _run_and_callback, 202"]
+  n7 --> n6
+  n6 --> n8["build_nci_time_windows: current, -1 day, -1 week, 12 h each"]
+  n6 --> n9["ThreadPool: fetch_npp_one_site per site per window"]
+  n6 --> n10["fetch_viavi per window: viavi_pool + viaviQueries"]
+  n6 --> n11["fetch_remedy per window: remedy_pool + remedyTicketsData"]
+  n9 --> n12["nppIntegration site hourly"]
+  n6 --> n13["_run_npp_comparisons, _run_viavi_comparisons: KPIAnalyzer"]
+  n13 --> n14["build_site_summary :342"]
+  n14 --> n15["_json_safe, add FLAG, 200"]
+  n7 --> n16["requests.post callback_url, 10 s"]
+</pre></figure>
+
+<h3>C5. POST /callflow/NCI/rca/</h3>
+<figure class="dia"><pre class="mermaid">
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
+flowchart TD
+  r1["POST NCI/rca/"] --> r2["NCIRcaSitesAPIView.post NCI/views.py:199"]
+  r2 --> r3["parse sites, baseline_method, start and end"]
+  r3 --> r4["run_rca_site_analysis rca_site_runner.py:125"]
+  r4 --> r5["windows: primary start-2h to end, yesterday"]
+  r5 --> r6["fetch_npp_one_site daily per site per window"]
+  r5 --> r7["fetch_viavi per window"]
+  r4 --> r8["fetch_remedy primary only"]
+  r6 --> r9["_normalize_npp_df, _pick_baseline"]
+  r9 --> r10["KPIAnalyzer.analyze_npp 15m thresholds"]
+  r7 --> r11["KPIAnalyzer.analyze_viavi"]
+  r10 --> r12["_fold_to_sites"]
+  r11 --> r12
+  r12 --> r13["build_site_summary"]
+  r8 --> r13
+  r13 --> r14["_rca_site_score, ranking, 200"]
+</pre></figure>
+
+<h3>C6. Thin KPI endpoints</h3>
+<figure class="dia"><pre class="mermaid">
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
+flowchart LR
+  k1["POST npp/kpis"] --> k2["NppKpiAPIView.post"] --> k3["nppIntegration"] --> x1[["NPP REST"]]
+  k4["POST viavi/kpis/"] --> k5["ViaviKpiAPIView.post"] --> k6["viaviConnection + viaviQueries"] --> x2[["Viavi Oracle"]]
+  k7["POST remedy/kpis/"] --> k8["RemedyKpiAPIView.post"] --> k9["Connection.connect + remedyTicketsData"] --> x3[["Remedy MSSQL"]]
+  k10["POST smartcare/site-kpis"] --> k11["SmartcareSiteKpiAPIView.post"] --> k12["fetch_smartcare_site_kpis"] --> k13["execute_smartcare_queries, sequential per window and query"] --> x4[["Smartcare Hive"]]
+</pre></figure>
+<p class="note">All four run inside the request. The Viavi and Remedy views set <code>conn = None</code> after use instead of closing it, and their <code>pool</code> variable is never assigned, so the invalidate branches never run.</p>
+
+<h2 id="diag-d">2D. Function call graph</h2>
+<p>The functions that more than one endpoint depends on, with their callers. A change to anything in the middle column reaches every endpoint on the left that connects to it.</p>
+<figure class="dia"><pre class="mermaid">
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
+flowchart LR
+  subgraph EP["Entry points"]
+    e1["portal analysis run_job"]
+    e2["STCC run_job"]
+    e3["run_nci_analysis"]
+    e4["run_rca_site_analysis"]
+    e5["NppKpiAPIView"]
+    e6["ViaviKpiAPIView"]
+    e7["RemedyKpiAPIView"]
+    e8["fetch_smartcare_site_kpis"]
+  end
+  subgraph SH["Shared functions"]
+    rp["scheduler.run_plan"]
+    ds["pipeline.default_sources"]
+    npp["npp_service.nppIntegration"]
+    via["viavi_service.viaviQueries"]
+    rem["remedy_service.remedyTicketsData"]
+    ka["KPIAnalyzer.analyze_npp / analyze_viavi"]
+    kc["KPIAnalyzer.analyze_core_node"]
+    esq["execute_smartcare_queries"]
+    jm["job_manager create / update / get"]
+    psn["data_utils.process_sitename"]
+    fc["file_cache cache_get / cache_set"]
+    rt["rca_threshold.check_threshold"]
+  end
+  e1 --> rp
+  e2 --> rp
+  e1 --> ds
+  e2 --> ds
+  ds --> npp
+  ds --> via
+  ds --> rem
+  ds --> esq
+  ds --> kc
+  ds --> ka
+  ds --> psn
+  e3 --> npp
+  e3 --> via
+  e3 --> rem
+  e3 --> ka
+  e4 --> npp
+  e4 --> via
+  e4 --> rem
+  e4 --> ka
+  e5 --> npp
+  e6 --> via
+  e7 --> rem
+  e8 --> esq
+  e1 --> jm
+  e2 --> jm
+  e3 --> jm
+  e4 --> jm
+  npp --> fc
+  via --> fc
+  ka --> rt
+  kc --> rt
+</pre></figure>
+<p class="note"><code>default_sources</code> reaches Splunk via <code>splunkIntegration</code> and Smartcare via <code>fetch_smartcare_nodes_data</code>; only the portal analysis calls those. The process-wide semaphore <code>_NPP_HTTP_SLOTS</code> (10 concurrent requests, <code>npp_service.py:27</code>) is shared by every NPP caller in a worker, so a large NCI request can slow portal NPP retrieval running in the same worker.</p>
+
+<h4>Key call chains inside the portal analysis</h4>
+<div class="tbl"><table>
+<thead><tr><th>Task</th><th>Call chain (file:line)</th></tr></thead>
+<tbody>
+<tr><td>trino_cells</td><td><code>wrapped_get_cells</code> (orchestrated_analysis:422) → <code>get_cells</code> (pipeline:347) → <code>fetch_cell_dataframe</code> (trino_service:89) → <code>build_cell_query</code> (:57) → <code>run_trino_query</code> (trino_client:43); then <code>customer_counts_from_df</code> (trino_service:155), <code>cell_names_from_df</code> (:119), <code>cell_resolution.resolve_cells</code> (:52)</td></tr>
+<tr><td>smartcare</td><td><code>wrapped_smartcare</code> (:389) → <code>fetch_smartcare_nodes_data</code> (smartcare_service:308) → Redis cache check → <code>smartcareNodesQueries</code> (:51) → 2-hour chunks → <code>execute_smartcare_queries</code> (smartcare_query_runner:266) → <code>run_in_order</code> (_parallel:18) → <code>run_single_query</code> (:97) → <code>smartcareConnection</code> (connections:14); then <code>process_smartcare_data</code> (:260) → <code>smartcareOutput_Aggregated</code>, <code>packet_nodes</code>, <code>calculate_subs_per_cell_site_handset</code> (Data only)</td></tr>
+<tr><td>npp_retrieval</td><td><code>retrieval_wrapper</code> (:371) → <code>retrieve_npp</code> (pipeline:392) → 2 windows in parallel → <code>_npp_fetch</code> (:385) → <code>nppIntegration</code> (npp_service:28) → <code>run_in_order</code> → <code>fetch_one</code> (:105) → <code>requests.post</code></td></tr>
+<tr><td>npp_analysis</td><td><code>wrapped_npp_analysis</code> (:488) → <code>NppAnalyzer.analyze</code> (npp_analyzer:85) → <code>KPIAnalyzer.analyze_npp</code> (kpi_analyzer:264) → <code>_check_thresholds</code> (:142) → <code>rca_threshold.check_threshold</code>; <code>filter_entities_by_severity</code>; <code>calculate_affected_hub_taclac_metrics</code> (npp_service:198, reads the master sheet); <code>shape_npp_abnormal</code> with <code>_npp_chart_series</code> (pipeline:433)</td></tr>
+<tr><td>splunk_retrieval / analysis</td><td><code>retrieve_splunk</code> (pipeline:491) → 5 nodes in parallel → <code>splunkIntegration</code> (splunk_service:38) → 5 KPI threads per node (DSC: 4 regions × 5) → <code>requests.get</code>. Analysis: <code>SplunkAnalyzer.analyze</code> (splunk_analyzer:80) → <code>analyze_core_node</code> (kpi_analyzer:210) → severity gate → <code>SmartcareIndex.splunk_subs_mapper</code> (smartcare_index:142) → <code>shape_splunk_abnormal</code></td></tr>
+<tr><td>viavi / remedy</td><td><code>retrieve_viavi</code> (pipeline:465) → <code>viaviConnection</code> + <code>viaviQueries</code>; <code>retrieve_remedy</code> (:479) → <code>Connection.connect</code> + <code>remedyTicketsData</code>; analyzers → <code>KPIAnalyzer.analyze_viavi</code> (:350), <code>calculate_top_remedy_with_subs</code> (smartcare_service:383), <code>shape_remedy</code></td></tr>
+</tbody></table></div>
+
+<h2 id="diag-e">2E. Data flow</h2>
+<p>From the portal request body to what Angular and the RCA tool receive. Cylinders are data at rest; everything else is in memory inside the job thread.</p>
+<figure class="dia"><pre class="mermaid">
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
+flowchart LR
+  req["Request: msisdn_list, start_date, end_date, Complain_Type, imsi"] --> tw["parse_time_window: naive datetimes"]
+  tw --> win["Windows: current = start-2h to end, previous = same minus 1 day, query span about 28 h"]
+  req --> tsql["Trino SQL: MSISDN IN list, epochs from Africa/Cairo local time"]
+  tsql --> trows["Trino rows: MSISDN and cell ids"]
+  trows --> cells["Cell names via map_cell_ids and SITE_NAME_Mapping.csv"]
+  trows --> cc["customer_counts_from_df: customers per cell and per site"]
+  trows --> f1[("trino_cells.csv")]
+  cells --> sites["process_sitename: site codes"]
+  cells --> nreq["NPP POST per cell per hour, 2 windows"]
+  win --> nreq
+  nreq --> ndf["NPP frame grouped by DATETIME_ID, cell, Vendor"]
+  ndf --> f2[("npp_kpi.csv")]
+  ndf --> nk["analyze_npp: mean current vs previous, threshold rules"]
+  nk --> ng["Severity gate: high, increase, medium"]
+  ng --> ne["Hub, TAC, LAC enrichment from master sheet xlsx"]
+  cc --> ne
+  ng --> na["NPP abnormal rows + 28 h chart per affected cell"]
+  sites --> vsql["Viavi SQL: FLWID LIKE site"]
+  vsql --> vdf["FD, FDV, FLR per route"]
+  vdf --> f3[("viavi_kpi.csv")]
+  vdf --> vk["analyze_viavi + severity gate"]
+  vk --> va["Viavi abnormal rows"]
+  cc --> va
+  sites --> rsql["Remedy SQL: site LIKE, 7-day lookback"]
+  rsql --> rt["Tickets per site"]
+  rt --> f4[("remedy_kpi.csv")]
+  rt --> rtop["Top 10 sites by subscribers"]
+  na --> rfil["Keep tickets of sites with NPP-affected cells"]
+  rtop --> rfil
+  req --> ssql["Smartcare HiveQL, 6 queries per 2-hour chunk"]
+  ssql --> sproc["process_smartcare_data: processed_data, metrics, packetNodes"]
+  sproc --> f5[("smartcare_filter.csv")]
+  sproc --> rc[("Redis, 10 h")]
+  win --> spreq["Splunk GET per KPI over the query span"]
+  spreq --> sdf["Per-node frames, columns kpi__suffix"]
+  sdf --> f6[("splunk_node_kpi.csv per node")]
+  sdf --> sal["analyze_core_node alarms + severity gate"]
+  sal --> smap["Suffix to Smartcare node to MSISDN count"]
+  sproc --> smap
+  na --> job[("Redis job: details, dashboard, summary")]
+  va --> job
+  rfil --> job
+  smap --> job
+  job --> ang["GET analysis/id to Angular"]
+  f1 --> rca["RCA tool via rca-files and file download"]
+  f2 --> rca
+  f3 --> rca
+  f4 --> rca
+  f5 --> rca
+  f6 --> rca
+</pre></figure>
+<p class="note"><strong>Validation</strong> happens only at the edge: <code>parse_time_window</code> (format and start before end) and a non-empty <code>msisdn_list</code>. MSISDN format rules in <code>smartcare_Validation_Inputs</code> are used only by the unrouted prototype. <strong>Transformations</strong> that matter for debugging: Trino times are localised to Africa/Cairo (<code>trino_service._epochs</code>), Smartcare uses the naive string in HiveQL <code>unix_timestamp()</code>, Viavi uses a 12-hour <code>AM/PM</code> string, Splunk uses <code>%m/%d/%Y:%H:%M:%S</code>. The RCA tool reads the CSVs, not the analysed results, and applies <code>data/thresholds.xlsx</code>, while the backend applies the Python dicts in <code>kpi_thresholds.py</code>. That split is one source of portal-vs-RCA differences.</p>
+
+<h2 id="diag-f">2F. External integration dependency graph</h2>
+<figure class="dia"><pre class="mermaid">
+%%{init: {"flowchart": {"useMaxWidth": false}}}%%
+flowchart LR
+  subgraph CALLERS["Calling modules"]
+    pl["pipeline.default_sources"]
+    nr["NCI analysis_runner"]
+    kv["thin KPI views"]
+    sk["smartcare_site_kpi_service"]
+    jmgr["job_manager"]
+  end
+  subgraph FUNCS["Functions that make the call"]
+    rtq["trino_client.run_trino_query"]
+    rsq["smartcare_query_runner.run_single_query"]
+    fo["npp_service.fetch_one"]
+    pk["splunk_service.process_kpi"]
+    vq["viavi_service.viaviQueries"]
+    rq["remedy_service.remedyTicketsData"]
+    cache["django cache get / set"]
+    fcache["file_cache pickle read / write"]
+  end
+  trino[["Trino"]]
+  sc[["Smartcare Hive"]]
+  npp[["NPP REST"]]
+  spl[["Splunk REST"]]
+  via[["Viavi Oracle"]]
+  rem[["Remedy MSSQL"]]
+  red[("Redis")]
+  disk[("cache_store disk")]
+  pl --> rtq --> trino
+  pl --> rsq --> sc
+  sk --> rsq
+  pl --> fo --> npp
+  nr --> fo
+  kv --> fo
+  pl --> pk --> spl
+  pl --> vq --> via
+  nr --> vq
+  kv --> vq
+  pl --> rq --> rem
+  nr --> rq
+  kv --> rq
+  jmgr --> cache --> red
+  rsq -. "result cached by fetch_smartcare_nodes_data" .-> cache
+  fo -. "nppIntegration" .-> fcache --> disk
+  pk -. "splunkIntegration" .-> fcache
+  vq --> fcache
+</pre></figure>
+<div class="tbl"><table>
+<thead><tr><th>System</th><th>Call made by</th><th>Sends / receives</th><th>Who depends on the result</th><th>Slow</th><th>Unavailable</th><th>Invalid or partial data</th></tr></thead>
+<tbody>
+<tr><td><strong>Trino</strong><br><code>10.230.180.66:8443</code>, basic auth, <code>verify=False</code></td><td><code>run_trino_query</code> via <code>fetch_cell_dataframe</code> (portal, STCC)</td><td>SQL over <code>hive.smartcare.npl_4g</code>, <code>iceberg…npl_attach_4g</code>, <code>…npl_ho_4g</code> with the MSISDN list and epoch range / rows of MSISDN and cell ids</td><td>sites, NPP, Viavi, Remedy retrieval; customer counts for every analysis; <code>trino_cells.csv</code></td><td>No query timeout; only the 1800 s task deadline. Smartcare and Splunk keep running; everything else waits.</td><td>One retry with a fresh connection, then <code>trino_cells</code> FAILED and the 7 tasks downstream of it (sites, NPP, Viavi, Remedy retrieval and analysis) SKIPPED.</td><td>Zero cells: waits up to 110 s for Smartcare and reuses its <code>cell_name</code> column (portal only).</td></tr>
+<tr><td><strong>Smartcare</strong><br>Hive via JDBC (jaydebeapi + JPype)</td><td><code>run_single_query</code> via <code>execute_smartcare_queries</code> (portal Smartcare task, site-kpis)</td><td>HiveQL templates with MSISDN tuple, <code>unix_timestamp</code> range, day-numbered table / CDR rows (Java types converted)</td><td>Splunk analysis (subscriber mapping), Smartcare card, packet nodes, handset types, <code>smartcare_filter.csv</code>, Trino-empty fallback</td><td>Socket timeout 30 min; task 1800 s. Splunk analysis waits for it.</td><td>A failed query returns an empty frame. Only if every query is empty does the task raise "No Smartcare data returned".</td><td>One failed query (for example S1-MME) is invisible to the task status; the columns it would have added are just missing.</td></tr>
+<tr><td><strong>NPP</strong><br><code>10.241.161.227:3000/get-kpis/…</code>, bearer token</td><td><code>fetch_one</code> via <code>nppIntegration</code> (portal, STCC, NCI, npp/kpis)</td><td>JSON <code>{cellName or site, hour}</code> per entity per hour / CSV of 15-min or hourly KPIs</td><td>NPP analysis, NPP cards, abnormal chart, Remedy site filter, <code>npp_kpi.csv</code></td><td>(10 s, 60 s) per request, 5 threads per call, 10 per worker process; task 600 s, then TIMEOUT and "NPP processing failed".</td><td>Raises only if every request failed; otherwise missing hours are dropped.</td><td>Unparseable CSV counts as a failed request; empty CSV counts as empty.</td></tr>
+<tr><td><strong>Splunk</strong><br>REST URLs in <code>SPLUNK_ENDPOINTS</code></td><td><code>process_kpi</code> via <code>splunkIntegration</code> (portal only)</td><td>GET per KPI with time placeholders replaced / CSV time series</td><td>Splunk analysis, per-node <code>splunk_*_kpi.csv</code></td><td>60 s per KPI, 5 threads per node, 5 nodes in parallel; task 600 s.</td><td>A node raises only if every KPI failed; that node is dropped and the others continue.</td><td>Missing time column falls back to the first column; a failed merge drops that KPI with a log line.</td></tr>
+<tr><td><strong>Viavi</strong><br>Oracle via cx_Oracle</td><td><code>viaviQueries</code> (portal, STCC, NCI, viavi/kpis)</td><td>SQL on <code>ONEADM."vw_VIAVI_Ethernet_Raw"</code> with <code>FLWID LIKE '%site%'</code> / FD, FDV, FLR rows</td><td>Viavi analysis, transport card, <code>viavi_kpi.csv</code></td><td>No query timeout; task 600 s.</td><td>Connection error raises; task FAILED.</td><td>Missing expected columns raise; task FAILED.</td></tr>
+<tr><td><strong>Remedy</strong><br>MSSQL via pyodbc</td><td><code>remedyTicketsData</code> (portal, STCC, NCI, remedy/kpis)</td><td>SQL on <code>Mobile_Squad.dbo.Remedy_Tickets</code>, 7-day lookback, <code>site LIKE</code> / tickets</td><td>Remedy analysis and card</td><td>No query timeout; task 600 s.</td><td>"Connection Failed" raises; task FAILED.</td><td>No rows returns <code>({}, 0)</code>.</td></tr>
+<tr><td><strong>Redis</strong><br><code>127.0.0.1:6379/1</code></td><td><code>job_manager</code>, <code>fetch_smartcare_nodes_data</code></td><td>Pickled job dicts and Smartcare results</td><td>Every job endpoint, every poll</td><td>Blocks the caller.</td><td><span class="tag p">POTENTIAL</span> <code>create_job</code> raises and the POST returns 500; failures inside the job thread depend on where they are raised.</td><td>Expired job: GET returns 404 and <code>update_job</code> silently no-ops.</td></tr>
+</tbody></table></div>
+
+<h2 id="diag-g">2G. Runtime sequence diagrams</h2>
+<h3>G1. Portal analysis, end to end</h3>
+<figure class="dia"><pre class="mermaid">
+%%{init: {"sequence": {"useMaxWidth": false}}}%%
+sequenceDiagram
+  autonumber
+  participant UI as Angular
+  participant W as Gunicorn worker (view)
+  participant R as Redis
+  participant J as Job thread
+  participant P as Scheduler pool (12)
+  participant T as Trino
+  participant S as Smartcare
+  participant SP as Splunk
+  participant N as NPP
+  participant VR as Viavi and Remedy
+  participant D as Disk (rca folder)
+  UI->>W: POST /callflow/api/analysis
+  W->>R: create_job PENDING
+  W->>J: start daemon thread
+  W-->>UI: 202 job_id
+  J->>D: init_request manifest, copy thresholds.xlsx
+  J->>P: run_plan(11 tasks)
+  par no dependencies
+    P->>T: trino_cells
+    P->>S: smartcare (6 queries per 2 h chunk)
+    P->>SP: splunk_retrieval (5 nodes)
+  end
+  T-->>P: cells and customer counts
+  P->>D: trino_cells.csv
+  par after trino_cells
+    P->>N: npp_retrieval (2 windows)
+    P->>P: sites
+  end
+  P->>VR: viavi_retrieval and remedy_retrieval
+  N-->>P: NPP frame
+  P->>P: npp_analysis (chart fetch to NPP inside)
+  P->>R: update_job details npp, dashboard, summary
+  loop every 1 to 2 s
+    UI->>W: GET /callflow/api/analysis/job_id
+    W->>R: get_job
+    W-->>UI: RUNNING with systems, cards, details
+  end
+  SP-->>P: per-node frames
+  S-->>P: processed Smartcare data
+  P->>P: splunk_analysis (needs both)
+  P->>D: per-system CSVs as each retrieval ends
+  P-->>J: PlanResult
+  J->>R: update_job DONE with result
+  UI->>W: GET rca-status, rca-files, file
+  W->>D: read manifest and CSVs
+</pre></figure>
+<p class="note">Steps 6 to 8 start together because those three tasks have no dependencies. Viavi and Remedy also wait for the <code>sites</code> task. NPP, Viavi and Remedy analyses never wait for Smartcare; only Splunk analysis does.</p>
+
+<h3>G2. A task that times out</h3>
+<figure class="dia"><pre class="mermaid">
+%%{init: {"sequence": {"useMaxWidth": false}}}%%
+sequenceDiagram
+  participant P as run_plan loop
+  participant WT as Pool thread (npp_retrieval)
+  participant N as NPP REST
+  participant D as Disk and manifest
+  participant R as Redis job
+  P->>WT: submit npp_retrieval, deadline now plus 600 s
+  WT->>N: hundreds of POSTs, 5 at a time
+  Note over P: wait() wakes at the deadline
+  P->>P: status TIMEOUT, fut.cancel() has no effect
+  P->>R: progress_cb npp_retrieval TIMEOUT
+  P->>P: npp_analysis SKIPPED
+  P->>R: systems npp FAILED
+  WT->>N: keeps sending requests
+  WT->>D: set_data_status COMPLETED, write npp_kpi.csv
+  Note over D: manifest can show NPP data COMPLETED and file READY although the job reports NPP FAILED
+</pre></figure>
+<p class="note"><span class="tag v">VERIFIED</span> <code>scheduler.py:303-315</code> abandons the future, and <code>retrieval_wrapper</code> (<code>orchestrated_analysis.py:371</code>) has no check for a cancelled task, so the abandoned thread finishes its work and writes the file. Today's NPP change cut retrieval for 48 cells from 1,344 requests to 384 (plus 28 per affected cell for charts), which makes this much less likely, but the mechanism is unchanged.</p>
+
+<h3>G3. NCI analysis (default synchronous mode)</h3>
+<figure class="dia"><pre class="mermaid">
+%%{init: {"sequence": {"useMaxWidth": false}}}%%
+sequenceDiagram
+  participant C as NCI caller
+  participant W as Gunicorn worker
+  participant E as ThreadPool (up to 30)
+  participant FC as File cache
+  participant N as NPP
+  participant V as Viavi pool
+  participant RM as Remedy pool
+  C->>W: POST /callflow/NCI/analysis/ site_names
+  W->>E: for 3 windows: NPP per site, Viavi, Remedy
+  par per window and site
+    E->>FC: cache_get
+    E->>N: nppIntegration site hourly, 12 hours
+    E->>V: acquire, viaviQueries, release
+    E->>RM: acquire, remedyTicketsData, release
+  end
+  E-->>W: frames per window
+  W->>W: KPIAnalyzer comparisons, build_site_summary
+  W-->>C: 200 sites_summary and errors
+  Note over W: the worker serves nothing else until this returns
+</pre></figure>
+
+<h2 id="analysis">3. Dependency, execution-order and risk analysis</h2>
+<p>Each item names the file and line it was read from. <span class="tag v">VERIFIED</span> means the behaviour follows directly from the code. <span class="tag p">POTENTIAL</span> means the code path is real but how much it matters needs a runtime measurement.</p>
+
+<h3 id="bugs">Defects found while tracing</h3>
+<div class="findings">
+  <div class="finding"><span class="tag b">DEFECT</span><div><p class="t">Smartcare reads the wrong day's table after midnight</p><p><code>smartcareNodesQueries</code> (<code>smartcare_service.py:66</code>) computes <code>tablename</code> once from the window start, then splits the window into 2-hour chunks that all reuse it. A complaint window that crosses 00:00 queries the previous day's tables for the hours after midnight. <code>smartcare_site_kpi_service._run_window</code> splits on the date boundary correctly, so the intended behaviour is clear.</p></div></div>
+  <div class="finding"><span class="tag b">DEFECT</span><div><p class="t">A failed Smartcare query is reported as success</p><p><code>run_single_query</code> returns an empty DataFrame on any error (<code>smartcare_query_runner.py:205</code>) and <code>execute_smartcare_queries</code> concatenates whatever came back. The Smartcare task only fails when every query is empty. This is how request <code>da5f17cdcf4b469e</code> lost its S1-MME columns while Smartcare showed COMPLETED. Today's Splunk fix keeps those alarms visible as unverified, but the Smartcare card and the packet-node popup still have no signal that data is missing.</p></div></div>
+  <div class="finding"><span class="tag b">DEFECT</span><div><p class="t">Smartcare "retry once" never retries, and the failure log can crash</p><p>The docstring of <code>run_single_query</code> promises one retry, but <code>max_retries=1</code> gives exactly one attempt (<code>:129</code>). If <code>smartcareConnection</code> itself fails, the error log on line 204 references <code>query</code>, which was never assigned, so that log line raises <code>UnboundLocalError</code> (the real error is still logged on line 201).</p></div></div>
+  <div class="finding"><span class="tag b">DEFECT</span><div><p class="t">The Trino-to-Smartcare cell fallback gives up too early</p><p><code>FALLBACK_WAIT_SECONDS = 110</code> (<code>orchestrated_analysis.py:54</code>) is commented as "just under the trino task timeout", but that timeout is now 1800 s. Smartcare took 192 s in the last request you sent, so when Trino returns no cells the fallback times out before Smartcare finishes and the whole analysis fails.</p></div></div>
+  <div class="finding"><span class="tag b">DEFECT</span><div><p class="t">Timed-out tasks keep writing results</p><p>See G2. After a TIMEOUT the abandoned thread still runs <code>retrieval_wrapper</code>, which marks the data COMPLETED and writes the CSV, so the RCA manifest can disagree with the job's system status.</p></div></div>
+  <div class="finding"><span class="tag b">DEFECT</span><div><p class="t">Splunk state is computed before the subscriber mapping</p><p><code>SplunkAnalyzer.analyze</code> derives the state from <code>alarms_by_node</code> (<code>splunk_analyzer.py:117-122</code>), not from the mapped <code>abnormal</code> list, so the state can be SUCCESS_WITH_ABNORMAL_KPIS while the list the portal draws is empty.</p></div></div>
+  <div class="finding"><span class="tag b">DEFECT</span><div><p class="t">Voice complaints get no packet-node or handset metrics</p><p>In <code>process_smartcare_data</code> (<code>smartcare_service.py:285-288</code>) the Voice branch only copies the frame; <code>packet_nodes</code> and <code>calculate_subs_per_cell_site_handset</code> run in the Data branch only. <code>smartcare_nodes_Voice</code> also has no S1-MME device-info query.</p></div></div>
+  <div class="finding"><span class="tag b">DEFECT</span><div><p class="t">Two Splunk KPIs are silently overwritten</p><p><code>SPLUNK_ENDPOINTS</code> (<code>constants/endpoints.py:6</code>) defines <code>GGSN_CPU</code> and <code>GGSN_Throughput</code> twice each. Python keeps the second definition, so 105 written entries become 103 KPIs.</p></div></div>
+  <div class="finding"><span class="tag v">VERIFIED</span><div><p class="t">NCI endpoints are open and can call any URL</p><p><code>@method_decorator(require_api_token)</code> is commented out on both NCI views (<code>NCI/views.py:56</code>, <code>:183</code>), DRF has no default permission set, and <code>callback_url</code> is POSTed to without any allow-list, so any client that can reach the server can make it send a request to any address it chooses.</p></div></div>
+  <div class="finding"><span class="tag v">VERIFIED</span><div><p class="t">Credentials in source files</p><p>Trino user and password (<code>utils/trino_client.py</code>), NPP bearer token (<code>services/npp_service.py</code>), MSSQL <code>sa</code> password (<code>general_apis/constants.py</code> and <code>core/constants/general_constants.py</code>), Postgres password (<code>settings.py:139</code>), Eniq credentials (<code>utils/connections.py</code>) and prototype mediation credentials. Values are deliberately not reproduced here.</p></div></div>
+  <div class="finding"><span class="tag v">VERIFIED</span><div><p class="t">Database connections are opened and not closed</p><p><code>pipeline.retrieve_viavi</code> (<code>:465</code>) and <code>retrieve_remedy</code> (<code>:479</code>) open a new Oracle and ODBC connection per request and never close it; the two KPI views set <code>conn = None</code> instead of closing. Release then depends on garbage collection.</p></div></div>
+</div>
+
+<h3 id="perf">Performance: execution order, blocking calls and bottlenecks</h3>
+<h4>Measured in your logs (request da5f17cdcf4b469e, 48 cells)</h4>
+<div class="tbl"><table>
+<thead><tr><th>Stage</th><th>Duration</th><th>Status</th><th>Cause in code</th></tr></thead>
+<tbody>
+<tr><td>npp_retrieval</td><td>600 s (TIMEOUT)</td><td>Fixed today</td><td>Fetched 28 h for 48 cells (1,344 POSTs). Now 384 POSTs for the two analysis windows plus 28 per affected cell for charts.</td></tr>
+<tr><td>smartcare</td><td>192 s</td><td>Open</td><td>A batch takes as long as its slowest query; in that run the S1-MME query failed after 120 s and the task still reported success.</td></tr>
+<tr><td>trino_cells</td><td>105 s</td><td>Open</td><td>Single SQL over three Hive/Iceberg tables; no query timeout. Blocks NPP, Viavi and Remedy.</td></tr>
+<tr><td>splunk_retrieval</td><td>77 s</td><td>Open</td><td>One GET per KPI (103 defined; DSC KPIs once per region × 4), 5 at a time per node, 60 s timeout each.</td></tr>
+</tbody></table></div>
+<h4>Found in the code</h4>
+<div class="findings">
+  <div class="finding"><span class="tag v">VERIFIED</span><div><p class="t">Synchronous endpoints share three sync workers</p><p>Gunicorn runs 3 sync workers. The NCI endpoints (default mode), <code>smartcare/site-kpis</code>, <code>npp/kpis</code>, <code>viavi/kpis/</code> and <code>remedy/kpis/</code> do all their external I/O inside the request. Three such calls at once leave no worker to answer the portal's polls. <span class="tag p">POTENTIAL</span> impact depends on how often NCI is called.</p></div></div>
+  <div class="finding"><span class="tag v">VERIFIED</span><div><p class="t">Sequential loops that could run in parallel</p><p>Smartcare 2-hour chunks run one after another (<code>smartcare_service.py:89</code>); a 1-hour complaint is one chunk, so this only matters for longer windows. <code>fetch_smartcare_site_kpis</code> runs 3 windows × 2 queries × up to 2 day-chunks one after another, up to 12 Hive queries in the request. The NPP chart fetch handles affected cells one at a time (each cell's 28 requests are parallel), bounded by the 120 s budget.</p></div></div>
+  <div class="finding"><span class="tag p">POTENTIAL</span><div><p class="t">The master sheet is re-read on every NPP analysis</p><p><code>calculate_affected_hub_taclac_metrics</code> calls <code>pd.read_excel(MASTER_SHEET_PATH)</code> (<code>npp_service.py:238</code>, a 1.3 MB workbook) each time there are affected cells; nothing caches it. Site mapping (<code>utils/site_mapping.py</code>) is cached per process, which shows the pattern to copy. Measure before changing.</p></div></div>
+  <div class="finding"><span class="tag p">POTENTIAL</span><div><p class="t">Connection setup on every call</p><p>Smartcare opens a new JDBC connection for every query (6 per chunk, by design per the comment at <code>smartcare_query_runner.py:134</code>); the Smartcare pool exists but is never called. Viavi and Remedy open a new connection per portal request while NCI pools them. Trino goes the other way: one <code>lru_cache</code>d connection is shared by every thread and request.</p></div></div>
+  <div class="finding"><span class="tag p">POTENTIAL</span><div><p class="t">Poll responses grow with the analysis</p><p><code>GET /callflow/api/analysis/{id}</code> returns the whole job, including <code>details.abnormal</code> with every chart series, every 1 to 2 seconds per open portal tab.</p></div></div>
+  <div class="finding"><span class="tag p">POTENTIAL</span><div><p class="t">Job record can expire during a long Smartcare run</p><p>Job TTL is 30 min, refreshed on each update (<code>job_manager.py:37</code>). Smartcare's task timeout is also 30 min. If Smartcare is the only task left and runs that long without any update, the job expires: polls return 404 and the final DONE update is dropped.</p></div></div>
+</div>
+
+<h3 id="races">Race conditions and shared state</h3>
+<div class="findings">
+  <div class="finding"><span class="tag v">VERIFIED</span><div><p class="t">Lost updates on the job record</p><p><code>update_job</code> does get, merge, set with no lock (<code>job_manager.py:64-72</code>). In the portal job it is called from scheduler callbacks under <code>lock</code>, from <code>push_details</code> under <code>details_lock</code> and from <code>merge_dash</code> under <code>dash_lock</code>, which are three different locks, so two threads can each read the old record and the later write erases the earlier one's field. Later pushes resend full objects, so the effect is usually a stale poll rather than lost data. <span class="tag p">POTENTIAL</span> frequency.</p></div></div>
+  <div class="finding"><span class="tag v">VERIFIED</span><div><p class="t">Log handlers accumulate for the life of the worker</p><p><code>build_request_logger</code> attaches a <code>FileHandler</code> to <code>callflow.request.{id}</code> and nothing ever removes it. <code>smartcareNodesQueries</code> calls <code>execute_smartcare_queries</code> without a logger, so <code>_fallback_logger</code> builds a new logger with a millisecond id for every chunk (<code>smartcare_query_runner.py:62</code>). <code>get_system_logger</code> adds six more per portal request. Open file handles and logger objects grow with every request until the worker restarts. <span class="tag p">POTENTIAL</span> whether the process file-handle limit is reached.</p></div></div>
+  <div class="finding"><span class="tag v">VERIFIED</span><div><p class="t">Request logs are keyed by time window, not by request</p><p><code>get_log_file</code> returns one file per prefix (<code>logs/orchestrated.txt</code>, <code>logs/nci.txt</code>) and <code>ts = "{start}_{end}"</code>; that <code>ts</code> is the logger id. Two portal requests for the same window share a logger, and every NCI request uses the id <code>now_now</code>. The per-request files under <code>rca/{request_id}/logs/</code> are the reliable place to read one request.</p></div></div>
+  <div class="finding"><span class="tag v">VERIFIED</span><div><p class="t">Shared output file names</p><p>Debug dumps are named by window, not request: <code>sc_nodes_{view}_{category}_filter_{ts}.xlsx</code> (<code>smartcare_service.py:371</code>), <code>remedy_kpi_{start}_{end}.csv</code> (<code>remedy_service.py:31</code>), <code>matched_master_{ts}.csv</code> (<code>npp_service.py:299</code>). Concurrent requests for the same window overwrite each other. The RCA tool does not read these files.</p></div></div>
+  <div class="finding"><span class="tag p">POTENTIAL</span><div><p class="t">Other shared state</p><p>The pickle file cache writes straight to the final path, so a concurrent reader can see a partial file; it is treated as a miss. <code>_summary_snapshot</code> copies <code>details</code> under the status lock, not <code>details_lock</code>; a concurrent change makes it return an empty card set for that push. Two Smartcare callers in one worker could both try a cold <code>jpype.startJVM()</code>; <code>run_in_order(first_sync=True)</code> only protects one call. Module caches (<code>_SITE_MAPPING</code>, <code>_SITE_PHY_TO_CIDS</code>) load without a lock, which only risks a double load.</p></div></div>
+</div>
+
+<h3 id="dupes">Duplication, coupling and shared functions</h3>
+<div class="tbl"><table>
+<thead><tr><th>Duplicate</th><th>Where</th><th>Risk</th></tr></thead>
+<tbody>
+<tr><td>Two threshold sources</td><td><code>services/kpi_thresholds.py</code> (backend) and <code>data/thresholds.xlsx</code> (RCA tool)</td><td>Portal and RCA results drift whenever one is edited.</td></tr>
+<tr><td>Byte-identical <code>classes.py</code></td><td><code>general_apis/classes.py</code> and <code>callflow/core/utils/classes.py</code></td><td>Fixes land in one copy only.</td></tr>
+<tr><td>Near-identical constants</td><td><code>general_apis/constants.py</code> and <code>core/constants/general_constants.py</code></td><td><code>settings.py</code> and <code>utils/classes.py</code> read one copy, the services the other.</td></tr>
+<tr><td>NCI time windows</td><td><code>NCI/utils/helpers.build_nci_time_windows</code> and <code>services/smartcare_site_kpi_service.build_nci_time_windows</code> (+ <code>_round_down</code>)</td><td>Window rules diverge.</td></tr>
+<tr><td>Splunk to Smartcare mapping</td><td><code>SmartcareIndex.splunk_subs_mapper</code> (live), <code>analyzers/_pandas.splunk_subs_mapper</code> and <code>data_utils.map_splunk_kpi_to_smartcare</code> (unused)</td><td>Today's case-insensitive fix exists only in the live one.</td></tr>
+<tr><td>JSON-safe converters</td><td><code>NCI/views._json_safe</code>, <code>stcc_analysis.to_json</code>, <code>test_remedy_ticket._json_safe</code></td><td>Different NaN and timestamp handling per endpoint.</td></tr>
+<tr><td>Datetime parsers</td><td><code>_parse_dt</code> in three KPI views and <code>NCI/views.py</code>; <code>parse_time_window</code> in <code>views/base.py</code></td><td>Different accepted formats per endpoint.</td></tr>
+<tr><td>Severity ranking</td><td><code>analyzers/severity.SEVERITY_RANK</code> and <code>NCI/service/analysis_runner._SEVERITY_RANK</code></td><td>Kept in sync by hand.</td></tr>
+<tr><td>Task names as strings</td><td><code>pipeline.T_*</code>, <code>summary_readiness</code> constants, the order list in <code>orchestrated_analysis.py:314</code></td><td>Renaming a task breaks cards silently.</td></tr>
+<tr><td>Legacy copies</td><td><code>Shourok_Code.py</code> (1,835 lines), <code>callflow/prototype/services/kpi_analyzer.py</code> and <code>kpi_thresholds.py</code></td><td>Search results point to stale logic.</td></tr>
+</tbody></table></div>
+<p><strong>Tightly coupled modules.</strong> <code>views/orchestrated_analysis.py</code> owns job streaming, dashboard mapping, RCA file extraction and the cell fallback in one 705-line class, and depends on the exact dict shape every analyzer returns. <code>orchestration/pipeline.py</code> imports every retrieval service and is the only place the DAG is defined; STCC reuses it by filtering task names. <code>services/kpi_analyzer.py</code> is called by every analysis path (portal, STCC, NCI, NCI RCA), so any threshold or aggregation change moves all four at once.</p>
+<p><strong>Shared functions with the widest reach.</strong> <code>nppIntegration</code>, <code>viaviQueries</code> and <code>remedyTicketsData</code> each serve 4 to 5 endpoints. <code>KPIAnalyzer.analyze_npp</code> and <code>analyze_viavi</code> serve 4. <code>process_sitename</code> decides which sites Viavi and Remedy query, so it shapes their results for the portal, STCC and NCI. <code>job_manager</code> backs every async endpoint.</p>
+
+<h3 id="unused">Unused and unreachable code</h3>
+<p>Method: import reachability from <code>settings.py</code>, <code>wsgi.py</code>, <code>manage.py</code> and every URLconf (both module-level and in-function imports), then a search for <code>importlib</code>, <code>__import__</code>, signals, <code>AppConfig.ready</code>, management commands and schedulers (none exist), then a name search across all files for each top-level function.</p>
+<div class="tbl"><table>
+<thead><tr><th>Item</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td><code>Shourok_Code.py</code></td><td>Not imported by anything; standalone legacy script.</td></tr>
+<tr><td><code>services/dqi_service.py</code> + <code>constants/DQI_queries.py</code></td><td>Unreachable; the <code>dqi</code> route is commented out.</td></tr>
+<tr><td><code>services/smartcare_failure_service.py</code> + <code>constants/smartcare_failure_queries.py</code></td><td>Unreachable; the <code>smartcare-failure</code> route is commented out.</td></tr>
+<tr><td><code>services/complain_reports.py</code></td><td>Unreachable; the <code>complaint-report</code> route is commented out.</td></tr>
+<tr><td><code>utils/permissions.py</code></td><td>Unreachable.</td></tr>
+<tr><td><code>NCI/service/portal_result.py</code>, <code>NCI/service/npp_service.py</code>, <code>NCI/api_key_auth.py</code> (empty)</td><td>Unreachable.</td></tr>
+<tr><td><code>callflow/prototype/views.py</code>, <code>apis.py</code>, <code>services/*</code></td><td>Loaded at startup, but the prototype URLconf has no routes.</td></tr>
+<tr><td><code>connectors/smartcare_pool.get_smartcare_pool</code></td><td>Imported by the query runner, called only in commented-out code.</td></tr>
+<tr><td><code>analyzers/smartcare_analyzer.SmartcareAnalyzer</code></td><td>Exported, never instantiated.</td></tr>
+<tr><td>Unreferenced functions</td><td><code>smartcareRateQueries</code>, <code>voice_specific_aggregation</code>, <code>remedy_ticket</code>, <code>get_cell_names</code>, <code>Eniq_Connection</code>, <code>cache_delete</code>, <code>cache_clear_expired</code>, <code>get_4g_site_names</code>, <code>shape_npp_data</code>, <code>rca_threshold.find_config</code>, <code>pipeline._smartcare_processed</code>, <code>pipeline._smartcare_metrics</code>, <code>_dash_remedy</code>, <code>_dash_npp_UNUSED</code>, <code>analyzers/_pandas.splunk_subs_mapper</code>.</td></tr>
+<tr><td><code>callflow_portal/asgi.py</code></td><td>Framework entry point; unused by the current Gunicorn script but not dead code.</td></tr>
+</tbody></table></div>
+<p class="note">No import cycles exist, either at module level or including in-function imports.</p>
+
+<h2 id="matrix">4. Dependency matrix</h2>
+<p>Importer and dependency lists are generated from the AST scan (both import kinds) and use short names: <code>orch.</code> = <code>callflow.core.orchestration.</code>, <code>an.</code> = <code>analyzers.</code>. The other columns were filled in by reading each file. The table scrolls sideways.</p>
+<div class="tbl"><table class="matrix">
+<thead><tr><th>Module / file</th><th>Responsibility</th><th>Imported by</th><th>Dependencies</th><th>Important functions / classes</th><th>Database</th><th>External systems</th><th>Related endpoints</th><th>Potential risks</th></tr></thead>
+<tbody>
+<tr><td>callflow_portal/settings.py</td><td>Django settings, env loading, DBs, cache, CORS, paths</td><td>-</td><td>general_apis.constants</td><td>INSTALLED_APPS, MIDDLEWARE, DATABASES, CACHES, OUTPUT_DIR</td><td>Postgres default, MSSQL CORE_NW_KPIS</td><td>Redis</td><td>All</td><td>DEBUG=True; hardcoded DB password; no LOGGING; DRF defaults to AllowAny</td></tr>
+<tr><td>callflow/core/urls.py</td><td>Portal API routes</td><td>-</td><td>views.orchestrated_analysis, views.smartcare_site_kpi, views.stcc_analysis, views.test_npp_kpi, views.test_remedy_ticket, views.test_viavi_kpi</td><td>urlpatterns</td><td>-</td><td>-</td><td>All /callflow/api/*</td><td>~20 commented-out routes; route order matters for analysis/{id}/…</td></tr>
+<tr><td>NCI/urls.py</td><td>NCI routes</td><td>-</td><td>NCI.views</td><td>urlpatterns</td><td>-</td><td>-</td><td>/callflow/NCI/*</td><td>-</td></tr>
+<tr><td>callflow/core/views/base.py</td><td>Base view: time parsing, analysis windows, log file path</td><td>NCI.views, views.job_base, views.orchestrated_analysis, views.smartcare_site_kpi, views.test_npp_kpi, views.test_remedy_ticket, views.test_viavi_kpi</td><td>-</td><td>BaseCallFlowAPIView, parse_time_window, build_analysis_time_windows, get_log_file</td><td>-</td><td>Disk (logs)</td><td>All except admin</td><td>Log file is shared per prefix; ts derived from the window, not the request</td></tr>
+<tr><td>callflow/core/views/job_base.py</td><td>Job pattern: create job, start thread, poll</td><td>views.orchestrated_analysis, views.stcc_analysis</td><td>jobs.job_manager, utils.logging_utils, views.base</td><td>JobBackedAPIView.post/get/_run_safely</td><td>-</td><td>Redis via job_manager</td><td>analysis, stcc/analysis</td><td>Daemon threads die with the worker; no concurrency limit per worker</td></tr>
+<tr><td>callflow/core/views/orchestrated_analysis.py</td><td>Portal analysis job; wraps sources for RCA files, dashboard, details; RCA endpoints</td><td>urls</td><td>jobs.job_manager, orch.cell_resolution, orch.dashboard_shaping, orch.pipeline, orch.rca_files, orch.summary_readiness, orch.task_logging, orch.task_logging, views.base, views.job_base</td><td>AnalysisOrchestratorAPIView.run_job, _build_sources, RCAStatus/Files/FileDownload views</td><td>-</td><td>Redis, Disk</td><td>analysis, analysis/{id}, rca-status, rca-files, file</td><td>Highest coupling; lost-update race on job; abandoned tasks still write files; fallback wait 110 s</td></tr>
+<tr><td>callflow/core/views/stcc_analysis.py</td><td>STCC job: DAG subset for NPP/Viavi/Remedy</td><td>urls</td><td>jobs.job_manager, orch.pipeline, orch.scheduler, views.job_base</td><td>STCCAnalysisAPIView.run_job, stcc_plan, build_stcc_response</td><td>-</td><td>via services</td><td>stcc/analysis</td><td>No cell fallback; urls comment says synchronous</td></tr>
+<tr><td>callflow/core/views/test_npp_kpi.py</td><td>Raw NPP rows</td><td>urls</td><td>services.npp_service, views.base</td><td>NppKpiAPIView.post</td><td>-</td><td>NPP</td><td>npp/kpis</td><td>Synchronous in the worker</td></tr>
+<tr><td>callflow/core/views/test_viavi_kpi.py</td><td>Raw Viavi rows</td><td>urls</td><td>services.viavi_service, utils.connections, views.base</td><td>ViaviKpiAPIView.post</td><td>-</td><td>Viavi</td><td>viavi/kpis/</td><td>Connection never closed; dead pool branch</td></tr>
+<tr><td>callflow/core/views/test_remedy_ticket.py</td><td>Raw Remedy tickets</td><td>urls</td><td>constants.general_constants, services.remedy_service, utils.classes, views.base</td><td>RemedyKpiAPIView.post</td><td>-</td><td>Remedy MSSQL</td><td>remedy/kpis/</td><td>Connection never closed; dead pool branch</td></tr>
+<tr><td>callflow/core/views/smartcare_site_kpi.py</td><td>Smartcare site KPIs</td><td>urls</td><td>services.smartcare_site_kpi_service, views.base</td><td>SmartcareSiteKpiAPIView.post</td><td>-</td><td>Smartcare</td><td>smartcare/site-kpis</td><td>Up to 12 sequential Hive queries inside the request</td></tr>
+<tr><td>callflow/core/jobs/job_manager.py</td><td>Job state in Django cache</td><td>NCI.service.analysis_runner, NCI.service.rca_site_runner, NCI.views, views.job_base, views.orchestrated_analysis, views.stcc_analysis</td><td>-</td><td>create_job, update_job, get_job</td><td>-</td><td>Redis</td><td>All job endpoints, NCI async</td><td>Read-modify-write without lock; 30 min TTL can expire during long jobs</td></tr>
+<tr><td>callflow/core/orchestration/scheduler.py</td><td>Generic DAG runner</td><td>orch.pipeline, orchestration, views.stcc_analysis</td><td>-</td><td>run_plan, Task, TaskOutcome, PlanResult</td><td>-</td><td>-</td><td>analysis, stcc/analysis</td><td>Timed-out threads keep running</td></tr>
+<tr><td>callflow/core/orchestration/pipeline.py</td><td>CallFlow DAG, data sources, status roll-up</td><td>views.orchestrated_analysis, views.stcc_analysis</td><td>constants.general_constants, orch.an._pandas, orch.analyzers, orch.customer_counts, orch.scheduler, services.npp_service, services.remedy_service, services.smartcare_service, services.splunk_service, services.trino_service, services.viavi_service, utils.classes, utils.connections, utils.data_utils</td><td>build_callflow_plan, run_callflow_analysis, default_sources, rollup_all, classify_overall</td><td>-</td><td>All six via services</td><td>analysis, stcc/analysis</td><td>Hub module (14 imports); Viavi/Remedy connections not closed; docstring says lazy imports but they are module-level</td></tr>
+<tr><td>callflow/core/orchestration/analyzers/npp_analyzer.py</td><td>NPP analysis contract</td><td>orch.analyzers</td><td>orch.an._pandas, orch.an.base, orch.an.severity, orch.customer_counts, orch.dashboard_shaping, orch.task_logging, services.kpi_analyzer, services.npp_service</td><td>NppAnalyzer.analyze</td><td>-</td><td>NPP (chart fetch via provider)</td><td>analysis, stcc/analysis</td><td>Master sheet read on every run with affected cells</td></tr>
+<tr><td>callflow/core/orchestration/analyzers/splunk_analyzer.py</td><td>Splunk analysis contract</td><td>orch.analyzers</td><td>orch.an._pandas, orch.an.base, orch.an.severity, orch.dashboard_shaping, orch.smartcare_index, orch.task_logging, services.kpi_analyzer</td><td>SplunkAnalyzer.analyze</td><td>-</td><td>-</td><td>analysis</td><td>State counts alarms before Smartcare mapping</td></tr>
+<tr><td>callflow/core/orchestration/analyzers/viavi_analyzer.py</td><td>Viavi analysis contract</td><td>orch.analyzers</td><td>constants.endpoints, orch.an._pandas, orch.an.base, orch.an.severity, orch.customer_counts, orch.dashboard_shaping, orch.task_logging, services.kpi_analyzer</td><td>ViaviAnalyzer.analyze</td><td>-</td><td>-</td><td>analysis, stcc/analysis</td><td>-</td></tr>
+<tr><td>callflow/core/orchestration/analyzers/remedy_analyzer.py</td><td>Remedy ranking contract</td><td>orch.analyzers</td><td>orch.an.base, orch.customer_counts, orch.dashboard_shaping, services.smartcare_service</td><td>RemedyAnalyzer.analyze</td><td>-</td><td>-</td><td>analysis, stcc/analysis</td><td>Borrows a function from smartcare_service</td></tr>
+<tr><td>callflow/core/orchestration/smartcare_index.py</td><td>Smartcare node index, Splunk subscriber mapping</td><td>orch.an.splunk_analyzer</td><td>constants.endpoints, orch.dashboard_shaping, utils.data_utils</td><td>SmartcareIndex.build, match_and_count, splunk_subs_mapper, from_context</td><td>-</td><td>-</td><td>analysis</td><td>Mapping table quality (mixed-case keys, name variants)</td></tr>
+<tr><td>callflow/core/orchestration/dashboard_shaping.py</td><td>Pure shaping of frontend arrays</td><td>NCI.service.portal_result, orch.an.npp_analyzer, orch.an.remedy_analyzer, orch.an.smartcare_analyzer, orch.an.splunk_analyzer, orch.an.viavi_analyzer, orch.customer_counts, orch.smartcare_index, views.orchestrated_analysis</td><td>-</td><td>shape_npp_abnormal, shape_viavi_abnormal, shape_splunk_abnormal, shape_remedy, shape_smartcare_metrics</td><td>-</td><td>-</td><td>analysis, stcc/analysis</td><td>Shape changes affect Angular directly</td></tr>
+<tr><td>callflow/core/orchestration/rca_files.py</td><td>Request-scoped RCA files and manifest</td><td>views.orchestrated_analysis</td><td>-</td><td>init_request, write_system_file(s), rca_status, list_ready_files, resolve_file</td><td>-</td><td>Disk</td><td>analysis, rca-status, rca-files, file</td><td>Per-request lock dict never pruned (small)</td></tr>
+<tr><td>callflow/core/orchestration/task_logging.py</td><td>Structured per-request, per-system logs</td><td>orch.an.npp_analyzer, orch.an.splunk_analyzer, orch.an.viavi_analyzer, views.orchestrated_analysis</td><td>-</td><td>TaskEventLogger, StageLog, get_system_logger</td><td>-</td><td>Disk</td><td>analysis</td><td>File handlers never closed</td></tr>
+<tr><td>callflow/core/services/kpi_analyzer.py</td><td>KPI threshold evaluation</td><td>NCI.service.analysis_runner, Shourok_Code, orch.an.npp_analyzer, orch.an.splunk_analyzer, orch.an.viavi_analyzer</td><td>orch.an.rca_threshold, services.kpi_thresholds, utils.site_mapping</td><td>KPIAnalyzer.analyze_npp, analyze_viavi, analyze_core_node</td><td>-</td><td>Disk (site mapping xlsx, once per process)</td><td>analysis, stcc, NCI analysis, NCI rca</td><td>Shared by every analysis path; Splunk previous value defaults to 0</td></tr>
+<tr><td>callflow/core/services/kpi_thresholds.py</td><td>Threshold rules as Python dicts</td><td>services.kpi_analyzer</td><td>-</td><td>KPIThresholds.get_thresholds_for_system</td><td>-</td><td>-</td><td>Same as kpi_analyzer</td><td>Separate from data/thresholds.xlsx used by the RCA tool</td></tr>
+<tr><td>callflow/core/services/trino_service.py</td><td>Trino cell lookup and customer counts</td><td>orch.pipeline</td><td>utils.data_utils, utils.mapping_cell_name, utils.trino_client</td><td>fetch_cell_dataframe, cell_names_from_df, customer_counts_from_df</td><td>-</td><td>Trino</td><td>analysis, stcc/analysis</td><td>Single cached connection shared across threads</td></tr>
+<tr><td>callflow/core/services/smartcare_service.py</td><td>Smartcare node retrieval and processing</td><td>orch.an.remedy_analyzer, orch.pipeline</td><td>constants.queries, services.smartcare_query_runner, utils.connections, utils.data_utils, utils.file_cache, utils.java_sanitize</td><td>fetch_smartcare_nodes_data, smartcareNodesQueries, process_smartcare_data, calculate_top_remedy_with_subs</td><td>-</td><td>Smartcare, Redis, Disk</td><td>analysis</td><td>Table suffix fixed at window start; Voice branch leaves metrics empty</td></tr>
+<tr><td>callflow/core/services/smartcare_query_runner.py</td><td>Parallel Hive query execution</td><td>services.dqi_service, services.smartcare_failure_service, services.smartcare_service, services.smartcare_site_kpi_service</td><td>connectors.smartcare_pool, services._parallel, utils.connections, utils.data_utils, utils.logging_utils</td><td>execute_smartcare_queries, run_single_query</td><td>-</td><td>Smartcare JDBC</td><td>analysis, smartcare/site-kpis</td><td>Failed query becomes an empty frame; logger per call leaks handlers</td></tr>
+<tr><td>callflow/core/services/npp_service.py</td><td>NPP REST client and hub/TAC/LAC enrichment</td><td>NCI.service.analysis_runner, orch.an.npp_analyzer, orch.pipeline, views.test_npp_kpi</td><td>services._parallel, utils.data_utils, utils.file_cache</td><td>nppIntegration, calculate_affected_hub_taclac_metrics</td><td>-</td><td>NPP, file cache, master sheet</td><td>analysis, stcc, NCI analysis, NCI rca, npp/kpis</td><td>Hardcoded token; process-wide semaphore shared by all callers</td></tr>
+<tr><td>callflow/core/services/splunk_service.py</td><td>Splunk REST client</td><td>orch.pipeline</td><td>constants.endpoints, utils.file_cache</td><td>splunkIntegration</td><td>-</td><td>Splunk, file cache</td><td>analysis</td><td>verify=False; duplicate KPI keys in endpoint table</td></tr>
+<tr><td>callflow/core/services/viavi_service.py</td><td>Viavi Oracle query</td><td>NCI.service.analysis_runner, orch.pipeline, views.test_viavi_kpi</td><td>utils.file_cache</td><td>viaviQueries</td><td>-</td><td>Viavi Oracle, file cache</td><td>analysis, stcc, NCI, viavi/kpis</td><td>SQL built by string formatting</td></tr>
+<tr><td>callflow/core/services/remedy_service.py</td><td>Remedy ticket query</td><td>NCI.service.analysis_runner, orch.pipeline, views.test_remedy_ticket</td><td>constants.general_constants, utils.classes, utils.data_utils</td><td>remedyTicketsData</td><td>-</td><td>Remedy MSSQL</td><td>analysis, stcc, NCI, remedy/kpis</td><td>Shared CSV dump name per window</td></tr>
+<tr><td>callflow/core/utils/connections.py</td><td>Smartcare JDBC, Viavi Oracle connections</td><td>NCI.connectors.viavi_pool, connectors.smartcare_pool, orch.pipeline, services.smartcare_query_runner, services.smartcare_service, views.test_viavi_kpi</td><td>constants.configs</td><td>smartcareConnection, viaviConnection</td><td>-</td><td>Smartcare, Viavi</td><td>Every Smartcare and Viavi caller</td><td>JVM started lazily; hardcoded Eniq credentials in unused function</td></tr>
+<tr><td>callflow/core/utils/trino_client.py</td><td>Trino DB-API connection and query</td><td>services.dqi_service, services.trino_service</td><td>-</td><td>get_trino_connection, run_trino_query</td><td>-</td><td>Trino</td><td>analysis, stcc/analysis</td><td>Hardcoded credentials; verify=False</td></tr>
+<tr><td>callflow/core/utils/classes.py</td><td>pyodbc Connection, file helpers, email</td><td>NCI.connectors.remedy_pool, orch.pipeline, services.remedy_service, views.test_remedy_ticket</td><td>general_apis.constants</td><td>Connection.connect/query_select/close</td><td>MSSQL</td><td>Remedy MSSQL</td><td>analysis, stcc, NCI, remedy/kpis</td><td>Identical copy in general_apis/classes.py</td></tr>
+<tr><td>callflow/core/utils/data_utils.py</td><td>Site-name derivation, Java type conversion, Splunk suffix</td><td>NCI.utils.helpers, callflow.prototype.apis, orch.an._pandas, orch.pipeline, orch.smartcare_index, services.npp_service, services.remedy_service, services.smartcare_query_runner, services.smartcare_service, services.smartcare_site_kpi_service, services.trino_service</td><td>constants.endpoints</td><td>process_sitename, convert_java_types, extract_suffix</td><td>-</td><td>-</td><td>All analysis endpoints</td><td>Highest fan-in (11 importers)</td></tr>
+<tr><td>callflow/core/utils/file_cache.py</td><td>Pickle cache on disk</td><td>NCI.service.analysis_runner, services.npp_service, services.smartcare_service, services.splunk_service, services.viavi_service</td><td>-</td><td>cache_get, cache_set, make_*_cache_key</td><td>-</td><td>Disk cache_store</td><td>analysis, stcc, NCI, npp/kpis, viavi/kpis</td><td>Absolute path created at import; non-atomic writes</td></tr>
+<tr><td>callflow/core/utils/logging_utils.py</td><td>Request identity and request loggers</td><td>NCI.views, services.smartcare_query_runner, utils.permissions, views.job_base</td><td>-</td><td>build_request_logger, get_request_identity, log_step</td><td>-</td><td>Disk</td><td>All job and NCI endpoints</td><td>Logger and FileHandler per id never closed</td></tr>
+<tr><td>NCI/views.py</td><td>NCI endpoints</td><td>NCI.urls</td><td>NCI.service.analysis_runner, NCI.service.rca_site_runner, NCI.utils.authentication, jobs.job_manager, utils.logging_utils, views.base</td><td>NCIAnalysisAPIView, NCIRcaSitesAPIView</td><td>-</td><td>Callback URLs</td><td>NCI analysis, NCI rca</td><td>No auth; callback to any URL; shared logger id now_now</td></tr>
+<tr><td>NCI/service/analysis_runner.py</td><td>NCI fetch, compare, site summary</td><td>NCI.service.portal_result, NCI.service.rca_site_runner, NCI.views</td><td>NCI.connectors.remedy_pool, NCI.connectors.viavi_pool, NCI.utils.helpers, jobs.job_manager, services.kpi_analyzer, services.npp_service, services.remedy_service, services.viavi_service, utils.file_cache</td><td>run_nci_analysis, fetch_npp_one_site, fetch_viavi, fetch_remedy, build_site_summary</td><td>-</td><td>NPP, Viavi, Remedy</td><td>NCI analysis, NCI rca</td><td>Synchronous by default; up to 30 threads per request</td></tr>
+<tr><td>NCI/service/rca_site_runner.py</td><td>Server-side RCA scoring for sites</td><td>NCI.views</td><td>NCI.service.analysis_runner, NCI.utils.helpers, jobs.job_manager</td><td>run_rca_site_analysis, _pick_baseline, _fold_to_sites, _rca_site_score</td><td>-</td><td>NPP, Viavi, Remedy</td><td>NCI rca</td><td>Scoring constants mirror the HTML tool by hand</td></tr>
+</tbody></table></div>
+
+<h2 id="explain">5. How it fits together</h2>
+<h3>1. How the backend starts</h3>
+<p>Gunicorn imports <code>callflow_portal.wsgi</code>, which loads <code>settings.py</code>. Settings read <code>.env</code> into module constants, star-import <code>general_apis/constants.py</code>, register the <code>callflow</code> and <code>NCI</code> apps, configure Redis as the cache and point <code>ROOT_URLCONF</code> at <code>callflow_portal/urls.py</code>. When the URLconf is first resolved, every view module and, through <code>pipeline.py</code>, every service, driver library and the pickle cache directory are imported. Nothing connects to an external system at startup: Trino connects on its first query and Smartcare starts the JVM on its first connection, separately in each of the 3 workers.</p>
+<h3>2. How a request travels</h3>
+<p>CORS and the standard Django middleware run, the URL resolver picks a DRF <code>APIView</code>, and the view either answers directly (RCA reads, KPI views, NCI default mode) or follows the job pattern: validate in <code>build_log_context</code>, write a PENDING job to Redis, start a daemon thread, return 202. The thread runs <code>run_job</code>, which for the portal executes the 11-task DAG on a 12-thread pool. Each task calls a service, the service calls an external system, the wrappers in <code>_build_sources</code> write the RCA CSV and stream results into the Redis job, and the frontend sees them on its next poll.</p>
+<h3>3. Where the core business logic lives</h3>
+<p>KPI rules and comparisons: <code>services/kpi_analyzer.py</code> with <code>kpi_thresholds.py</code> and <code>orchestration/analyzers/rca_threshold.py</code>. Per-system interpretation (severity gate, enrichment, customer counts, state): the four analyzers in <code>orchestration/analyzers/</code>. Frontend shapes: <code>orchestration/dashboard_shaping.py</code>. Data rules that change results silently: <code>trino_service.customer_counts_from_df</code>, <code>data_utils.process_sitename</code>, <code>smartcare_service.process_smartcare_data</code>, <code>smartcare_index.splunk_subs_mapper</code>. NCI keeps its own comparison and scoring logic in <code>NCI/service/</code>.</p>
+<h3>4. How data access is organised</h3>
+<p>There is no ORM layer. Each external system has one connection function (<code>trino_client</code>, <code>connections.smartcareConnection</code> and <code>viaviConnection</code>, <code>classes.Connection</code>) and one query function in <code>services/</code> that builds SQL or HTTP payloads by string formatting and returns a pandas DataFrame. Two cache layers sit in front: Redis for Smartcare results and job state, and a pickle directory for NPP, Splunk, Viavi and NCI Remedy. Request-scoped outputs go to <code>callflow_output/rca/{request_id}/</code>.</p>
+<h3>5. The central modules</h3>
+<p><code>orchestration/pipeline.py</code> and <code>orchestration/scheduler.py</code> (every portal and STCC request), <code>views/orchestrated_analysis.py</code> (everything the portal sees), <code>services/kpi_analyzer.py</code> (every abnormal verdict), <code>jobs/job_manager.py</code> (every async response), and <code>utils/data_utils.py</code> (highest fan-in).</p>
+<h3>6. Highest coupling</h3>
+<p><code>views/orchestrated_analysis.py</code> (9 project imports, depends on every analyzer's result shape), <code>orchestration/pipeline.py</code> (14 imports, every service), and <code>NCI/service/analysis_runner.py</code> (9 imports, reused by the NCI RCA runner). Between packages, <code>services/kpi_analyzer.py</code> reaching into <code>orchestration/analyzers/rca_threshold.py</code> is the one dependency that points upward.</p>
+<h3>7. Where failures and slowness propagate</h3>
+<p>Trino is the root of the DAG: when it is slow, NPP, Viavi and Remedy cannot start; when it fails, or (in the portal) returns no cells and the Smartcare fallback cannot help, those seven tasks are skipped. Smartcare only gates Splunk analysis, but its partial failures are silent, so they show up as wrong Splunk or Smartcare output rather than an error. NPP's request volume scales with cells × hours and is capped by a process-wide semaphore that every NPP caller shares. Synchronous endpoints compete with polls for 3 workers. Any change in <code>kpi_analyzer</code> or <code>process_sitename</code> moves the results of the portal, STCC and NCI together.</p>
+<h3>8. Read these first, in this order</h3>
+<ol class="steps">
+  <li><code>callflow/core/urls.py</code> and <code>NCI/urls.py</code>: what is live.</li>
+  <li><code>callflow/core/views/job_base.py</code> and <code>jobs/job_manager.py</code>: the async contract the frontend relies on.</li>
+  <li><code>callflow/core/orchestration/pipeline.py</code> then <code>scheduler.py</code>: the DAG, timeouts and status roll-up.</li>
+  <li><code>callflow/core/views/orchestrated_analysis.py</code>: how results reach the job, the dashboard and the RCA folder.</li>
+  <li><code>orchestration/analyzers/*.py</code> and <code>services/kpi_analyzer.py</code>: the business verdicts.</li>
+  <li>The service for the system you are touching (<code>trino_service</code>, <code>smartcare_service</code> + <code>smartcare_query_runner</code>, <code>npp_service</code>, <code>splunk_service</code>, <code>viavi_service</code>, <code>remedy_service</code>).</li>
+  <li><code>NCI/service/analysis_runner.py</code> before changing any shared service, since NCI calls the same functions without the DAG.</li>
+</ol>
+</main>
+</div>
+
+<!--claude-mermaid-runtime-begin:3477-->
+<style>.mermaid-diagram{margin-block:4px}.mermaid-diagram svg{display:block;margin:0 auto;max-width:100%;height:auto}</style>
+<script src="/_runtime/mermaid-11.16.1.min.js"></script>
+<script>(function(){
+var CFG={"palettes":{"light":{"surface":"#f4efe4","text":"#42392e","line":"#8a7f6d","border":"#7a6c52","bg":"#fffdf8"},"dark":{"surface":"#262b34","text":"#f2f3f5","line":"#a8adb8","border":"#9aa4b8","bg":"#1f232b"}}};
+if(typeof mermaid==='undefined')return;
+var pres=Array.prototype.slice.call(document.querySelectorAll('pre.mermaid')).filter(function(p){if(p.hasAttribute('data-claude-mermaid-claimed'))return false;p.setAttribute('data-claude-mermaid-claimed','1');return true;});
+if(!pres.length)return;
+var mq=window.matchMedia?window.matchMedia('(prefers-color-scheme: dark)'):null;
+var root=document.documentElement;
+var items=pres.map(function(pre){
+var mount=document.createElement('div');mount.className='mermaid-diagram';
+return {pre:pre,mount:mount,src:pre.textContent||''};
+});
+var seq=0;
+var renderGen=0;
+var lastKey='';
+function pageBg(fallback){
+var els=[document.body,document.documentElement];
+for(var i=0;i<els.length;i++){
+var c=els[i]&&getComputedStyle(els[i]).backgroundColor;
+if(c&&c!=='transparent'&&c!=='rgba(0, 0, 0, 0)')return c;
+}
+return fallback;
+}
+function render(){
+var theme=root.getAttribute('data-theme');
+var dark=theme==='dark'||(!!(mq&&mq.matches)&&theme!=='light');
+var pal=dark?CFG.palettes.dark:CFG.palettes.light;
+var bg=pageBg(pal.bg);
+var key=(dark?'d':'l')+'|'+bg;
+if(key===lastKey)return;
+lastKey=key;
+var gen=++renderGen;
+var font=getComputedStyle(document.body).fontFamily||'sans-serif';
+var nat={useMaxWidth:false};
+mermaid.initialize({
+startOnLoad:false,securityLevel:'strict',theme:'base',
+flowchart:nat,sequence:nat,er:nat,state:nat,class:nat,pie:nat,
+gantt:nat,journey:nat,timeline:nat,gitGraph:nat,mindmap:nat,xyChart:nat,
+quadrantChart:nat,sankey:nat,c4:nat,requirement:nat,block:nat,
+packet:nat,kanban:nat,architecture:nat,radar:nat,
+themeVariables:{background:bg,mainBkg:pal.surface,primaryColor:pal.surface,
+primaryTextColor:pal.text,lineColor:pal.line,primaryBorderColor:pal.border,
+nodeBorder:pal.border,clusterBorder:pal.border,edgeLabelBackground:bg,
+clusterBkg:'rgba(127,127,127,0.07)',titleColor:pal.text,
+darkMode:dark,rowOdd:bg,rowEven:'rgba(127,127,127,0.07)',
+attributeBackgroundColorOdd:bg,attributeBackgroundColorEven:'rgba(127,127,127,0.07)',
+fontSize:'16px',fontFamily:font},
+themeCSS:'.node rect, .node circle, .node polygon, .node path, .cluster rect { stroke-width: 2px; }'
+});
+items.forEach(function(it){
+var id='claude-mermaid-'+seq++;
+mermaid.render(id,it.src).then(function(r){
+if(gen!==renderGen)return;
+var prev=it.pre.previousElementSibling;
+if(prev&&prev.className==='mermaid-diagram'&&prev!==it.mount)return;
+it.mount.innerHTML=r.svg;
+if(!it.mount.parentNode)it.pre.parentNode.insertBefore(it.mount,it.pre);
+it.pre.style.display='none';
+},function(){
+var scratch=document.getElementById(id);
+if(scratch)scratch.parentNode.removeChild(scratch);
+scratch=document.getElementById('d'+id);
+if(scratch)scratch.parentNode.removeChild(scratch);
+if(gen!==renderGen)return;
+if(it.mount.parentNode)it.mount.parentNode.removeChild(it.mount);
+it.pre.style.display='';
+});
+});
+}
+render();
+if(mq&&mq.addEventListener)mq.addEventListener('change',render);
+if(typeof MutationObserver!=='undefined')new MutationObserver(render).observe(root,{attributes:true,attributeFilter:['data-theme']});
+})();</script>
+<!--claude-mermaid-runtime-end-->
+
+</body></html>
