@@ -15,7 +15,7 @@ def _get(name, default):
 
 
 def output_dir() -> Path:
-    return Path(_get("OUTPUT_DIR", Path(settings.BASE_DIR) / "callflow_output" / "prototype"))
+    return Path(_get("OUTPUT_DIR", Path(settings.BASE_DIR) / "callflow_output"))
 
 
 # --------------------------------------------------------------------------
