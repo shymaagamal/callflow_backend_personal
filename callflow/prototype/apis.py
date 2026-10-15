@@ -682,9 +682,26 @@ def _dump_csv(df, filename, **to_csv_kwargs):
 
 
 def distinct_count(df, group_col, value_col):
+    """
+    Return nunique counts of value_col grouped by group_col.
+    Returns {} if the DataFrame is empty or either column is missing.
+    """
+    if df is None or df.empty:
+        return {}
+    if group_col not in df.columns or value_col not in df.columns:
+        logger.warning(
+            "distinct_count skipped: missing column(s) group=%s value=%s (have %s)",
+            group_col, value_col, list(df.columns),
+        )
+        return {}
+
+    mask = df[group_col].fillna('').astype(str).str.strip() != ''
+    filtered = df.loc[mask]
+    if filtered.empty:
+        return {}
+
     return (
-        df[df[group_col].fillna('').str.strip() != '']
-        .groupby(group_col)[value_col]
+        filtered.groupby(group_col)[value_col]
         .nunique()
         .to_dict()
     )
