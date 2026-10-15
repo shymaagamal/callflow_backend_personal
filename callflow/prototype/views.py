@@ -154,6 +154,7 @@ def _dispatch(job_id, params, fingerprint):
 class PrototypeSmartcareIntegrationAPIView(APIView):
 
     def post(self, request):
+        print("POST prototype pid=%s", threading.get_ident())
         params = _params_from_request(request)
         request_id = uuid.uuid4().hex[:16]
         want_async = _truthy(request.query_params.get('async', request.data.get('async'))) \

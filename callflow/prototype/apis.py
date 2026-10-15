@@ -37,6 +37,8 @@ from general_apis.classes import *
 from general_apis.constants import *
 from callflow.models import *
 from callflow.prototype.constants import *
+from callflow.prototype.Data_Queries import smartcare_Data_QUERIES
+from callflow.prototype.Voice_Queries import smartcare_Voice_QUERIES
 import logging
 import threading
 from ..core.utils.data_utils import process_sitename
@@ -207,7 +209,7 @@ def _select_queries(complain_type):
     elif complain_type == 'Data':
       queries = smartcare_Data_QUERIES
     else:
-      queries = smartcare_main_QUERIES
+      raise ValueError(f"Invalid complain_type: {complain_type}. Must be 'Voice' or 'Data'.")
     queries = dict(queries)
     if complain_type == 'Data' and prototype_conf.skip_unused_data_queries():
       for name in UNUSED_DATA_QUERIES:
@@ -464,23 +466,23 @@ def smartcareOutput_Aggregated_Voice(data, logs_file,timestamp):
 
       
     # ________ P_CSCF_NAME ______________
-      p_cscf_name = distinct_count(IMS_data, 'p_cscf_Name', 'IMPU_TEL_URI1')
+      p_cscf_name = _safe_distinct(IMS_data, 'p_cscf_Name', 'IMPU_TEL_URI1')
     
     #   ________ AS_NAME ______________
-      AS_Name = distinct_count(IMS_data, 'AS_NAME', 'IMPU_TEL_URI1')
+      AS_Name = _safe_distinct(IMS_data, 'AS_NAME', 'IMPU_TEL_URI1')
     
     #   ________ MSC_NAME ______________
-      MSC_NAME = distinct_count(IMS_data, 'MSC_NAME', 'MSISDN')
+      MSC_NAME = _safe_distinct(IMS_data, 'MSC_NAME', 'MSISDN')
     
     # Filter only VoLTE records
       IMS_data = IMS_data[IMS_data['Voice_Data_Flag'] == 'Voice']
     #   IMS_data.to_csv(r'/home/Shorouk/CallFlow/IMS_data.csv')
     #   ________ DRA_NAME ______________
-      DRA_NAME = distinct_count(IMS_data, 'DRA_NAME', 'MSISDN')
+      DRA_NAME = _safe_distinct(IMS_data, 'DRA_NAME', 'MSISDN')
     #   ___________ OCS_NAME ___________
-      OCS_NAME =distinct_count(IMS_data, 'OCS_NAME', 'MSISDN')
+      OCS_NAME =_safe_distinct(IMS_data, 'OCS_NAME', 'MSISDN')
           #  ___________ PCRF ___________
-      PCRF =distinct_count(IMS_data, 'VPCRF_NAME', 'MSISDN')
+      PCRF =_safe_distinct(IMS_data, 'VPCRF_NAME', 'MSISDN')
     # ________ Site COUNTS ______________
       site_counts = data['modified_site_name'].value_counts().to_dict()
       suspected_cells = tuple(set(data['CELL_NAME'].to_list()))
@@ -545,14 +547,14 @@ def smartcareOutput_Aggregated_Data(data, logs_file,timestamp):
     
     #   ________ DRA_NAME ______________
       if 'DRA_NAME' in IMS_data.columns:
-        DRA_NAME = distinct_count(IMS_data, 'DRA_NAME', 'MSISDN')
+        DRA_NAME = _safe_distinct(IMS_data, 'DRA_NAME', 'MSISDN')
       else:
         DRA_NAME = {}
         logger.warning("DRA_NAME column missing after fallback; returning empty counts")
     #   ___________ OCS_NAME ___________
-      OCS_NAME =distinct_count(IMS_data, 'OCS_NAME', 'MSISDN')
+      OCS_NAME = _safe_distinct(IMS_data, 'OCS_NAME', 'MSISDN')
           #  ___________ PCRF ___________
-      PCRF =distinct_count(IMS_data, 'VPCRF_NAME', 'MSISDN')
+      PCRF = _safe_distinct(IMS_data, 'VPCRF_NAME', 'MSISDN')
 
       # _________RAT COUNTS __________
       rat_distinct_msisdn = data.groupby('RAT')['MSISDN'].nunique().to_dict()
@@ -709,7 +711,14 @@ def distinct_count(df, group_col, value_col):
         .nunique()
         .to_dict()
     )
+def _safe_distinct(df, group_col, value_col): 
+  if group_col not in df.columns or value_col not in df.columns: 
+    logger.warning("Skipping distinct_count for %s / %s (column missing)", group_col, value_col) 
+    return {} 
+  return distinct_count(df, group_col, value_col) 
 
+ 
+ 
 def calculate_affected_hub_metrics(nodesdata, affected_cells: list, ts: str) -> dict:
     """
      Calculates HUB metrics
