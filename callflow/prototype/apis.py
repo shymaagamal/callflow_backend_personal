@@ -544,7 +544,11 @@ def smartcareOutput_Aggregated_Data(data, logs_file,timestamp):
       IMS_data = IMS_data[IMS_data['Voice_Data_Flag'] == 'Data']
     
     #   ________ DRA_NAME ______________
-      DRA_NAME = distinct_count(IMS_data, 'DRA_NAME', 'MSISDN')
+      if 'DRA_NAME' in IMS_data.columns:
+        DRA_NAME = distinct_count(IMS_data, 'DRA_NAME', 'MSISDN')
+      else:
+        DRA_NAME = {}
+        logger.warning("DRA_NAME column missing after fallback; returning empty counts")
     #   ___________ OCS_NAME ___________
       OCS_NAME =distinct_count(IMS_data, 'OCS_NAME', 'MSISDN')
           #  ___________ PCRF ___________
