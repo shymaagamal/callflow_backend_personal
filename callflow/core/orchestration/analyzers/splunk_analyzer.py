@@ -55,6 +55,7 @@ class SplunkAnalyzer:
                 current_start=qtr["current_start"], current_end=qtr["current_end"],
                 prev_start=qtr["prev_start_1day"], prev_end=qtr["prev_end_1day"],
             )
+            self.log.info("[SPLUNK] alarms by node %s: %d alarms", node, out[node] or [])
         return out
 
     def _subs_mapper(self, smartcare, ctx):

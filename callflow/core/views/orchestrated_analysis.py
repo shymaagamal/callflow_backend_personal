@@ -45,6 +45,7 @@ from ..orchestration import rca_files as rf
 from ..orchestration import cell_resolution as cr
 from ..orchestration import dashboard_shaping as ds
 from ..orchestration.task_logging import TaskEventLogger
+from ..orchestration.task_logging import render_pipeline_summary
 
 logger = logging.getLogger(__name__)
 
@@ -306,7 +307,6 @@ class AnalysisOrchestratorAPIView(JobBackedAPIView):
 
         # End-of-request timing table so the bottleneck is obvious at a glance.
         try:
-            from ..orchestration.task_logging import render_pipeline_summary
             diag = (result or {}).get("diagnostics", {}) or {}
             summary_txt = render_pipeline_summary(
                 request_id, diag.get("timings", {}) or {},

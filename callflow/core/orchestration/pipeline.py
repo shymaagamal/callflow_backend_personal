@@ -386,7 +386,7 @@ def default_sources() -> DataSources:
         return nppIntegration(
             cells, start_date=start, end_date=end,
             logs_file=ctx.get("log_path", ""), timestamp=ctx.get("ts", ""),
-            resolution=ctx.get("npp_resolution", "daily"), stats=stats,
+            resolution=ctx.get("npp_resolution", "hourly"), stats=stats,
         )
 
     def retrieve_npp(cells, ctx):

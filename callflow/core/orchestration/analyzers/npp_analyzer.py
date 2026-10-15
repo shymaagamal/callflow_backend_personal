@@ -47,7 +47,7 @@ class NppAnalyzer:
             return self._analyze_fn(npp_raw, ctx)
         qtr = ctx["query_time_range"]
         return KPIAnalyzer().analyze_npp(
-            npp_raw, ctx.get("analyzer_freq", "15m"),
+            npp_raw, ctx.get("analyzer_freq", "1H"),
             qtr["current_start"], qtr["current_end"],
             qtr["prev_start_1day"], qtr["prev_end_1day"], ctx.get("ts", ""),
         )
