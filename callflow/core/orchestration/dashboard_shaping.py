@@ -208,9 +208,11 @@ def shape_splunk_abnormal(
 ) -> List[Dict[str, Any]]:
     """[{node, mapped_value, impacted_subs, Kpi_Column, degraded_kpis, system:'splunk'}].
 
-    ``subs_mapper(kpi_column) -> (mapped_value, impacted_subs, node_type)`` supplies
-    the Smartcare-based mapping (pandas lives in the caller). Without it, DNS-style
+    ``subs_mapper(kpi_column) -> (mapped_value, impacted_subs, node_type[, serving_status])``
+    supplies the Smartcare-based mapping (pandas lives in the caller). Without it, DNS-style
     passthrough is used (mapped_value == kpi_column, impacted_subs == None).
+    ``serving_status`` (serving | unverified | not_serving | no_mapping) is copied onto
+    the row so the portal can separate alarms linked to the complainants from the rest.
     """
     results = []
     for node, alarms in (alarms_by_node or {}).items():
@@ -229,6 +231,7 @@ def shape_splunk_abnormal(
                 kpi_entry["name"] = kpi_col
                 results.append({
                     "node": node,
+                    "splunk_node": node,
                     "mapped_value": kpi_col,
                     "impacted_subs": None,
                     "Kpi_Column": kpi_col,
@@ -236,12 +239,15 @@ def shape_splunk_abnormal(
                     "system": "splunk",
                 })
                 continue
-            mapped_value, impacted_subs, node_type = subs_mapper(kpi_col)
+            mapped = subs_mapper(kpi_col)
+            mapped_value, impacted_subs, node_type = mapped[:3]
             if mapped_value is None:
                 continue
             kpi_entry["name"] = mapped_value
             results.append({
                 "node": node_type or node,
+                "splunk_node": node,
+                "serving_status": mapped[3] if len(mapped) > 3 else "serving",
                 "mapped_value": mapped_value,
                 "impacted_subs": impacted_subs,
                 "Kpi_Column": kpi_col,

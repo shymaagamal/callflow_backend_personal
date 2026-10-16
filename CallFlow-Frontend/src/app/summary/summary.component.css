@@ -314,3 +314,12 @@
     text-align: center;
   }
 }
+
+/* Splunk alarms not linked to these customers */
+.splunk-other { border-top: 1px solid #e3e6ea; padding-top: 8px; }
+.splunk-other-toggle { background: none; border: 0; padding: 0; color: #5a6675; font-size: 0.95rem; cursor: pointer; }
+.splunk-other-toggle:hover, .splunk-other-toggle:focus-visible { color: #1b2430; text-decoration: underline; }
+.splunk-other-table { font-size: 0.85rem; color: #5a6675; }
+.splunk-other-table td { word-break: break-word; }
+.splunk-reason { display: inline-block; padding: 1px 6px; border-radius: 3px; background: #eef1f4; color: #5a6675; white-space: nowrap; }
+.splunk-reason.no-mapping { background: #fbf0dc; color: #8a5300; }

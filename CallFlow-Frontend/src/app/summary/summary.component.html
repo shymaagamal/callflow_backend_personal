@@ -284,6 +284,29 @@
               [showValueAtEnd]="false" [enableAbnormalTooltip]="true">
             </app-bar-chart>
 
+            <!-- Splunk alarms on core nodes NOT linked to these customers: kept
+                 visible but separate, and excluded from the chart and the counts. -->
+            <div *ngIf="Select_Abnormal_System === 'Splunk' && Splunk_Other_Nodes?.length > 0" class="splunk-other mt-3">
+              <button type="button" class="splunk-other-toggle" (click)="showSplunkOther = !showSplunkOther">
+                {{ showSplunkOther ? '▾' : '▸' }}
+                Other abnormal core nodes ({{ Splunk_Other_Nodes.length }}) · not linked to these customers
+              </button>
+              <table *ngIf="showSplunkOther" class="table table-sm mt-2 mb-0 splunk-other-table">
+                <thead>
+                  <tr><th>Node</th><th>Type</th><th>KPI</th><th>Severity</th><th>Reason</th></tr>
+                </thead>
+                <tbody>
+                  <tr *ngFor="let n of Splunk_Other_Nodes">
+                    <td>{{ n.mapped_value }}</td>
+                    <td>{{ n.node }}</td>
+                    <td>{{ n.Kpi_Column }}</td>
+                    <td>{{ n.degraded_kpis && n.degraded_kpis[0] ? n.degraded_kpis[0].severity : '' }}</td>
+                    <td><span class="splunk-reason" [class.no-mapping]="n.serving_status === 'no_mapping'">{{ splunkReasonLabel(n.serving_status) }}</span></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
           </div>
         </div>
       </div>

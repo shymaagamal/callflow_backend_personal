@@ -24,6 +24,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
+# Splunk rows returned for display only (not linked to the complainants).
+NOT_LINKED = ("not_serving", "no_mapping")
+
 # Card readiness states.
 PENDING = "PENDING"
 READY_WITH_DATA = "READY_WITH_DATA"
@@ -122,7 +125,8 @@ def summary_cards(task_status: Dict[str, str],
             failed_systems.append(system)
         elif st == _DONE_OK:
             ready_systems.append(system)
-            total_items += len(abnormal.get(system) or [])
+            total_items += len([r for r in (abnormal.get(system) or [])
+                                if not (isinstance(r, dict) and r.get("serving_status") in NOT_LINKED)])
         else:
             pending_systems.append(system)
 

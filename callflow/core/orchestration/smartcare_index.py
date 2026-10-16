@@ -244,8 +244,10 @@ class SmartcareIndex:
                     return True
             return False
 
-        stats = {"kept": 0, "unverified": 0, "dropped_no_suffix_mapping": 0,
-                 "dropped_not_serving": 0, "dropped_error": 0}
+        # Alarms are no longer dropped: each is labelled so the portal can show
+        # the ones not linked to the complainants separately.
+        stats = {"serving": 0, "unverified": 0, "no_mapping": 0,
+                 "not_serving": 0, "dropped_error": 0}
         dropped = []
 
         def mapper(kpi_col):
@@ -253,11 +255,11 @@ class SmartcareIndex:
             try:
                 suffix = str(extract_suffix(kpi_col) or "")
                 mapped_value = lookup(suffix)
-                if not mapped_value:
-                    stats["dropped_no_suffix_mapping"] += 1
-                    dropped.append({"kpi": kpi_col, "suffix": suffix, "reason": "no_suffix_mapping"})
-                    return (None, None, None)
                 node = str(kpi_col).split("_")[0].upper()
+                if not mapped_value:
+                    stats["no_mapping"] += 1
+                    dropped.append({"kpi": kpi_col, "suffix": suffix, "reason": "no_mapping"})
+                    return (suffix or kpi_col, None, node, "no_mapping")
                 search_cols = SPLUNK_NODE_COLUMNS.get(node) or self._node_columns
                 matched, impacted = self.match_and_count_in(mapped_value, search_cols)
                 column = matched[0] if matched else None
@@ -269,12 +271,12 @@ class SmartcareIndex:
                         # failed), so "served the complainants?" cannot be checked:
                         # keep the alarm with unknown impact instead of hiding it.
                         stats["unverified"] += 1
-                        return (mapped_value, None, None)
-                    stats["dropped_not_serving"] += 1
-                    dropped.append({"kpi": kpi_col, "mapped": mapped_value, "reason": "not_in_smartcare_nodes"})
-                    return (None, None, None)
-                stats["kept"] += 1
-                return (mapped_value, impacted, node_type)
+                        return (mapped_value, None, node, "unverified")
+                    stats["not_serving"] += 1
+                    dropped.append({"kpi": kpi_col, "mapped": mapped_value, "reason": "not_serving"})
+                    return (mapped_value, None, node, "not_serving")
+                stats["serving"] += 1
+                return (mapped_value, impacted, node_type, "serving")
             except Exception as e:
                 stats["dropped_error"] += 1
                 dropped.append({"kpi": kpi_col, "suffix": suffix, "reason": "error: %s" % e})

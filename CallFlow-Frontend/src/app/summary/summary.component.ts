@@ -136,6 +136,10 @@ export class SummaryComponent implements OnInit, OnDestroy {
   Abnormal_Kpis_Data: any
   Abnormal_Kpis_chart_Loading = false
   No_Abnormal_Data_Message: string = '';
+  /** Splunk alarms on core nodes not linked to these customers (shown apart from the chart). */
+  Splunk_Other_Nodes: any[] = [];
+  showSplunkOther = false;
+  private readonly SPLUNK_NOT_LINKED = ['not_serving', 'no_mapping'];
  
   // --- Progress bar values 
 
@@ -543,7 +547,8 @@ export class SummaryComponent implements OnInit, OnDestroy {
     const labels: { [k: string]: string } = { npp: 'NPP', splunk: 'Splunk', viavi: 'Viavi' };
     for (const sys of ['npp', 'splunk', 'viavi']) {
       const s = this.systemStatusOf(sys);
-      const count = (this.Abnormal_Kpis_RawData?.[sys] || []).length;
+      const count = (this.Abnormal_Kpis_RawData?.[sys] || [])
+        .filter((r: any) => !this.SPLUNK_NOT_LINKED.includes(r?.serving_status)).length;
       if (s === 'NOT_AVAILABLE') {
         this.abnormalJobs[sys] = { status: 'NOT_AVAILABLE', step: 'Not Available', progress: 0, error: null };
       } else if (s === 'COMPLETED') {
@@ -908,7 +913,12 @@ export class SummaryComponent implements OnInit, OnDestroy {
     }
 
     const systemKey = this.Select_Abnormal_System.toLowerCase();
-    const systemData = this.Abnormal_Kpis_RawData[systemKey] || [];
+    let systemData = this.Abnormal_Kpis_RawData[systemKey] || [];
+    this.Splunk_Other_Nodes = [];
+    if (systemKey === 'splunk') {
+      this.Splunk_Other_Nodes = systemData.filter((r: any) => this.SPLUNK_NOT_LINKED.includes(r?.serving_status));
+      systemData = systemData.filter((r: any) => !this.SPLUNK_NOT_LINKED.includes(r?.serving_status));
+    }
 
  const status = this.systemStatus[systemKey]; 
 
@@ -931,7 +941,10 @@ export class SummaryComponent implements OnInit, OnDestroy {
     // Distinguish "analysis ran, all clean" from "no usable data" (never conflate
     // an empty abnormal list with 'analysis did not run').
     const st = this.systemStates[systemKey];
-    if (st && (st.all_clean || st.state === 'SUCCESS_ALL_CLEAN')) {
+    if (this.Splunk_Other_Nodes.length) {
+      this.No_Abnormal_Data_Message =
+        'No abnormal core node is serving these customers. See the other abnormal core nodes below.';
+    } else if (st && (st.all_clean || st.state === 'SUCCESS_ALL_CLEAN')) {
       this.No_Abnormal_Data_Message =
         `✓ Analysis completed — all ${st.entities_analyzed ?? ''} analyzed ` +
         `entities are within the configured thresholds. No abnormal KPIs detected.`;
@@ -1027,7 +1040,7 @@ export class SummaryComponent implements OnInit, OnDestroy {
   }
   prepareSplunkChartData(splunkData: any[]) {
     return splunkData.map(item => ({
-      label: item.mapped_value,
+      label: item.serving_status === 'unverified' ? `${item.mapped_value} (unverified)` : item.mapped_value,
       value: item.impacted_subs,
       tooltipData: item.degraded_kpis || []
       // tooltipData: [
@@ -1037,6 +1050,10 @@ export class SummaryComponent implements OnInit, OnDestroy {
       //   }
       // ]
     })).slice(0,5);
+  }
+  splunkReasonLabel(status: string): string {
+    return status === 'not_serving' ? 'Not serving these customers'
+      : status === 'no_mapping' ? 'No Smartcare mapping' : status;
   }
   prepareRemedyChartData(remedyResponse: any) {
     

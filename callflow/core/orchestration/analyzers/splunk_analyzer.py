@@ -23,6 +23,9 @@ from ..smartcare_index import from_context
 from ._pandas import splunk_series_provider
 from ..task_logging import StageLog
 
+# Splunk rows returned for display only (not linked to the complainants).
+NOT_LINKED = ("not_serving", "no_mapping")
+
 logger = logging.getLogger(__name__)
 
 # Configured core nodes (kept in sync with abnormal_kpis / retrieval).
@@ -55,7 +58,7 @@ class SplunkAnalyzer:
                 current_start=qtr["current_start"], current_end=qtr["current_end"],
                 prev_start=qtr["prev_start_1day"], prev_end=qtr["prev_end_1day"],
             )
-            self.log.info("[SPLUNK] alarms by node %s: %d alarms", node, out[node] or [])
+            self.log.info("[SPLUNK] alarms by node %s: %d alarms", node, len(out[node] or []))
         return out
 
     def _subs_mapper(self, smartcare, ctx):
@@ -99,6 +102,7 @@ class SplunkAnalyzer:
 
         abnormal = []
         mapper = None
+        shaped = False
         with slog.stage("Smartcare subscriber mapping + chart rows") as s:
             try:
                 mapper = self._subs_mapper(smartcare, ctx)
@@ -107,20 +111,31 @@ class SplunkAnalyzer:
                     subs_mapper=mapper,
                     kpi_series=self._series(splunk_raw, ctx),
                 )
+                shaped = True
                 s.counts(abnormal=len(abnormal), **(getattr(mapper, "stats", None) or
                          {"mapping": "none (no Smartcare node data) - all alarms kept"}))
             except Exception as e:
                 self.log.warning("Splunk abnormal shaping failed: %s", e)
         for d in (getattr(mapper, "dropped", None) or []):
             (ctx.get("request_logger") or self.log).info(
-                "[SPLUNK] request_id=%s dropped alarm %s", ctx.get("request_id"), d)
+                "[SPLUNK] request_id=%s alarm not linked to complainants %s", ctx.get("request_id"), d)
 
-        abnormal_nodes = sorted(n for n, a in alarms_by_node.items() if a)
+        # Only alarms linked to the complainants (serving / unverified) count as
+        # affected; not_serving / no_mapping rows are returned for display only.
+        other_count = sum(1 for r in abnormal if r.get("serving_status") in NOT_LINKED)
+        if shaped:
+            abnormal_nodes = sorted({r.get("splunk_node") or r.get("node") for r in abnormal
+                                     if r.get("serving_status") not in NOT_LINKED})
+        else:
+            abnormal_nodes = sorted(n for n, a in alarms_by_node.items() if a)
         alarm_count = sum(len(a or []) for a in alarms_by_node.values())
         analyzed = self._nodes_with_data(splunk_raw) or list(raw_alarms.keys())
         entities_analyzed = len(analyzed)
         analysis_run = True  # analyze always runs over the configured node set
         state, message = compute_state(analysis_run, entities_analyzed, len(abnormal_nodes))
+        if other_count and not abnormal_nodes:
+            message = (f"No abnormal core node serves these customers; {other_count} other "
+                       f"abnormal node alarm(s) found.")
         slog.note("Splunk analysis complete", marker="COMPLETE",
                   nodes=entities_analyzed, abnormal_nodes=len(abnormal_nodes),
                   alarms=alarm_count, state=state)
@@ -135,7 +150,9 @@ class SplunkAnalyzer:
                 "entities_analyzed": entities_analyzed,
                 "affected_count": len(abnormal_nodes),
                 "has_abnormal_kpis": len(abnormal_nodes) > 0,
-                "all_clean": analysis_run and entities_analyzed > 0 and len(abnormal_nodes) == 0,
+                "all_clean": (analysis_run and entities_analyzed > 0 and len(abnormal_nodes) == 0
+                              and other_count == 0),
+                "other_abnormal_count": other_count,
                 "severity_counts": severity_counts,
             },
             metrics={"alarms_by_node": alarms_by_node},
