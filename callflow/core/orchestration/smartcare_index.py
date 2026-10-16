@@ -40,6 +40,20 @@ import threading
 from typing import Any, Dict, List, Optional, Tuple
 
 _CTX_KEY = "_smartcare_index"
+
+# Smartcare columns that hold the customers of each Splunk node type.
+#   MME  (4G)    -> S1-MME MME_Name, S6a MME_NAME
+#   SGSN (2G/3G) -> GBIUPS SGSN_MME_NAME
+#   GGSN         -> SGW/PGW names; SGW_PGW_NAME is the S1-MME/DNS SGW column after
+#                   smartcareOutput_Aggregated renamed it and removed '_SGW-PGW_'.
+# Other node types (DSC, DNS, ...) search every node column, as before.
+SPLUNK_NODE_COLUMNS = {
+    "MME": ("MME_Name", "MME_NAME"),
+    "SGSN": ("SGSN_MME_NAME",),
+    "GGSN": ("SGSN_SGW_NAME", "GGSN_PGW_NAME", "SGW_PGW_NAME"),
+}
+_STRIPPED_SGW_COLUMN = "SGW_PGW_NAME"
+_SGW_STRIP = ("_vSGW-vPGW_", "_SGW-PGW_")   # same replacements as smartcareOutput_Aggregated
 _CTX_LOCK_KEY = "_smartcare_index_lock"
 _INSTALL_LOCK = threading.Lock()  # guards lazy creation of the per-ctx lock
 
@@ -103,6 +117,11 @@ class SmartcareIndex:
                     # One string conversion per column, reused for every query.
                     prepared[col] = processed[col].astype(str)
                     cols.append(col)
+            # Per-node-type columns that are not in the generic search order.
+            for type_cols in SPLUNK_NODE_COLUMNS.values():
+                for col in type_cols:
+                    if col not in prepared and col in getattr(processed, "columns", []):
+                        prepared[col] = processed[col].astype(str)
 
         return cls(
             customers_per_cell=cpc,
@@ -138,6 +157,42 @@ class SmartcareIndex:
                 impacted = int(self._msisdn[mask.values].nunique())
                 return (col, self._node_type_map.get(col), impacted)
         return (None, None, None)
+
+    def match_and_count_in(self, mapped_value, columns) -> Tuple[List[str], Optional[int]]:
+        """Columns (of ``columns``) whose values contain ``mapped_value``, and the
+        unique MSISDNs over ALL matching rows of those columns together.
+
+        Unlike ``match_and_count`` (first matching column only), customers seen on
+        the node through several interfaces are all counted, once each.
+        Returns ``([], None)`` when nothing matches.
+        """
+        if not self._prepared or self._msisdn is None or mapped_value is None:
+            return ([], None)
+        needle = str(mapped_value)
+        stripped = needle
+        for token in _SGW_STRIP:
+            stripped = stripped.replace(token, "")
+        union = None
+        matched: List[str] = []
+        for col in columns:
+            series = self._prepared.get(col)
+            if series is None:
+                continue
+            try:
+                if col == _STRIPPED_SGW_COLUMN:
+                    if stripped == needle:
+                        continue  # not an SGW/PGW name; this column cannot hold it
+                    mask = series.str.strip().str.lower() == stripped.lower()
+                else:
+                    mask = series.str.contains(needle, case=False, na=False, regex=False)
+            except Exception:
+                continue
+            if bool(mask.any()):
+                matched.append(col)
+                union = mask if union is None else (union | mask)
+        if union is None:
+            return ([], None)
+        return (matched, int(self._msisdn[union.values].nunique()))
 
     def splunk_subs_mapper(self):
         """Return the ``(mapped_value, impacted_subs, node_type)`` mapper the
@@ -179,10 +234,7 @@ class SmartcareIndex:
                     or by_lower.get(low) or by_zero.get(_zero_norm(low)))
 
         # Smartcare columns that can confirm (or rule out) a Splunk node type.
-        expected_cols = {
-            "MME": ("MME_Name", "SGSN_MME_NAME"), "SGSN": ("MME_Name", "SGSN_MME_NAME"),
-            "GGSN": ("SGSN_SGW_NAME", "GGSN_PGW_NAME"), "DSC": ("DRA_NAME",),
-        }
+        expected_cols = dict(SPLUNK_NODE_COLUMNS, DSC=("DRA_NAME",))
         empty_vals = {"", "nan", "none", "<na>", "nat"}
 
         def has_node_data(cols):
@@ -205,9 +257,13 @@ class SmartcareIndex:
                     stats["dropped_no_suffix_mapping"] += 1
                     dropped.append({"kpi": kpi_col, "suffix": suffix, "reason": "no_suffix_mapping"})
                     return (None, None, None)
-                column, node_type, impacted = self.match_and_count(mapped_value)
+                node = str(kpi_col).split("_")[0].upper()
+                search_cols = SPLUNK_NODE_COLUMNS.get(node) or self._node_columns
+                matched, impacted = self.match_and_count_in(mapped_value, search_cols)
+                column = matched[0] if matched else None
+                node_type = (self._node_type_map.get(column) or node) if column else None
                 if column is None:
-                    cols = expected_cols.get(str(kpi_col).split("_")[0].upper())
+                    cols = expected_cols.get(node)
                     if cols and not has_node_data(cols):
                         # Smartcare has no data for this node type (e.g. its query
                         # failed), so "served the complainants?" cannot be checked:
