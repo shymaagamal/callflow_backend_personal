@@ -13,7 +13,7 @@ import pandas as pd
 
 from . import aggregation, catalog, config, hub, outputs, response, validation
 from .smartcare import Executor, Session, classify_error
-
+from callflow.core.utils.data_utils import convert_java_types
 
 def _connect_with_retries(session, ctx):
     attempts = config.max_attempts()
@@ -113,7 +113,7 @@ def run(params, ctx, connect_fn=None):
                     main_ok.add(id(template))
                 frames.append(outcome.frame)
         result = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-
+        result = convert_java_types(result)  # convert JPype/Java types to native Python types for pickling
         with ctx.stage("fallback_queries"):
             result = _apply_fallbacks(result, executor, main_ok, ctx, req.complain_type)
         session.close()                        # no more Smartcare work in this job

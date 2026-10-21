@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 import os
 import sys
@@ -17,6 +18,8 @@ sys.path.append('../general_apis')
 from general_apis.constants import *
 from corsheaders.defaults import default_methods
 from corsheaders.defaults import default_headers
+
+import logging 
 
 
 
@@ -39,7 +42,7 @@ VIAVE_SERVICE_NAME =os.getenv("viavi_service_name")
 VIAVE_USER =os.getenv("viavi_user")
 VIAVE_PASSWORD=os.getenv("viavi_password")
 
-
+CALLFLOW_PORTAL_URL = "https://10.30.30.177/callflow-portal/"
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
@@ -96,6 +99,7 @@ CORS_ALLOW_CREDENTIALS = True
 
 
 MIDDLEWARE = [
+    'callflow_portal.middleware.RequestTrackerMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -196,7 +200,8 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Africa/Cairo'
+
 
 USE_I18N = True
 
@@ -256,3 +261,38 @@ CACHES = {
         }
     }
 }
+
+
+
+
+
+
+LOG_DIR = '/home/AutomationProjects/CallFlowTool/backend/callflow_portal/requestlogs/' 
+os.makedirs(LOG_DIR, exist_ok=True) 
+
+
+LOGGING = { 
+            'version': 1, 
+            'disable_existing_loggers': False, 
+            'formatters': { 
+                'verbose': { 
+                    'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}', 
+                    'style': '{', 
+                    }, 
+                }, 
+            'handlers': { 
+                'request_file': { 
+                    'level': 'WARNING', 
+                    'class': 'logging.handlers.RotatingFileHandler', 
+                    'filename': os.path.join(LOG_DIR, 'request_tracker.log'), 
+                    'maxBytes': 10 * 1024 * 1024, # 10 MB 
+                    'backupCount': 5, 
+                    'formatter': 'verbose', }, }, 
+            'loggers': { 
+                'request_tracker': { 
+                    'handlers': ['request_file'], 
+                    'level': 'WARNING', 
+                    'propagate': True, 
+                    }, 
+                }, 
+        }

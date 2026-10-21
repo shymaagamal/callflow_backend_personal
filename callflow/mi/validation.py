@@ -65,8 +65,8 @@ def parse_request(params) -> AnalysisRequest:
         raise RequestError(str(e), legacy_status=500)
 
     errors = []
-    if end_dt - start_dt > datetime.timedelta(minutes=config.max_window_minutes()):
-        errors.append("Time_Stamp should not exceed 30 min")
+    # if end_dt - start_dt > datetime.timedelta(minutes=config.max_window_minutes()):
+    #     errors.append("Time_Stamp should not exceed 30 min")
     if end_dt <= start_dt:
         errors.append("end_date must be after start_date")
 

@@ -86,11 +86,11 @@ def log_level() -> str:
 
 # ------------------------------------------------------------ Smartcare
 def smartcare_user():
-    return _get("MI_SMARTCARE_USER", None)
+    return _get("SMARTCARE_DB_USER", None)
 
 
 def smartcare_password():
-    return _get("MI_SMARTCARE_PASSWORD", None)
+    return _get("SMARTCARE_DB_PASSWORD", None)
 
 
 def smartcare_jdbc_url() -> str:

@@ -457,6 +457,7 @@ def smartcareOutput_Aggregated(data, logs_file, complain_type, timestamp):
         # ---------- SGW / PGW processing (always) ---------- 
         try: 
             data.rename(columns={'SGW_SGSN_NAME': 'SGW_PGW_NAME'}, inplace=True) 
+            data['SGW_SGSN_NAME'] = data['SGW_PGW_NAME']  # Keep original for reference
         except Exception as e: 
             with open(logs_file, 'a') as logs_f: 
                 logs_f.write(f'SGW rename error: {str(e)}\n') 
