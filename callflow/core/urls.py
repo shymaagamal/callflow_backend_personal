@@ -28,7 +28,7 @@ from .views.orchestrated_analysis import (
     RCAFileDownloadAPIView,
 )
 from .views.stcc_analysis import STCCAnalysisAPIView
-from .views.rca_run import RCARunAPIView
+from .views.rca_run import RCARunAPIView, RCARunFindingsCSVView, RCARunDiagnosticsView
 from  .views.test_viavi_kpi import ViaviKpiAPIView
 from .views.test_remedy_ticket import RemedyKpiAPIView
 
@@ -37,48 +37,7 @@ from .views.test_remedy_ticket import RemedyKpiAPIView
 # from .views.complaint_report import BaseComplainReportAPIView
 # from .views.download import DataExportAPIView, ExportFileDownloadAPIView
 
-urlpatterns = [
-#     # Smartcare
-#     path('smartcare', SmartcareIntegrationAPIView.as_view(), name="smartcare-api"),
-#     path('smartcare/<str:job_id>', SmartcareIntegrationAPIView.as_view(), name="smartcare-job-status"),
-#     path("smartcare_trino", smartcare_trino.as_view(), name="smartcare-trino"),
-
-#     # Splunk
-#     path('splunk', SplunkIntegrationAPIView.as_view(), name="splunk-api"),
-#     path('splunk/<str:job_id>', SplunkIntegrationAPIView.as_view(), name="splunk-job-status"),
-
-#     # NPP
-#     path('npp/minutes', NppIntegration15minAPIView.as_view(), name="npp-api"),
-#     path('npp/minutes/<str:job_id>', NppIntegration15minAPIView.as_view(), name="npp-job-status"),
-#     path('npp/hourly', NppIntegrationHourlyAPIView.as_view(), name="npp-hourly-api"),
-#     path('npp/hourly/<str:job_id>', NppIntegrationHourlyAPIView.as_view(), name="npp-hourly-job-status"),
-
-#     # Viavi
-#     path('viavi', ViaviIntegrationAPIView.as_view(), name="viavi-api"),
-#     path('viavi/<str:job_id>', ViaviIntegrationAPIView.as_view(), name="viavi-job-status"),
-
-#     # Remedy
-#     path('remedy', RemedyIntegrationMain.as_view(), name="remedy-api"),
-#     path('remedy/<str:job_id>', RemedyIntegrationMain.as_view(), name="remedy-job-status"),
-
-#     # Smartcare failure
-#     path('smartcare-failure', SmartcareSCFAPIView.as_view(), name='smartcare-failure'),
-#     path('smartcare-failure/<str:job_id>', SmartcareSCFAPIView.as_view(), name='smartcare-failure-job-status'),
-
-#     # Abnormal KPIs (the parallelized-Splunk-node fix lives here)
-#     path('abnormal/splunk/', SplunkAbnormalAPIView.as_view(), name='abnormal-splunk'),
-#     path('abnormal/splunk/<str:job_id>', SplunkAbnormalAPIView.as_view(), name='abnormal-splunk-job-status'),
-#     path('abnormal/npp/', NppAbnormalAPIView.as_view(), name='abnormal-npp'),
-#     path('abnormal/npp/<str:job_id>', NppAbnormalAPIView.as_view(), name='abnormal-npp-job-status'),
-#     path('abnormal/viavi/', ViaviAbnormalAPIView.as_view(), name='abnormal-viavi'),
-#     path('abnormal/viavi/<str:job_id>', ViaviAbnormalAPIView.as_view(), name='abnormal-viavi-job-status'),
-
-#     # Root cause (now takes cache_key in POST body instead of reading a global file)
-#     path("root-cause", RootCauseAPIView.as_view(), name="root-cause-file"),
-#     path("root-cause/<str:filename>", RootCauseAPIView.as_view()),
-
-    # Orchestrated analysis (data-availability driven; retrieval no longer waits
-    # on Smartcare -- see orchestration/ANALYSIS.md). Additive; other endpoints
+urlpatterns =[
     # are unchanged. request_id == job_id.
     path("analysis", AnalysisOrchestratorAPIView.as_view(), name="orchestrated-analysis"),
     # RCA readiness / serving must be registered BEFORE the generic job-status
@@ -94,6 +53,8 @@ urlpatterns = [
     # All systems + the existing RCA HTML tool run headless; returns the tool's results.
     path("rca/run", RCARunAPIView.as_view(), name="rca-run"),
     path("rca/run/<str:job_id>", RCARunAPIView.as_view(), name="rca-run-job-status"),
+    path("rca/run/<str:job_id>/findings.csv", RCARunFindingsCSVView.as_view(), name="rca-run-findings-csv"),
+    path("rca/run/<str:job_id>/diagnostics", RCARunDiagnosticsView.as_view(), name="rca-run-diagnostics"),
         # STCC: NPP / Viavi / Remedy only, synchronous (result in the POST response)
     path("stcc/analysis", STCCAnalysisAPIView.as_view(), name="stcc-analysis"),
     path("stcc/analysis/<str:job_id>", STCCAnalysisAPIView.as_view(), name="stcc-analysis-job-status"),
@@ -103,20 +64,7 @@ urlpatterns = [
      path("npp/kpis", NppKpiAPIView.as_view(), name="npp-kpis"),
 
      path("viavi/kpis/", ViaviKpiAPIView.as_view(), name="viavi-kpis"),
-
      path("remedy/kpis/", RemedyKpiAPIView.as_view(), name="remedy-kpis"),
-#     # Unchanged / not yet converted (no reported slowness here)
-#     path("abnormal-kpis", SplunkAbnormalAPIView.as_view(), name="abnormal-kpi"),  # legacy alias, review if still used
-#     path('dqi', DQIAPIView.as_view(), name='dqi'),
-#     path('complaint-report', BaseComplainReportAPIView.as_view(), name='complaint-report'),
-#     path('export-data', DataExportAPIView.as_view(), name='export-data'),
-#     path('export-data/<str:job_id>', DataExportAPIView.as_view(), name='export-data-status'),
-#     path('export-data/file/<str:filename>', ExportFileDownloadAPIView.as_view(), name='export-data-file'),
-
-#     path('Eniq', EniqIntegrationAPIView.as_view(), name="eniq-api"),
-
-#     path("trino-test", trino_test.as_view(), name="trino-test"),
-
 ]
 
 """

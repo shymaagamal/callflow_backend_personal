@@ -33,7 +33,7 @@ from ..orchestration.customer_counts import CTX_KEY
 from ..services.smartcare_service import process_smartcare_data
 from ..services.trino_service import customer_counts_from_df
 from ..views import orchestrated_analysis as oa
-from ..views.rca_run import RCARunAPIView
+from ..views.rca_run import RCARunAPIView, RCARunFindingsCSVView, RCARunDiagnosticsView
 
 try:
     from playwright.sync_api import sync_playwright  # noqa: F401
@@ -200,11 +200,11 @@ class _Base(SimpleTestCase):
             time.sleep(1)
         self.fail(f"job {job_id} did not finish in {timeout}s")
 
-    def get(self, job_id):
-        return RCARunAPIView.as_view()(self.factory.get(f"/callflow/api/rca/run/{job_id}"), job_id=job_id)
+    def get(self, job_id, view=RCARunAPIView, suffix=""):
+        return view.as_view()(self.factory.get(f"/callflow/api/rca/run/{job_id}{suffix}"), job_id=job_id)
 
     def rdir(self, job_id):
-        return self.out / "MI" / "rca" / job_id
+        return self.out / RCARunAPIView.output_subdir / "rca" / job_id
 
     def tool_copy(self, script):
         """The real tool plus one extra <script> at the end (test-only fault injection)."""
@@ -218,32 +218,54 @@ class _Base(SimpleTestCase):
 @unittest.skipUnless(HAVE_PW and TOOL.is_file(), "Playwright/Chromium or the RCA tool is not available")
 class RCARunEndToEndTests(_Base):
 
-    def test_success_returns_real_rca_results(self):
+    def test_success_returns_clean_report(self):
         job_id, job = self.post(fake_sources())
         self.assertEqual(job["status"], "DONE", job.get("error"))
-        res = job["result"]
-        self.assertEqual(res["request_id"], job_id)
-        self.assertEqual(res["status"], "COMPLETED")
-        rca = res["rca"]
-        self.assertEqual(rca["status"], "SUCCESS")
-        # files went through the tool's own loader
-        self.assertIn("npp_kpi.csv", rca["inputs"]["kpi_files"])
-        self.assertEqual(rca["inputs"]["filter_file"], "smartcare_filter.csv")
-        self.assertEqual(rca["inputs"]["threshold_file"], "thresholds.xlsx")
-        # the tool's structured results, not just logs
-        r = rca["results"]
-        for key in ("summary", "chains", "suspects", "nodeSuspects", "anomalies", "detectedNodeTypes"):
-            self.assertIn(key, r)
-        self.assertGreater(r["summary"]["total"], 0, "the degraded cell must produce anomalies")
-        self.assertTrue(any(a.get("kpiName") for a in r["anomalies"]))
-        self.assertIsNotNone(rca["root_cause"])
-        self.assertIn("hypothesis", rca["root_cause"])
-        # request-scoped artifacts under MI
-        d = self.rdir(job_id)
-        for name in ("rca_result.json", "rca_tool_log.json", "browser_console.log", "manifest.json",
-                     "npp_kpi.csv", "smartcare_filter.csv"):
-            self.assertTrue((d / name).is_file(), name)
-        self.assertTrue((self.out / "MI" / "logs" / "rca_run.txt").is_file())
+        rep = self.get(job_id).data
+        json.dumps(rep)                                   # valid JSON, no NaN/objects
+        self.assertEqual(rep["request_id"], job_id)
+        self.assertEqual(rep["status"], "COMPLETED")
+        self.assertEqual(set(rep), {"report_version", "request_id", "status", "analysis_window",
+                                    "data_coverage", "summary", "root_cause", "findings", "suspects",
+                                    "impact", "warnings", "links"})
+        # nothing from the pipeline / browser / logs leaks into the report
+        flat = json.dumps(rep)
+        for leaked in ("analysisLog", "browser", "kpi_files", "manifest", "dashboard", "details",
+                       "rca_tool_log", "duration_seconds", "subProfiles", "anomalyList"):
+            self.assertNotIn(leaked, flat)
+        # values are the tool's, with predictable types
+        self.assertTrue(rep["summary"]["primary_root_cause"])
+        self.assertEqual(rep["summary"]["primary_root_cause"], rep["root_cause"]["hypothesis"])
+        self.assertIn(rep["summary"]["confidence"], ("HIGH", "MEDIUM", "LOW"))
+        self.assertTrue(rep["root_cause"]["recommended_actions"])
+        self.assertTrue(rep["root_cause"]["evidence_chain"])
+        self.assertTrue(rep["findings"])
+        f = rep["findings"][0]
+        self.assertEqual(set(f), {"id", "system", "kpi", "node", "site", "severity", "observed",
+                                  "baseline", "deviation_pct", "direction", "threshold"})
+        self.assertIsInstance(f["observed"], (int, float))
+        self.assertTrue(any(x["node"] == "L18_LU4820_04" and x["kpi"] == "CFR" for x in rep["findings"]))
+        ids = {x["id"] for x in rep["findings"]}
+        self.assertEqual(len(ids), len(rep["findings"]))
+        top = rep["suspects"]["sites"][0]
+        self.assertEqual(top["site"], "LU4820")
+        self.assertTrue(set(top["finding_ids"]) <= ids and top["finding_ids"])
+        self.assertNotIn("anomalies", top)                # suspects reference findings, no copies
+        self.assertEqual(rep["summary"]["counts"]["critical_findings"],
+                         sum(1 for x in rep["findings"] if x["severity"] == "CRITICAL"))
+        # CSV: one row per finding
+        csv_resp = self.get(job_id, RCARunFindingsCSVView, "/findings.csv")
+        self.assertEqual(csv_resp.status_code, 200)
+        self.assertIn("text/csv", csv_resp["Content-Type"])
+        lines = csv_resp.content.decode().strip().splitlines()
+        self.assertEqual(lines[0], "request_id,id,system,kpi,node,site,severity,observed,baseline,"
+                                   "deviation_pct,direction,threshold")
+        self.assertEqual(len(lines) - 1, len(rep["findings"]))
+        # diagnostics keep the detail the report leaves out
+        diag = self.get(job_id, RCARunDiagnosticsView, "/diagnostics").data
+        self.assertTrue(diag["rca_tool_log"])
+        self.assertIn("npp_kpi.csv", diag["pipeline"]["rca_tool"]["inputs"]["kpi_files"])
+        self.assertTrue((self.out / RCARunAPIView.output_subdir / "logs" / "rca_run.txt").is_file())
 
     def test_result_survives_job_expiry(self):
         job_id, job = self.post(fake_sources())
@@ -252,19 +274,20 @@ class RCARunEndToEndTests(_Base):
         cache.delete(f"callflow_job:{job_id}")
         resp = self.get(job_id)
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.data["status"], "DONE")
-        self.assertEqual(resp.data["source"], "file")
-        self.assertEqual(resp.data["result"]["rca"]["status"], "SUCCESS")
+        self.assertEqual(resp.data["status"], "COMPLETED")
+        self.assertTrue(resp.data["findings"])
 
-    def test_failed_system_still_runs_rca_on_the_rest(self):
+    def test_failed_system_gives_partial_report(self):
         job_id, job = self.post(fake_sources(fail=("npp",)))
         self.assertEqual(job["status"], "DONE", job.get("error"))
-        res = job["result"]
-        self.assertEqual(res["status"], "PARTIAL")
-        self.assertIn("npp", res["failed_systems"])
-        self.assertEqual(res["systems"]["npp"], "FAILED")
-        self.assertNotIn("npp_kpi.csv", res["rca"]["inputs"]["kpi_files"])
-        self.assertEqual(res["rca"]["status"], "SUCCESS")
+        rep = self.get(job_id).data
+        self.assertEqual(rep["status"], "PARTIAL")
+        self.assertEqual(rep["data_coverage"]["systems_missing"], ["npp"])
+        self.assertNotIn("npp", rep["data_coverage"]["systems_available"])
+        self.assertTrue(any(w["code"] == "SYSTEM_UNAVAILABLE" and w["system"] == "npp"
+                            for w in rep["warnings"]))
+        self.assertFalse(any(f["system"] == "NPP" for f in rep["findings"]))
+        self.assertIsNotNone(rep["summary"])              # what the tool did produce is returned
 
     def test_missing_csvs_fail_clearly(self):
         job_id, job = self.post(fake_sources(empty=True))
@@ -275,6 +298,8 @@ class RCARunEndToEndTests(_Base):
         self.assertEqual(err["code"], "RCA_NO_INPUT_FILES")
         resp = self.get(job_id)
         self.assertEqual(resp.data["status"], "FAILED")
+        self.assertEqual(resp.data["error"]["code"], "RCA_NO_INPUT_FILES")
+        self.assertNotIn("details", resp.data["error"])
 
     def test_rca_javascript_error_is_reported(self):
         tool = self.tool_copy("window.parseFiles = async function () { throw new Error('injected parse failure'); };")
@@ -324,8 +349,8 @@ class RCARunEndToEndTests(_Base):
         self.assertNotIn("L18_LU4830_02", npp_a)
         self.assertIn("L18_LU4830_02", npp_b)
         self.assertNotIn("L18_LU4820_04", npp_b)
-        an_a = json.dumps(done["A"]["result"]["rca"]["results"]["anomalies"])
-        an_b = json.dumps(done["B"]["result"]["rca"]["results"]["anomalies"])
+        an_a = json.dumps(done["A"]["result"]["findings"])
+        an_b = json.dumps(done["B"]["result"]["findings"])
         self.assertIn("LU4820", an_a)
         self.assertNotIn("LU4830", an_a)
         self.assertIn("LU4830", an_b)

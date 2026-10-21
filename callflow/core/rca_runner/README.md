@@ -7,10 +7,10 @@ and returns the tool's own results. No RCA logic is re-implemented in Python.
 ## How it works
 
 1. `RCARunAPIView` (views/rca_run.py) is the existing `AnalysisOrchestratorAPIView`
-   with its files and logs moved to `OUTPUT_DIR/MI`. `POST` returns a job id at once;
+   with its files and logs moved to `OUTPUT_DIR/rca_engine`. `POST` returns a job id at once;
    the job thread runs the unchanged orchestration (Trino, Smartcare, NPP, Splunk,
    Viavi, Remedy), which writes the request-scoped CSVs and `manifest.json` to
-   `OUTPUT_DIR/MI/rca/<request_id>/`.
+   `OUTPUT_DIR/rca_engine/rca/<request_id>/`.
 2. When no file is still being written, `browser_runner.run_rca_tool` opens the tool
    in Chromium and calls the tool's own `callAPIWithPayload({rca_files_url, start_date,
    end_date})`, which is what the portal iframe calls. That runs
@@ -31,16 +31,31 @@ POST /callflow/api/rca/run
 -> 202 {"job_id": "<request_id>", "status": "PENDING"}
 
 GET /callflow/api/rca/run/<request_id>
--> RUNNING: step, systems, rca_run.status   DONE: result   FAILED: error + rca_run.code
+   PENDING/RUNNING -> {"request_id", "status", "progress_percent"}
+   DONE            -> the RCA report (below)
+   FAILED          -> {"request_id", "status": "FAILED", "error": {"code", "message"}}
+GET /callflow/api/rca/run/<request_id>/findings.csv   one row per finding
+GET /callflow/api/rca/run/<request_id>/diagnostics    logs, file loading, browser and pipeline detail
 ```
 
-Error codes in `rca_run.code`, also written to `rca_error.json`:
+The report (`report.py`) only re-shapes the tool's own objects (`performRCA(...)` and
+`AppState.correlationResults`); nothing is recomputed:
+`status` (COMPLETED | PARTIAL), `analysis_window`, `data_coverage`, `summary`
+(primary root cause, layers, confidence, scope, counts), `root_cause` (hypothesis, mechanism,
+evidence chain, recommended actions, next steps, differentials), `findings` (one per anomaly,
+ids F1..Fn), `suspects` (sites / core nodes / TACs, ranked, linked to findings by id),
+`impact` (subscribers, sites, tickets), `warnings`, `links`.
+A value the tool did not produce is `null`, never 0. A failed system makes the report
+`PARTIAL` and is listed in `data_coverage.systems_missing` with a warning.
+
+Error codes (`error.code`, also in `rca_error.json`):
 `RCA_NO_INPUT_FILES`, `RCA_TOOL_NOT_FOUND`, `RCA_VENDOR_MISSING`, `BROWSER_START_FAILED`,
 `RCA_TOOL_LOAD_FAILED`, `RCA_FILE_LOAD_FAILED`, `RCA_JS_ERROR`, `RCA_TIMEOUT`,
 `RCA_INCOMPLETE`, `RCA_QUEUE_TIMEOUT`.
 
-The final result is also kept in `MI/rca/<request_id>/rca_result.json`, so `GET` still
-answers after the 30-minute job record expires.
+Files per request in `rca_engine/rca/<request_id>/`: `rca_result.json` (report), `rca_findings.csv`,
+`rca_diagnostics.json`, `rca_tool_log.json`, `browser_console.log`, `rca_error.json` on failure.
+They outlive the 30-minute job record, so `GET` keeps working.
 
 ## Settings (all optional)
 

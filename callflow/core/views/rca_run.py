@@ -1,7 +1,11 @@
 # callflow/core/views/rca_run.py
 """
-POST /callflow/api/rca/run           -> 202 {job_id, status: "PENDING"}   (job_id == request_id)
-GET  /callflow/api/rca/run/{job_id}  -> job: RUNNING (step, systems, rca_run) | DONE (result) | FAILED
+POST /callflow/api/rca/run                        -> 202 {job_id, status: "PENDING"}  (job_id == request_id)
+GET  /callflow/api/rca/run/{id}                   -> PENDING/RUNNING {request_id, status, progress_percent}
+                                                     DONE: the RCA report (rca_runner/report.py)
+                                                     FAILED: {request_id, status, error: {code, message}}
+GET  /callflow/api/rca/run/{id}/findings.csv      -> one row per finding
+GET  /callflow/api/rca/run/{id}/diagnostics       -> logs, file loading, browser and pipeline detail
 
 One request runs every CallFlow system through the EXISTING orchestration
 (AnalysisOrchestratorAPIView.run_job: same DAG, services, analyzers, RCA file
@@ -10,7 +14,7 @@ headless Chromium (rca_runner.browser_runner) and returns the tool's own
 results. No RCA logic is re-implemented in Python.
 
 Files, logs and the final result for each request live under
-    OUTPUT_DIR/MI/rca/{request_id}/      (CSV inputs, manifest.json, logs/, rca_result.json,
+    OUTPUT_DIR/rca_engine/rca/{request_id}/      (CSV inputs, manifest.json, logs/, rca_result.json,
                                           rca_tool_log.json, browser_console.log)
 so concurrent requests never share a file.
 
@@ -25,6 +29,7 @@ import time
 from pathlib import Path
 
 from django.conf import settings
+from django.http import HttpResponse
 from rest_framework import status as http_status
 from rest_framework.response import Response
 
@@ -32,12 +37,16 @@ from ..jobs import job_manager
 from ..orchestration import rca_files as rf
 from ..rca_runner import limits
 from ..rca_runner.browser_runner import RCARunError, run_rca_tool
+from ..rca_runner.report import build_report, findings_csv
+from .base import BaseCallFlowAPIView
 from .orchestrated_analysis import AnalysisOrchestratorAPIView
 
 logger = logging.getLogger(__name__)
 
-RESULT_FILE = "rca_result.json"
+RESULT_FILE = "rca_result.json"          # the public report
 ERROR_FILE = "rca_error.json"
+DIAGNOSTICS_FILE = "rca_diagnostics.json"  # pipeline + tool detail, never in the report
+CSV_FILE = "rca_findings.csv"
 
 
 def _setting(name, default):
@@ -63,29 +72,29 @@ class RCARunAPIView(AnalysisOrchestratorAPIView):
     log_prefix = "rca_run"
 
     def get_log_file(self, prefix, start_date, end_date):
-        # Same contract as the base class, but the request log lives under MI/logs.
-        logs_dir = Path(settings.OUTPUT_DIR) / "rca_engine" / "logs"
+        # Same contract as the base class, but the request log lives under rca_engine/logs.
+        logs_dir = Path(settings.OUTPUT_DIR) / self.output_subdir / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
         return logs_dir / f"{prefix}.txt", f"{start_date}_{end_date}"
 
     def get(self, request, job_id=None):
         if not job_id:
             return Response({"error": "job_id is required"}, status=http_status.HTTP_400_BAD_REQUEST)
-        job = job_manager.get_job(job_id)
-        if job is not None:
-            return Response(job)
-        # The Redis job record expires after 30 min; the result file does not.
         try:
             rdir = rf.request_dir(self._base(), job_id)
         except ValueError:
             return Response({"error": "invalid job_id"}, status=http_status.HTTP_400_BAD_REQUEST)
-        for name, state in ((RESULT_FILE, "DONE"), (ERROR_FILE, "FAILED")):
-            p = rdir / name
-            if p.is_file():
-                data = json.loads(p.read_text(encoding="utf-8"))
-                body = {"job_id": job_id, "job_type": self.job_type, "status": state, "source": "file"}
-                body["result" if state == "DONE" else "error"] = data
-                return Response(body)
+        job = job_manager.get_job(job_id)
+        if job is not None and job.get("status") in ("PENDING", "RUNNING"):
+            return Response({"request_id": job_id, "status": job["status"],
+                             "progress_percent": job.get("progress_percent")})
+        if job is not None and job.get("status") == "DONE" and job.get("result"):
+            return Response(job["result"])
+        # Finished (or the 30-min job record expired): answer from the request files.
+        if (rdir / RESULT_FILE).is_file():
+            return Response(json.loads((rdir / RESULT_FILE).read_text(encoding="utf-8")))
+        if (rdir / ERROR_FILE).is_file() or (job is not None and job.get("status") == "FAILED"):
+            return Response(_failed_body(job_id, rdir, job))
         return Response({"error": "job not found or expired"}, status=http_status.HTTP_404_NOT_FOUND)
 
     # ------------------------------------------------------------------ job --
@@ -94,7 +103,7 @@ class RCARunAPIView(AnalysisOrchestratorAPIView):
         request_id = job_id
         base = self._base()
         rdir = rf.request_dir(base, request_id)
-        lock_dir = limits.default_lock_dir(settings.OUTPUT_DIR)
+        lock_dir = Path(settings.OUTPUT_DIR) / self.output_subdir / "locks"
         wait_s = float(_setting("RCA_RUN_SLOT_WAIT_S", 1800))
         t0 = time.monotonic()
 
@@ -149,30 +158,30 @@ class RCARunAPIView(AnalysisOrchestratorAPIView):
         except RCARunError as e:
             self._fail(job_id, rdir, request_logger, e)
 
-        failed = sorted(s for s, st in systems.items() if st not in ("COMPLETED",))
-        result = {
+        file_status = (rca_inputs or {}).get("file_status") or {}
+        failed = sorted(x for x, st in systems.items()
+                        if st == "FAILED" or file_status.get(x) == rf.FILE_FAILED)
+        no_data = sorted(x for x, fs in file_status.items()
+                         if fs == rf.FILE_NOT_APPLICABLE and x not in failed and x in systems)
+        report = build_report(request_id, rca, systems, failed, no_data)
+
+        # Everything else (pipeline, file loading, tool internals) goes to diagnostics only.
+        _write_json(rdir / DIAGNOSTICS_FILE, {
             "request_id": request_id,
-            "status": "COMPLETED" if not failed else "PARTIAL",
-            "failed_systems": failed,
             "overall_status": analysis.get("overall_status"),
             "systems": systems,
-            "summary": analysis.get("summary"),
+            "summary_cards": analysis.get("summary"),
             "dashboard": analysis.get("dashboard"),
             "rca_inputs": {**rca_inputs, "files": listing},
-            "rca": rca,
-            "artifacts": {
-                "directory": str(rdir),
-                "result": str(rdir / RESULT_FILE),
-                "tool_log": str(rdir / "rca_tool_log.json"),
-                "browser_console": str(rdir / "browser_console.log"),
-            },
+            "rca_tool": {k: v for k, v in rca.items() if k not in ("results", "root_cause")},
             "duration_seconds": round(time.monotonic() - t0, 2),
-        }
-        _write_json(rdir / RESULT_FILE, result)
+        })
+        (rdir / CSV_FILE).write_text(findings_csv(report), encoding="utf-8")
+        _write_json(rdir / RESULT_FILE, report)
         job_manager.update_job(job_id, rca_run={"status": "SUCCESS"})
-        request_logger.info(f"[RCA-RUN] request_id={request_id} done status={result['status']} "
-                            f"rca_duration={rca.get('duration_seconds')}s")
-        return result
+        request_logger.info(f"[RCA-RUN] request_id={request_id} done status={report['status']} "
+                            f"findings={len(report['findings'])} rca_duration={rca.get('duration_seconds')}s")
+        return report
 
     def _wait_for_files(self, base, request_id, request_logger):
         """Wait (bounded) until no system is still writing its RCA file."""
@@ -195,3 +204,81 @@ class RCARunAPIView(AnalysisOrchestratorAPIView):
         request_logger.error(f"[RCA-RUN] request_id={job_id} failed {err.code}: {err.message}")
         job_manager.update_job(job_id, rca_run={"status": "FAILED", **info})
         raise err
+
+
+def _failed_body(request_id, rdir, job=None):
+    err = {}
+    p = Path(rdir) / ERROR_FILE
+    if p.is_file():
+        try:
+            err = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            err = {}
+    if not err and job is not None:
+        run = job.get("rca_run") or {}
+        err = {"code": run.get("code") or "PIPELINE_ERROR", "message": run.get("message") or job.get("error")}
+    return {"request_id": request_id, "status": "FAILED",
+            "error": {"code": err.get("code"), "message": err.get("message")},
+            "links": {"diagnostics": f"/callflow/api/rca/run/{request_id}/diagnostics"}}
+
+
+class _RCARunFileView(BaseCallFlowAPIView):
+    """Shared request-dir lookup for the CSV and diagnostics endpoints."""
+
+    def _rdir(self, job_id):
+        return rf.request_dir(Path(settings.OUTPUT_DIR) / RCARunAPIView.output_subdir, job_id)
+
+
+class RCARunFindingsCSVView(_RCARunFileView):
+    """GET /callflow/api/rca/run/{id}/findings.csv -- one row per RCA finding."""
+
+    def get(self, request, job_id=None):
+        try:
+            rdir = self._rdir(job_id)
+        except ValueError:
+            return Response({"error": "invalid job_id"}, status=http_status.HTTP_400_BAD_REQUEST)
+        p = rdir / CSV_FILE
+        if p.is_file():
+            body = p.read_text(encoding="utf-8")
+        elif (rdir / RESULT_FILE).is_file():
+            body = findings_csv(json.loads((rdir / RESULT_FILE).read_text(encoding="utf-8")))
+        else:
+            return Response({"error": "no RCA result for this request (yet)"},
+                            status=http_status.HTTP_404_NOT_FOUND)
+        resp = HttpResponse(body, content_type="text/csv; charset=utf-8")
+        resp["Content-Disposition"] = f'attachment; filename="rca_findings_{job_id}.csv"'
+        return resp
+
+
+class RCARunDiagnosticsView(_RCARunFileView):
+    """GET /callflow/api/rca/run/{id}/diagnostics -- everything kept out of the report."""
+
+    def get(self, request, job_id=None):
+        try:
+            rdir = self._rdir(job_id)
+        except ValueError:
+            return Response({"error": "invalid job_id"}, status=http_status.HTTP_400_BAD_REQUEST)
+        if not rdir.is_dir():
+            return Response({"error": "unknown request"}, status=http_status.HTTP_404_NOT_FOUND)
+
+        def read_json(name):
+            p = rdir / name
+            try:
+                return json.loads(p.read_text(encoding="utf-8")) if p.is_file() else None
+            except Exception as e:
+                return {"unreadable": str(e)}
+
+        console = rdir / "browser_console.log"
+        job = job_manager.get_job(job_id)
+        return Response({
+            "request_id": job_id,
+            "job": {k: (job or {}).get(k) for k in ("status", "step", "progress_percent", "error",
+                                                     "systems", "rca_run")} if job else None,
+            "pipeline": read_json(DIAGNOSTICS_FILE),
+            "error": read_json(ERROR_FILE),
+            "manifest": read_json("manifest.json"),
+            "rca_tool_log": read_json("rca_tool_log.json"),
+            "browser_console": console.read_text(encoding="utf-8").splitlines()[-500:]
+                               if console.is_file() else [],
+            "files": sorted(p.name for p in rdir.iterdir() if p.is_file()),
+        })

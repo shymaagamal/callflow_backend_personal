@@ -3,7 +3,7 @@
 Concurrency slots shared by every Gunicorn worker on the host.
 
 A plain threading.Semaphore only limits one worker process; Gunicorn runs 3.
-Each slot is a lock file under CALLFLOW_OUTPUT/MI/locks/ held with fcntl.flock,
+Each slot is a lock file under CALLFLOW_OUTPUT/rca_engine/locks/ held with fcntl.flock,
 so at most N holders exist across all processes. The OS releases the lock if a
 worker dies, so a crashed job can never leave a slot taken.
 
@@ -87,4 +87,4 @@ def slot(lock_dir, name, size, wait_seconds, on_wait=None, poll_seconds=2.0):
 
 
 def default_lock_dir(output_dir):
-    return Path(output_dir) / "MI" / "locks"
+    return Path(output_dir) / "rca_engine" / "locks"
