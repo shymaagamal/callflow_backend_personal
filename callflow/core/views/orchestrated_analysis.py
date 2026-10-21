@@ -61,6 +61,14 @@ def _output_dir():
 
 class AnalysisOrchestratorAPIView(JobBackedAPIView):
     job_type = "orchestrated_analysis"
+    # Subclasses (rca_run) can keep their request-scoped files and logs apart,
+    # e.g. under OUTPUT_DIR/MI. None = the existing OUTPUT_DIR layout.
+    output_subdir = None
+    log_prefix = "orchestrated"
+
+    def _base(self):
+        base = _output_dir()
+        return base / self.output_subdir if self.output_subdir else base
 
     def build_log_context(self, request):
         window = self.parse_request_time_range(request.data)
@@ -69,7 +77,7 @@ class AnalysisOrchestratorAPIView(JobBackedAPIView):
             raise ValueError("msisdn_list is required")
         complain_type = request.data.get("Complain_Type", "Data")
         imsi = request.data.get("imsi", "")
-        log_path, ts = self.get_log_file("orchestrated", window["start_dt"], window["end_dt"])
+        log_path, ts = self.get_log_file(self.log_prefix, window["start_dt"], window["end_dt"])
         query_time_range = self.build_analysis_time_windows(window["start_dt"], window["end_dt"])
         return {
             "log_path": log_path, "ts": ts, "window": window,
@@ -80,7 +88,7 @@ class AnalysisOrchestratorAPIView(JobBackedAPIView):
     def run_job(self, job_id, request_logger, log_path, ts, window, msisdn_list,
                 complain_type, imsi, query_time_range):
         request_id = job_id  # request_id IS the job id -> naturally isolated
-        base = _output_dir()
+        base = self._base()
         tlog = TaskEventLogger(request_id, request_logger, base)
         tlog.event("ORCHESTRATOR", "analysis", "STARTED",
                    detail=f"msisdns={len(msisdn_list)}")
@@ -641,6 +649,12 @@ class AnalysisOrchestratorAPIView(JobBackedAPIView):
             df = data
             if df is None or getattr(df, "empty", True):
                 return f"{sysname}_{suffix}.csv", None
+            if sysname == "npp" and "cell" in df.columns and "Cell" not in df.columns:
+                # The RCA tool reads the NPP cell from a column named "Cell"
+                # (getInstanceIdentifier); the NPP API returns "cell". Without this
+                # the tool finds 0 NPP cells and evaluates no NPP KPI. File only;
+                # the DataFrame used by the backend analysis is not changed.
+                df = df.rename(columns={"cell": "Cell"})
             return f"{sysname}_{suffix}.csv", df.to_csv(index=False)
         return _extract
 

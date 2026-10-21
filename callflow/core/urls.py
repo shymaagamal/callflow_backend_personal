@@ -28,6 +28,7 @@ from .views.orchestrated_analysis import (
     RCAFileDownloadAPIView,
 )
 from .views.stcc_analysis import STCCAnalysisAPIView
+from .views.rca_run import RCARunAPIView
 from  .views.test_viavi_kpi import ViaviKpiAPIView
 from .views.test_remedy_ticket import RemedyKpiAPIView
 
@@ -90,6 +91,9 @@ urlpatterns = [
          name="orchestrated-rca-file"),
     path("analysis/<str:job_id>", AnalysisOrchestratorAPIView.as_view(),
          name="orchestrated-analysis-job-status"),
+    # All systems + the existing RCA HTML tool run headless; returns the tool's results.
+    path("rca/run", RCARunAPIView.as_view(), name="rca-run"),
+    path("rca/run/<str:job_id>", RCARunAPIView.as_view(), name="rca-run-job-status"),
         # STCC: NPP / Viavi / Remedy only, synchronous (result in the POST response)
     path("stcc/analysis", STCCAnalysisAPIView.as_view(), name="stcc-analysis"),
     path("stcc/analysis/<str:job_id>", STCCAnalysisAPIView.as_view(), name="stcc-analysis-job-status"),
