@@ -31,10 +31,16 @@ def _round_down(dt, minutes):
     return dt - discard
 
 
-def build_nci_time_windows(now=None):
-    now = _round_down(now or datetime.datetime.now(), NCI_CACHE_GRANULARITY_MINUTES)
-    current_start = now - datetime.timedelta(hours=12)
-    current_end = now
+def build_nci_time_windows(now=None, start=None, end=None):
+    """Default: the last 12 hours (SmartcareSiteKpiAPIView). With start/end the
+    current window is exactly that range (RCA site run); the comparison windows
+    are the same range 1 day and 1 week earlier in both cases."""
+    if start is not None and end is not None:
+        current_start, current_end = start, end
+    else:
+        now = _round_down(now or datetime.datetime.now(), NCI_CACHE_GRANULARITY_MINUTES)
+        current_start = now - datetime.timedelta(hours=12)
+        current_end = now
     print(f"[SITE KPI] current window: {current_start} -> {current_end}")
     return {
         "current": {"start": current_start, "end": current_end},
@@ -88,7 +94,8 @@ def _run_window(key, sql, params, start, end, log_path):
     )
 
 
-def fetch_smartcare_site_kpis(site_names, log_path="", tablename=None):
+def fetch_smartcare_site_kpis(site_names, log_path="", tablename=None, start=None, end=None):
+    """start/end (optional): the current window; default the last 12 hours."""
     sites = sorted({str(s).strip() for s in (site_names or []) if str(s).strip()})
     if not sites:
         raise ValueError("site_names is required")
@@ -118,7 +125,7 @@ def fetch_smartcare_site_kpis(site_names, log_path="", tablename=None):
         "site_tuple": site_tuple,
         "cgi_tuple": format_sql_in(cgi_values, quote=True),
     }
-    windows = build_nci_time_windows()
+    windows = build_nci_time_windows(start=start, end=end)
     out = {}
     errors = {}
 

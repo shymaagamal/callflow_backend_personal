@@ -25,9 +25,7 @@ and returns the tool's own results. No RCA logic is re-implemented in Python.
 ## API
 
 ```
-POST /callflow/api/rca/run
-{"msisdn_list": ["1012345678"], "start_date": "2026-10-10T14:21",
- "end_date": "2026-10-10T15:21", "Complain_Type": "Data", "imsi": ""}
+POST /callflow/api/rca/run          (one of two body formats, see below)
 -> 202 {"job_id": "<request_id>", "status": "PENDING"}
 
 GET /callflow/api/rca/run/<request_id>
@@ -38,9 +36,36 @@ GET /callflow/api/rca/run/<request_id>/findings.csv   one row per finding
 GET /callflow/api/rca/run/<request_id>/diagnostics    logs, file loading, browser and pipeline detail
 ```
 
+### Two endpoints (`site_mode.py`)
+
+`POST /callflow/api/rca/run` (MSISDN run, existing flow):
+`{"msisdn": "01012345678,01098765432", "complain_type": "data", "start": "2026-10-21 10:00:00", "end": "2026-10-21 12:00:00"}`
+(the earlier `msisdn_list` / `Complain_Type` / `imsi` / `start_date` / `end_date` keys still work;
+`complain_type` is `data` or `voice`, default `data`).
+
+`POST /callflow/api/rca/sites/run` (site run, `RCASiteRunAPIView`):
+`{"sitelist": ["SITE_A", "SITE_B"], "start": "...", "end": "..."}`
+GET `/callflow/api/rca/sites/run/<id>`, `.../findings.csv` and `.../diagnostics` work as for `/rca/run`.
+
+Sending a site list to `/rca/run`, or MSISDN keys to `/rca/sites/run`, or invalid values gets HTTP 400
+`{"error": "..."}` naming the right endpoint.
+
+The site run uses the same job, pipeline, analyzers, RCA file writers, RCA tool and report. It does
+not query Trino; the sites go straight to the systems:
+- NPP: `nppIntegration(..., entity_type="site")` (the NPP site endpoint).
+- Viavi, Remedy: the requested sites as given.
+- Splunk: unchanged.
+- Smartcare: `fetch_smartcare_site_kpis` (the `SmartcareSiteKpiAPIView` implementation) for the sites
+  and the request's `start`..`end` (plus the same range 1 day and 1 week earlier), saved as
+  `smartcare_site_kpis.json`. The RCA tool has no input for per-site Smartcare counters, so it does
+  not use them.
+- RCA filter file `smartcare_filter.csv`: the requested sites (`SITE_NAME`), so the tool scopes to them
+  (without it the tool builds no site suspects and links no tickets).
+- No subscribers: customer counts are unknown and the tool reports 0 subscribers.
+
 The report (`report.py`) only re-shapes the tool's own objects (`performRCA(...)` and
 `AppState.correlationResults`); nothing is recomputed:
-`status` (COMPLETED | PARTIAL), `analysis_window`, `data_coverage`, `summary`
+`status` (COMPLETED | PARTIAL), `input` (mode, sites or MSISDN count), `analysis_window`, `data_coverage`, `summary`
 (primary root cause, layers, confidence, scope, counts), `root_cause` (hypothesis, mechanism,
 evidence chain, recommended actions, next steps, differentials), `findings` (one per anomaly,
 ids F1..Fn), `suspects` (sites / core nodes / TACs, ranked, linked to findings by id),

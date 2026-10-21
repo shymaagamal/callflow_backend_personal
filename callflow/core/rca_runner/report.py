@@ -199,10 +199,12 @@ def _root_cause(rc):
     }
 
 
-def build_report(request_id, rca, systems, failed_systems, no_data_systems=()):
+def build_report(request_id, rca, systems, failed_systems, no_data_systems=(), request_input=None,
+                 link_base="/callflow/api/rca/run"):
     """rca: browser_runner.run_rca_tool() output. systems: {system: status} from the run.
     failed_systems: systems whose data could not be retrieved (-> status PARTIAL).
-    no_data_systems: systems that ran but returned no rows (reported, not a failure)."""
+    no_data_systems: systems that ran but returned no rows (reported, not a failure).
+    request_input: {mode, sites, msisdn_count, complain_type} echoed as "input"."""
     results = rca.get("results") or {}
     rc = rca.get("root_cause") or {}
     h = rc.get("hypothesis") or {}
@@ -236,6 +238,7 @@ def build_report(request_id, rca, systems, failed_systems, no_data_systems=()):
         "report_version": REPORT_VERSION,
         "request_id": request_id,
         "status": "PARTIAL" if failed_systems else "COMPLETED",
+        "input": dict(request_input) if request_input else None,
         "analysis_window": {
             "start": params.get("startDate"), "end": params.get("endDate"),
             "baseline_method": params.get("baselineMethod"), "sensitivity": params.get("sensitivity"),
@@ -277,8 +280,8 @@ def build_report(request_id, rca, systems, failed_systems, no_data_systems=()):
         },
         "warnings": warnings,
         "links": {
-            "findings_csv": f"/callflow/api/rca/run/{request_id}/findings.csv",
-            "diagnostics": f"/callflow/api/rca/run/{request_id}/diagnostics",
+            "findings_csv": f"{link_base}/{request_id}/findings.csv",
+            "diagnostics": f"{link_base}/{request_id}/diagnostics",
         },
     }
 
