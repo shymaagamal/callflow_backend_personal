@@ -387,6 +387,8 @@ def default_sources() -> DataSources:
             cells, start_date=start, end_date=end,
             logs_file=ctx.get("log_path", ""), timestamp=ctx.get("ts", ""),
             resolution=ctx.get("npp_resolution", "hourly"), stats=stats,
+            # "site" for the RCA site run (NPP site endpoint); cells otherwise.
+            entity_type=ctx.get("npp_entity_type", "cell"),
         )
 
     def retrieve_npp(cells, ctx):

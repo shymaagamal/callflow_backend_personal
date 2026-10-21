@@ -30,10 +30,12 @@ from ..jobs import job_manager
 from ..orchestration import pipeline as pl
 from ..orchestration.analyzers import NppAnalyzer, ViaviAnalyzer, RemedyAnalyzer, SplunkAnalyzer
 from ..orchestration.customer_counts import CTX_KEY
+from ..services import smartcare_site_kpi_service as site_kpi_service
 from ..services.smartcare_service import process_smartcare_data
 from ..services.trino_service import customer_counts_from_df
 from ..views import orchestrated_analysis as oa
-from ..views.rca_run import RCARunAPIView, RCARunFindingsCSVView, RCARunDiagnosticsView
+from ..views.rca_run import RCARunAPIView, RCASiteRunAPIView, RCARunFindingsCSVView, RCARunDiagnosticsView
+from . import site_mode
 
 try:
     from playwright.sync_api import sync_playwright  # noqa: F401
@@ -179,8 +181,8 @@ class _Base(SimpleTestCase):
         self.addCleanup(self._ovr.disable)
         self.factory = APIRequestFactory()
 
-    def post(self, sources, msisdns=MSISDNS):
-        req = self.factory.post("/callflow/api/rca/run", {
+    def post(self, sources, msisdns=MSISDNS, body=None):
+        req = self.factory.post("/callflow/api/rca/run", body or {
             "msisdn_list": msisdns, "start_date": START, "end_date": END, "Complain_Type": "Data"},
             format="json")
         # default_sources() returns a NEW DataSources per job in production and the
@@ -225,7 +227,9 @@ class RCARunEndToEndTests(_Base):
         json.dumps(rep)                                   # valid JSON, no NaN/objects
         self.assertEqual(rep["request_id"], job_id)
         self.assertEqual(rep["status"], "COMPLETED")
-        self.assertEqual(set(rep), {"report_version", "request_id", "status", "analysis_window",
+        self.assertEqual(rep["input"], {"mode": "msisdn", "sites": None, "msisdn_count": len(MSISDNS),
+                                        "complain_type": "Data"})
+        self.assertEqual(set(rep), {"report_version", "request_id", "status", "input", "analysis_window",
                                     "data_coverage", "summary", "root_cause", "findings", "suspects",
                                     "impact", "warnings", "links"})
         # nothing from the pipeline / browser / logs leaks into the report
@@ -355,6 +359,230 @@ class RCARunEndToEndTests(_Base):
         self.assertNotIn("LU4830", an_a)
         self.assertIn("LU4830", an_b)
         self.assertNotIn("LU4820", an_b)
+
+
+# ------------------------------------------------- MSISDN run vs site run --
+SITES = ["LU4820", "LU4821"]
+
+
+class FakeSmartcareSites:
+    """Stands in for execute_smartcare_queries (the JDBC call) and records every
+    query the real smartcare_site_kpi_service sends."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, queries_dict, params, log_path=""):
+        (key, sql), = queries_dict.items()
+        self.calls.append({"key": key, "sql": sql, "params": dict(params)})
+        if key == "cells":
+            return pd.DataFrame({"CGISAI": ["602020A1B2C01", "602020A1B2C02"],
+                                 "LOGICAL_SITE_ID": SITES})
+        if key == "s1mme":
+            return pd.DataFrame({"LOGICAL_SITE_ID": SITES, "ATTACH_REQ_TIMES": [100, 80],
+                                 "ATTACH_Fail_TIMES": [5, 1]})
+        return pd.DataFrame({"LOGICAL_SITE_ID": SITES, "S6A_UPDATE_LOC_REQ_TIMES": [50, 40],
+                             "S6A_UPDATE_LOC_FAIL_TIMES": [0, 1]})
+
+
+def recording(sources):
+    """Copy of the fake sources that records what each system was asked for."""
+    seen = {"get_cells": [], "fetch_smartcare": [], "npp": [], "viavi": [], "remedy": []}
+    rec = dataclasses.replace(sources)
+
+    def wrap_ctx(name):
+        orig = getattr(sources, name)
+
+        def _f(ctx):
+            seen[name].append({"msisdn_list": list(ctx.get("msisdn_list") or []),
+                               "complain_type": ctx.get("complain_type")})
+            return orig(ctx)
+        return _f
+
+    def site_npp(entities, ctx):
+        # NPP site endpoint: rows per cell of the requested site (columns cell + sitePhysical)
+        seen["npp"].append({"entities": list(entities), "entity_type": ctx.get("npp_entity_type", "cell")})
+        if ctx.get("npp_entity_type") == "site":
+            entities = [f"L18_{s}_0{4 if i == 0 else 1}" for i, s in enumerate(entities)]
+        return sources.retrieve_npp(entities, ctx)
+
+    def by_sites(name, orig):
+        def _f(sites, ctx):
+            seen[name].append(list(sites))
+            return orig(sites, ctx)
+        return _f
+    rec.get_cells, rec.fetch_smartcare = wrap_ctx("get_cells"), wrap_ctx("fetch_smartcare")
+    rec.retrieve_npp = site_npp
+    rec.retrieve_viavi = by_sites("viavi", sources.retrieve_viavi)
+    rec.retrieve_remedy = by_sites("remedy", sources.retrieve_remedy)
+    return rec, seen
+
+
+class RequestFormatTests(SimpleTestCase):
+    """Request validation of the two endpoints (no systems, no browser)."""
+    databases = []
+
+    def test_msisdn_request_new_format(self):
+        r = site_mode.parse_msisdn_request({"msisdn": "01012345678, 01098765432", "complain_type": "data",
+                                            "start": "2026-10-21 10:00:00", "end": "2026-10-21 12:00:00"})
+        self.assertEqual(r["msisdn_list"], ["01012345678", "01098765432"])
+        self.assertEqual(r["complain_type"], "Data")      # the value the Smartcare service compares
+
+    def test_msisdn_request_previous_format_still_accepted(self):
+        r = site_mode.parse_msisdn_request({"msisdn_list": ["1012345678"], "Complain_Type": "Voice",
+                                            "imsi": "", "start_date": START, "end_date": END})
+        self.assertEqual((r["msisdn_list"], r["complain_type"], r["start"]), (["1012345678"], "Voice", START))
+        r = site_mode.parse_msisdn_request({"msisdn_list": ["1012345678"], "start_date": START, "end_date": END})
+        self.assertEqual(r["complain_type"], "Data")      # previous default
+
+    def test_site_request(self):
+        r = site_mode.parse_site_request({"sitelist": ["SITE_A", "SITE_B", "SITE_A"],
+                                          "start": "2026-10-21 10:00:00", "end": "2026-10-21 12:00:00"})
+        self.assertEqual(r["sitelist"], ["SITE_A", "SITE_B"])
+        self.assertEqual(site_mode.parse_site_request({"sitelist": "SITE_A,SITE_B", "start": START,
+                                                       "end": END})["sitelist"], ["SITE_A", "SITE_B"])
+
+    def test_invalid_requests(self):
+        cases = [
+            (site_mode.parse_msisdn_request, "send site requests",
+             {"sitelist": ["SITE_A"], "msisdn": "01012345678", "start": START, "end": END}),
+            (site_mode.parse_msisdn_request, "'msisdn' is required", {"start": START, "end": END}),
+            (site_mode.parse_msisdn_request, "invalid MSISDN", {"msisdn": "0101234abc", "start": START, "end": END}),
+            (site_mode.parse_msisdn_request, "must be one of",
+             {"msisdn": "01012345678", "complain_type": "sms", "start": START, "end": END}),
+            (site_mode.parse_site_request, "send MSISDN requests",
+             {"sitelist": ["SITE_A"], "msisdn": "01012345678", "start": START, "end": END}),
+            (site_mode.parse_site_request, "'complain_type' not accepted",
+             {"sitelist": ["SITE_A"], "complain_type": "data", "start": START, "end": END}),
+            (site_mode.parse_site_request, "'sitelist' is required", {"start": START, "end": END}),
+            (site_mode.parse_site_request, "'start' and 'end' are required", {"sitelist": ["SITE_A"], "start": START}),
+            (site_mode.parse_site_request, "invalid site id",
+             {"sitelist": ["SITE_A') OR 1=1 --"], "start": START, "end": END}),
+            (site_mode.parse_site_request, "'sitelist' is empty", {"sitelist": " , ", "start": START, "end": END}),
+        ]
+        for parse, msg, body in cases:
+            with self.subTest(msg):
+                with self.assertRaises(ValueError) as cm:
+                    parse(body)
+                self.assertIn(msg, str(cm.exception))
+
+    def test_invalid_request_is_http_400(self):
+        f = APIRequestFactory()
+        resp = RCARunAPIView.as_view()(f.post("/callflow/api/rca/run", {
+            "sitelist": ["SITE_A"], "start": START, "end": END}, format="json"))
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("/callflow/api/rca/sites/run", resp.data["error"])
+        resp = RCASiteRunAPIView.as_view()(f.post("/callflow/api/rca/sites/run", {
+            "msisdn": "01012345678", "start": START, "end": END}, format="json"))
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("/callflow/api/rca/run", resp.data["error"])
+        resp = RCASiteRunAPIView.as_view()(f.post("/callflow/api/rca/sites/run", {
+            "sitelist": ["SITE_A"], "start": "2026-10-21 12:00:00", "end": "2026-10-21 10:00:00"},
+            format="json"))
+        self.assertEqual(resp.status_code, 400)
+
+    def test_site_kpi_window_defaults_unchanged(self):
+        import datetime as dt
+        now = dt.datetime(2026, 10, 21, 12, 7)
+        w = site_kpi_service.build_nci_time_windows(now=now)      # SmartcareSiteKpiAPIView path
+        self.assertEqual((w["current"]["start"], w["current"]["end"]),
+                         (dt.datetime(2026, 10, 21, 0, 0), dt.datetime(2026, 10, 21, 12, 0)))
+        a, b = dt.datetime(2026, 10, 21, 10), dt.datetime(2026, 10, 21, 12)
+        w = site_kpi_service.build_nci_time_windows(start=a, end=b)
+        self.assertEqual((w["current"]["start"], w["current"]["end"]), (a, b))
+        self.assertEqual(w["prev_1day"]["start"], a - dt.timedelta(days=1))
+        self.assertEqual(w["prev_1week"]["end"], b - dt.timedelta(days=7))
+
+    def test_npp_retrieval_passes_entity_type(self):
+        calls = []
+
+        def fake_npp(entities, **kw):
+            calls.append((list(entities), kw["entity_type"]))
+            return pd.DataFrame()
+        qtr = {"current_start": 1, "current_end": 2, "prev_start_1day": 3, "prev_end_1day": 4}
+        with mock.patch.object(pl, "nppIntegration", fake_npp):
+            src = pl.default_sources()
+            src.retrieve_npp(["L18_LU4820_04"], {"query_time_range": qtr})
+            src.retrieve_npp(SITES, {"query_time_range": qtr, "npp_entity_type": "site"})
+        self.assertEqual({c[1] for c in calls[:2]}, {"cell"})     # MSISDN run: unchanged
+        self.assertEqual(calls[2:], [(SITES, "site"), (SITES, "site")])
+
+
+@unittest.skipUnless(HAVE_PW and TOOL.is_file(), "Playwright/Chromium or the RCA tool is not available")
+class RCARunRequestModeTests(_Base):
+
+    def post_site(self, sources, body):
+        req = self.factory.post("/callflow/api/rca/sites/run", body, format="json")
+        with mock.patch.object(oa, "default_sources", lambda: dataclasses.replace(sources)):
+            resp = RCASiteRunAPIView.as_view()(req)
+            self.assertEqual(resp.status_code, 202, resp.data)
+            return resp.data["job_id"], self.wait(resp.data["job_id"])
+
+    def test_msisdn_run_new_format_runs_existing_flow(self):
+        sources, seen = recording(fake_sources())
+        job_id, job = self.post(sources, body={"msisdn": ",".join(MSISDNS), "complain_type": "data",
+                                               "start": "2026-10-10 14:21:00", "end": "2026-10-10 15:21:00"})
+        self.assertEqual(job["status"], "DONE", job.get("error"))
+        self.assertEqual(seen["get_cells"], [{"msisdn_list": MSISDNS, "complain_type": "Data"}])
+        self.assertEqual(seen["fetch_smartcare"], [{"msisdn_list": MSISDNS, "complain_type": "Data"}])
+        self.assertEqual(seen["npp"], [{"entities": ["L18_LU4820_04", "L18_LU4821_01"], "entity_type": "cell"}])
+        rep = self.get(job_id).data
+        self.assertEqual(rep["input"]["mode"], "msisdn")
+        self.assertIn("trino", rep["data_coverage"]["systems_available"])
+        self.assertEqual(rep["links"]["diagnostics"], f"/callflow/api/rca/run/{job_id}/diagnostics")
+
+    def test_site_run_skips_trino_and_feeds_sites_to_systems(self):
+        sources, seen = recording(fake_sources())
+        fake_db = FakeSmartcareSites()
+        with mock.patch.object(site_kpi_service, "execute_smartcare_queries", fake_db):
+            job_id, job = self.post_site(sources, {"sitelist": SITES, "start": "2026-10-10 14:21:00",
+                                                   "end": "2026-10-10 15:21:00"})
+        self.assertEqual(job["status"], "DONE", job.get("error"))
+        # no Trino, no MSISDN Smartcare query; the sites go straight to NPP / Viavi / Remedy
+        self.assertEqual((seen["get_cells"], seen["fetch_smartcare"]), ([], []))
+        self.assertEqual(seen["npp"], [{"entities": SITES, "entity_type": "site"}])
+        self.assertEqual(seen["viavi"], [SITES])
+        self.assertEqual(seen["remedy"], [SITES])
+
+        # Smartcare: SmartcareSiteKpiAPIView's queries for the sites and the request's range
+        self.assertEqual(sorted({c["key"] for c in fake_db.calls}), ["cells", "s1mme", "s6a"])
+        for c in fake_db.calls:
+            self.assertEqual(c["params"]["site_tuple"], "('LU4820','LU4821')")
+        kpi_calls = [c for c in fake_db.calls if c["key"] != "cells"]
+        self.assertEqual({c["sql"] for c in kpi_calls}, set(site_kpi_service.smartcare_site_kpi_QUERIES.values()))
+        self.assertEqual({(c["params"]["start_date"], c["params"]["end_date"]) for c in kpi_calls},
+                         {("2026-10-10 14:21:00", "2026-10-10 15:21:00"),     # request range
+                          ("2026-10-09 14:21:00", "2026-10-09 15:21:00"),     # 1 day earlier
+                          ("2026-10-03 14:21:00", "2026-10-03 15:21:00")})    # 1 week earlier
+
+        rdir = self.rdir(job_id)
+        self.assertTrue((rdir / "smartcare_site_kpis.json").is_file())
+        self.assertFalse((rdir / "trino_cells.csv").exists())
+        self.assertEqual((rdir / "smartcare_filter.csv").read_text().split(), ["SITE_NAME"] + SITES)
+        manifest = json.loads((rdir / "manifest.json").read_text())
+        self.assertNotIn("trino", json.dumps(manifest))
+
+        # same RCA tool, same report format
+        rep = self.get(job_id, RCASiteRunAPIView).data
+        self.assertEqual(rep["status"], "COMPLETED")
+        self.assertEqual(rep["input"], {"mode": "site", "sites": SITES, "msisdn_count": None,
+                                        "complain_type": None})
+        self.assertNotIn("trino", json.dumps(rep["data_coverage"]))
+        self.assertTrue(any(x["node"] == "L18_LU4820_04" and x["kpi"] == "CFR" for x in rep["findings"]))
+        self.assertEqual(rep["suspects"]["sites"][0]["site"], "LU4820")
+        self.assertTrue(rep["summary"]["primary_root_cause"])
+        self.assertEqual(rep["links"]["findings_csv"], f"/callflow/api/rca/sites/run/{job_id}/findings.csv")
+        csv_resp = self.get(job_id, RCARunFindingsCSVView, "/findings.csv")
+        self.assertEqual(len(csv_resp.content.decode().strip().splitlines()) - 1, len(rep["findings"]))
+
+    def test_site_run_with_failed_npp_is_partial(self):
+        with mock.patch.object(site_kpi_service, "execute_smartcare_queries", FakeSmartcareSites()):
+            job_id, job = self.post_site(fake_sources(fail=("npp",)), {"sitelist": SITES, "start": START,
+                                                                       "end": END})
+        self.assertEqual(job["status"], "DONE", job.get("error"))
+        rep = self.get(job_id, RCASiteRunAPIView).data
+        self.assertEqual(rep["status"], "PARTIAL")
+        self.assertEqual(rep["data_coverage"]["systems_missing"], ["npp"])
 
 
 class SlotLimiterTests(SimpleTestCase):

@@ -28,7 +28,7 @@ from .views.orchestrated_analysis import (
     RCAFileDownloadAPIView,
 )
 from .views.stcc_analysis import STCCAnalysisAPIView
-from .views.rca_run import RCARunAPIView, RCARunFindingsCSVView, RCARunDiagnosticsView
+from .views.rca_run import RCARunAPIView, RCASiteRunAPIView, RCARunFindingsCSVView, RCARunDiagnosticsView
 from  .views.test_viavi_kpi import ViaviKpiAPIView
 from .views.test_remedy_ticket import RemedyKpiAPIView
 
@@ -55,6 +55,13 @@ urlpatterns =[
     path("rca/run/<str:job_id>", RCARunAPIView.as_view(), name="rca-run-job-status"),
     path("rca/run/<str:job_id>/findings.csv", RCARunFindingsCSVView.as_view(), name="rca-run-findings-csv"),
     path("rca/run/<str:job_id>/diagnostics", RCARunDiagnosticsView.as_view(), name="rca-run-diagnostics"),
+    # Same, for a site list instead of MSISDNs (no Trino; sites go straight to NPP/Viavi/Remedy).
+    path("rca/sites/run", RCASiteRunAPIView.as_view(), name="rca-site-run"),
+    path("rca/sites/run/<str:job_id>", RCASiteRunAPIView.as_view(), name="rca-site-run-job-status"),
+    path("rca/sites/run/<str:job_id>/findings.csv", RCARunFindingsCSVView.as_view(),
+         name="rca-site-run-findings-csv"),
+    path("rca/sites/run/<str:job_id>/diagnostics", RCARunDiagnosticsView.as_view(),
+         name="rca-site-run-diagnostics"),
         # STCC: NPP / Viavi / Remedy only, synchronous (result in the POST response)
     path("stcc/analysis", STCCAnalysisAPIView.as_view(), name="stcc-analysis"),
     path("stcc/analysis/<str:job_id>", STCCAnalysisAPIView.as_view(), name="stcc-analysis-job-status"),
