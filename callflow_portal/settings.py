@@ -30,8 +30,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR /  ".env")
 
+
 SMARTCARE_DB_USER  = os.getenv("smartcareDB_USER")
 SMARTCARE_DB_PASSWORD  = os.getenv("smartcareDB_PASSWORD")
+
+STCC_SMARTCARE_DB_USER  = os.getenv("STCC_SMARTCARE_DB_USER")
+STCC_SMARTCARE_DB_PASSWORD  = os.getenv("STCC_SMARTCARE_DB_PASSWORD")
+
+
 
 SPLUNK_USER = os.getenv("splunk_USER")
 SPLUNK_PASSWORD = os.getenv("splunk_PASSWORD")
@@ -232,7 +238,7 @@ MAPPING_SITENAMES_SHEET_PATH = os.path.join(BASE_DIR, 'data', 'Mapping_of_sitena
 THRESHOLDING_SHEET_PATH = os.path.join(BASE_DIR, 'data', 'thresholds.xlsx')
 OUTPUT_DIR = Path(BASE_DIR) / "callflow_output"
 
-
+RCA_TOOL_PATH = BASE_DIR / "rca_tool" / "rca_tool_V24.html"
 
 
 # =============================================================================

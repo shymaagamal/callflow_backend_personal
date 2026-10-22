@@ -10,15 +10,18 @@ Error classes (from the messages Smartcare actually returns):
   error        anything else                                          -> retried
 """
 import datetime
+import logging
 import re
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import List, Optional
-
+import jaydebeapi
+import jpype
 import pandas as pd
 
 from . import config
+logger = logging.getLogger("callflow.mi.smartcare")
 
 _jvm_lock = threading.Lock()
 EPOCH = datetime.datetime(1970, 1, 1)
@@ -60,10 +63,10 @@ def short_error(exc, limit=600):
 def connect():
     """Open a Smartcare cursor (cursor._connection is the JDBC connection)."""
     user, password = config.smartcare_user(), config.smartcare_password()
+    
     if not user or not password:
         raise SmartcareConfigError("MI_SMARTCARE_USER / MI_SMARTCARE_PASSWORD are not configured")
-    import jaydebeapi
-    import jpype
+
 
     jar = config.smartcare_jdbc_jar()
     with _jvm_lock:
@@ -79,6 +82,7 @@ def connect():
         "connectTimeout": str(config.connect_timeout_ms()),
     }
     conn = jaydebeapi.connect(config.smartcare_jdbc_driver(), config.smartcare_jdbc_url(), props, jar)
+    logger.debug("Smartcare JDBC connected to %s as %s", config.smartcare_jdbc_url(), user)
     try:
         conn.jconn.setNetworkTimeout(None, config.socket_timeout_ms())
     except Exception:

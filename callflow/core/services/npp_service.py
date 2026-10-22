@@ -176,15 +176,28 @@ def nppIntegration(
         )
 
     if not occ_df.empty:
+        # Normalize all column names to a consistent style 
+        occ_df.columns = [c.strip() for c in occ_df.columns] 
+        rename_map = {} 
+        for c in occ_df.columns: 
+            if c.lower() == "cell": 
+                rename_map[c] = "Cell" 
+            elif c.upper() == "SITE_PHYSICAL": 
+                rename_map[c] = "sitePhysical" 
+        if rename_map: 
+            occ_df = occ_df.rename(columns=rename_map) 
         occ_df = occ_df.sort_values(by="DATETIME_ID")
-        if "SITE_PHYSICAL" in occ_df.columns and "sitePhysical" not in occ_df.columns:
-            occ_df = occ_df.rename(columns={"SITE_PHYSICAL": "sitePhysical"})
-        group_cols = ["DATETIME_ID", "cell", "Vendor"]
-        if "site" in occ_df.columns:
-            group_cols.append("site")
-        elif "sitePhysical" in occ_df.columns:
-            group_cols.append("sitePhysical")
-        occ_df = occ_df.groupby(group_cols).sum(numeric_only=True).reset_index()
+        
+        group_cols = ["DATETIME_ID"]
+        for candidate in ["Cell", "Vendor", "sitePhysical", "site"]:
+            if candidate in occ_df.columns:
+                group_cols.append(candidate)
+                
+        if len(group_cols) == 1:
+            logger.warning(f"No grouping columns found in NPP data. Columns present: {occ_df.columns.tolist()}")
+            
+        else:
+            occ_df = occ_df.groupby(group_cols, dropna=False).sum(numeric_only=True).reset_index()
     else:
         logger.info(f"No NPP data returned. Failed requests: {failed}/{attempts}")
 
