@@ -37,6 +37,9 @@ def main(argv=None):
     except Exception as e:
         check("MI output dir writable", False, f"{root}: {e}")
 
+    legacy = config.legacy_export_dir()
+    if legacy:
+        check("legacy export dir exists", os.path.isdir(legacy), legacy, required=False)
 
     check("Smartcare credentials configured (MI_SMARTCARE_USER/PASSWORD)",
           bool(config.smartcare_user() and config.smartcare_password()))

@@ -17,17 +17,6 @@ _lock = threading.Lock()
 _cache = {}
 
 
-
-def to_native(obj): 
-    """Recursively turn JPype/Java objects into pure Python types so pickle works."""
-    if obj is None or isinstance(obj, (bool, int, float, str)): 
-        return obj 
-    if isinstance(obj, dict): 
-        return {to_native(k): to_native(v) for k, v in obj.items()} 
-    if isinstance(obj, (list, tuple)): 
-        return type(obj)(to_native(x) for x in obj) # java.lang.String, BigDecimal, Timestamp, etc. try: return str(obj) except Exception: return repr(obj) 
-
- 
 def master_sheet(path=None):
     path = str(path or settings.MASTER_SHEET_PATH)
     st = os.stat(path)

@@ -87,8 +87,7 @@ def aggregate_data(nodes, ctx):
     if data.empty:
         ctx.add_warning("no_smartcare_rows", complain_type="Data")
         return out, []
-    for col in data.select_dtypes(include=["object"]).columns:
-        data[col] = data[col].astype(str)
+
     req = catalog.DATA_METRICS
     m = _Metrics(ctx, data, req, out)
     ims = data.copy()
@@ -163,8 +162,7 @@ def aggregate_voice(nodes, ctx, export=None):
     if data.empty:
         ctx.add_warning("no_smartcare_rows", complain_type=ctx.complain_type)
         return out, []
-    for col in data.select_dtypes(include=["object"]).columns:
-        data[col] = data[col].astype(str)
+
     req = catalog.voice_metrics()
     m = _Metrics(ctx, data, req, out)
     ims = data.copy()

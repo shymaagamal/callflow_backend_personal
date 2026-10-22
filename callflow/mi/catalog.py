@@ -5,8 +5,7 @@ Prototype code used.
 """
 from collections import OrderedDict
 
-from . import config
-from .Queries import data_queries, voice_queries
+from . import config, sql
 
 DATA = "Data"
 VOICE = "Voice"
@@ -15,11 +14,11 @@ VOICE = "Voice"
 def query_set(complain_type):
     """OrderedDict name -> SQL template, in the original execution order."""
     if complain_type == VOICE:
-        queries = voice_queries.smartcare_Voice_QUERIES
+        queries = sql.smartcare_Voice_QUERIES
     elif complain_type == DATA:
-        queries = data_queries.smartcare_Data_QUERIES
+        queries = sql.smartcare_Data_QUERIES
     else:
-        raise ValueError(f"Unknown complain_type {complain_type!r}")
+        queries = sql.smartcare_main_QUERIES
     queries = OrderedDict(queries)
     if complain_type == DATA and config.skip_ineffective_queries():
         for name in INEFFECTIVE_DATA_QUERIES:
@@ -33,12 +32,12 @@ INEFFECTIVE_DATA_QUERIES = ("smartcare_nodes_REG_Voice",)
 
 # (column, query name, template) - checked in this order, as before.
 FALLBACKS = (
-    ("Voice_Data_Flag", "SCF_CCI_U_T_Data", data_queries.SCF_CCI_U_T_Data),
-    ("DRA_NAME", "SCF_CCI_U_T_Data", data_queries.SCF_CCI_U_T_Data),
-    ("VPCRF_NAME", "SCF_CCI_U_T_Data", data_queries.SCF_CCI_U_T_Data),
-    ("OCS_NAME", "SCF_CCI_U_T_Data", data_queries.SCF_CCI_U_T_Data),
-    ("TAC_DECIMAL", "smartcare_nodes_S1mme", data_queries.smartcare_nodes_S1mme),
-    ("MME_Name", "smartcare_nodes_S1mme", data_queries.smartcare_nodes_S1mme),
+    ("Voice_Data_Flag", "SCF_CCI_U_T_Data", sql.SCF_CCI_U_T_Data),
+    ("DRA_NAME", "SCF_CCI_U_T_Data", sql.SCF_CCI_U_T_Data),
+    ("VPCRF_NAME", "SCF_CCI_U_T_Data", sql.SCF_CCI_U_T_Data),
+    ("OCS_NAME", "SCF_CCI_U_T_Data", sql.SCF_CCI_U_T_Data),
+    ("TAC_DECIMAL", "smartcare_nodes_S1mme", sql.smartcare_nodes_S1mme),
+    ("MME_Name", "smartcare_nodes_S1mme", sql.smartcare_nodes_S1mme),
 )
 
 

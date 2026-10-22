@@ -2,14 +2,14 @@
 
 ## 1. Root causes found (production `logs.txt`, 15 Oct 2026)
 
-| Symptom in the log                                                                   | Cause in the old code                                                                                                                                                                                                                                                                                                                                                                                             | MI behaviour                                                                                                                                                                                                                               |
-| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `KeyError: 'VPCRF_NAME'` (36 times, ~7 per request)                                | SCF returns rows whose `VPCRF_NAME` is all null, so the fallback **re-runs the same SCF query** and merges `VPCRF_NAME` again. pandas renames both columns to `VPCRF_NAME_x`/`_y`, and `distinct_count(..., 'VPCRF_NAME')` raises. Everything computed after it (RAT, region, subregion, TAC, SGSN, MME, sites, SGWs) comes back **empty**. The 6-attempt loop repeats the identical crash. | A fallback that would re-run a main query that already succeeded is skipped (its rows are already present). All-null columns are dropped before a merge. Every metric is computed independently. Result: full Data response, `PCRF={}`.  |
-| `KeyError: 'Voice_Data_Flag'` (Voice)                                              | The Voice DRA/OCS/PCRF queries return `Service_flag` (`'VOLTE'`/`'Data'`), but the aggregation filters on `Voice_Data_Flag == 'Voice'`. That column only comes from the SCF fallback, which only yields `'Data'` (`WHERE left(MS_IP,3)='10.'`). The result is a crash when SCF is empty, and silently empty Voice DRA/OCS/PCRF otherwise.                                                             | Same response by default, no crash, plus warning `metric_unavailable` / `voice_ims_filter_empty`. `MI_VOICE_IMS_FILTER=service_flag` fills DRA/OCS/PCRF from `Service_flag='VOLTE'` (business decision, off by default).           |
-| `Table or view not found: ps.DETAIL_CDR_SGS_20463`, `cs.TDR_IMS_HSS_TRANS_20463` | 20463 = **2026-01-10**: a 9-month-old window. Missing tables were retried 5×.                                                                                                                                                                                                                                                                                                                              | Classified as `unavailable`, never retried, reported as `query_unavailable` (partial result).                                                                                                                                          |
-| `SocketTimeoutException: timeout`, "all 5 attempts"                                | The Prototype passed its timeouts in jaydebeapi's `libs` argument (ignored). Retries were immediate, plus 4 more full retry cycles from the fallbacks.                                                                                                                                                                                                                                                          | Socket/connect timeouts applied, 3 attempts with backoff (10 s, 20 s), reconnect after a failure, retry budget per job, a failed query retried once more by a fallback and then given up. An SCF timeout costs 4 executions instead of 25. |
-| Two "Smartcare Request" lines in the same second                                     | No duplicate protection                                                                                                                                                                                                                                                                                                                                                                                           | Identical submissions while a job is queued or running return that job.                                                                                                                                                                    |
-| (not in the log)                                                                     | A window crossing midnight never read the next day's table. One JDBC connection leaked per request. All rows printed to stdout.                                                                                                                                                                                                                                                                                   | Every calendar day read (`MI_FIX_MIDNIGHT_TABLES`). One connection per job, always closed. `logging` only.                                                                                                                             |
+| Symptom in the log | Cause in the old code | MI behaviour |
+|---|---|---|
+| `KeyError: 'VPCRF_NAME'` (36 times, ~7 per request) | SCF returns rows whose `VPCRF_NAME` is all null, so the fallback **re-runs the same SCF query** and merges `VPCRF_NAME` again. pandas renames both columns to `VPCRF_NAME_x`/`_y`, and `distinct_count(..., 'VPCRF_NAME')` raises. Everything computed after it (RAT, region, subregion, TAC, SGSN, MME, sites, SGWs) comes back **empty**. The 6-attempt loop repeats the identical crash. | A fallback that would re-run a main query that already succeeded is skipped (its rows are already present). All-null columns are dropped before a merge. Every metric is computed independently. Result: full Data response, `PCRF={}`. |
+| `KeyError: 'Voice_Data_Flag'` (Voice) | The Voice DRA/OCS/PCRF queries return `Service_flag` (`'VOLTE'`/`'Data'`), but the aggregation filters on `Voice_Data_Flag == 'Voice'`. That column only comes from the SCF fallback, which only yields `'Data'` (`WHERE left(MS_IP,3)='10.'`). The result is a crash when SCF is empty, and silently empty Voice DRA/OCS/PCRF otherwise. | Same response by default, no crash, plus warning `metric_unavailable` / `voice_ims_filter_empty`. `MI_VOICE_IMS_FILTER=service_flag` fills DRA/OCS/PCRF from `Service_flag='VOLTE'` (business decision, off by default). |
+| `Table or view not found: ps.DETAIL_CDR_SGS_20463`, `cs.TDR_IMS_HSS_TRANS_20463` | 20463 = **2026-01-10**: a 9-month-old window. Missing tables were retried 5×. | Classified as `unavailable`, never retried, reported as `query_unavailable` (partial result). |
+| `SocketTimeoutException: timeout`, "all 5 attempts" | The Prototype passed its timeouts in jaydebeapi's `libs` argument (ignored). Retries were immediate, plus 4 more full retry cycles from the fallbacks. | Socket/connect timeouts applied, 3 attempts with backoff (10 s, 20 s), reconnect after a failure, retry budget per job, a failed query retried once more by a fallback and then given up. An SCF timeout costs 4 executions instead of 25. |
+| Two "Smartcare Request" lines in the same second | No duplicate protection | Identical submissions while a job is queued or running return that job. |
+| (not in the log) | A window crossing midnight never read the next day's table. One JDBC connection leaked per request. All rows printed to stdout. | Every calendar day read (`MI_FIX_MIDNIGHT_TABLES`). One connection per job, always closed. `logging` only. |
 
 `golden_legacy_responses.json` (tests) is the original code's output on the same fixtures. The tests
 check that MI returns the same body wherever the old code did not crash, and the complete body where
@@ -59,12 +59,12 @@ but nothing imports it, so it was left alone. `prototype/services/kpi_analyzer.p
 
 ## 3. Endpoints
 
-| Path                                       | Default                                                                                                                            | Notes                                                                                           |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `POST /callflow/prototype/api/smartcare` | **synchronous**, the old body and error codes                                                                                | `?async=1` → 202 + `job_id`. The heavy work runs in the MI worker; the request only waits. |
-| `POST /callflow/mi/api/smartcare`        | **202** `{"job_id","status","status_url","result_url"}`                                                                    | validation errors → 400 before a job exists                                                    |
-| `GET …/smartcare/jobs/<id>`             | job record: `status` (PENDING/RUNNING/DONE/FAILED), `step`, `partial`, `warnings`, `timings`, `output_dir`, `result` | works on both prefixes                                                                          |
-| `GET …/smartcare/jobs/<id>/result`      | the exact analysis body with its original HTTP status; 202 while running                                                           | drop-in for consumers of the sync body                                                          |
+| Path | Default | Notes |
+|---|---|---|
+| `POST /callflow/prototype/api/smartcare` | **synchronous**, the old body and error codes | `?async=1` → 202 + `job_id`. The heavy work runs in the MI worker; the request only waits. |
+| `POST /callflow/mi/api/smartcare` | **202** `{"job_id","status","status_url","result_url"}` | validation errors → 400 before a job exists |
+| `GET …/smartcare/jobs/<id>` | job record: `status` (PENDING/RUNNING/DONE/FAILED), `step`, `partial`, `warnings`, `timings`, `output_dir`, `result` | works on both prefixes |
+| `GET …/smartcare/jobs/<id>/result` | the exact analysis body with its original HTTP status; 202 while running | drop-in for consumers of the sync body |
 
 Headers: `X-MI-Job-Id`, and on finished jobs `X-MI-Partial: true|false` and `X-MI-Warnings: <codes>`.
 The response **body** is unchanged, so existing consumers are unaffected.
@@ -110,7 +110,6 @@ Over many jobs: `python -m callflow.mi.report`.
 `callflow_mi_worker.service` runs `python -m callflow.mi.worker` from the same code, `.env` and
 virtualenv, and consumes a Redis list on the Redis that Django's cache already uses. It needs no new
 package, no nginx change and no Gunicorn change.
-
 - It runs one job at a time (`MI_MAX_CONCURRENT=1`, enforced across all processes), so there is one
   Smartcare session.
 - It runs at `Nice=10` with `CPUQuota=100%`, `MemoryMax=4G` and its own JVM capped by
@@ -121,7 +120,6 @@ package, no nginx change and no Gunicorn change.
 **Option B: a fully separate MI service.** A second Gunicorn unit (for example 2 workers on
 `run/callflow_mi_gunicorn.sock`) serving the same project, with nginx sending `/callflow/mi/` and
 `/callflow/prototype/` to it, plus the Option A worker. It is justified when:
-
 - the synchronous caller cannot move to async soon, because its waits would then occupy MI's own
   Gunicorn workers instead of CORE/NCI's;
 - MI needs independent restarts or deploys;
@@ -130,6 +128,25 @@ package, no nginx change and no Gunicorn change.
 
 Its cost is shared nginx configuration and a second API process to operate. Start with A, and move
 to B only if one of those applies.
+
+### Parallel queries
+
+Within a job, the main queries run in parallel (`MI_QUERY_PARALLELISM`, default 4), each on its own
+JDBC session. Results are put back in the original query order, so concatenation and every metric
+are identical to sequential execution (`ParallelTests` compares 1 vs 5 on all scenarios: body,
+`sc_nodes.csv` and the executions).
+
+The fallback queries that are needed also run in parallel, once per distinct query, and their merges
+are then applied in the original column order. When the main queries return no rows, the fallbacks
+are skipped entirely, because a merge into an empty frame stays empty.
+
+On the 15 Oct production job (Voice, 0 rows) the job took 653 s: 263 s of queries plus 388 s of
+fallbacks. At parallelism 4 this becomes roughly 101 s (the longest single query, DRA) and no fallback
+time. Two caveats:
+- Smartcare may slow individual queries down when more run at once.
+- Something in Smartcare or its driver ends queries at 120 s, and DRA already takes 101 s.
+
+Start with 4, watch `python -m callflow.mi.report`, and lower the value if you see more `kind=timeout`.
 
 ## 6. Deployment (Option A)
 
@@ -199,26 +216,27 @@ The `.env` lines and `callflow_output/MI/` are harmless to keep. Nothing in the 
 
 ## 8. Settings reference (all optional)
 
-| Setting                                               | Default                    | Meaning                                                                    |
-| ----------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------- |
-| `MI_OUTPUT_DIR`                                     | `OUTPUT_DIR/MI`          | absolute base for all MI logs/outputs                                      |
-| `MI_LEGACY_EXPORT_DIR`                              | `/home/Shorouk/CallFlow` | fixed-name CSV copies; empty = off                                         |
-| `MI_WRITE_LATEST`                                   | True                       | `MI/latest/*.csv`                                                        |
-| `MI_LEGACY_STATIC_LOG`                              | False                      | old `static/CallFlow/output/logs.txt`                                    |
-| `MI_LOG_RETENTION_DAYS` / `MI_JOB_RETENTION_DAYS` | 14 / 7                     | retention                                                                  |
-| `MI_SMARTCARE_USER` / `_PASSWORD`                 | – (required)              | Smartcare account                                                          |
-| `MI_SMARTCARE_SOCKET_TIMEOUT_MS`                    | 1 800 000                  | per query (same as core)                                                   |
-| `MI_SMARTCARE_MAX_ATTEMPTS`                         | 3                          | was 5 with no backoff                                                      |
-| `MI_SMARTCARE_RETRY_BACKOFF_S` / `_MAX_S`         | 10 / 120                   | exponential backoff                                                        |
-| `MI_SMARTCARE_RETRY_BUDGET_S`                       | 2700                       | no more retries after 45 min of Smartcare time                             |
-| `MI_JVM_MAX_HEAP`                                   | 1g                         | `-Xmx` when MI starts the JVM (worker)                                   |
-| `MI_FIX_MIDNIGHT_TABLES`                            | True                       | read every day touched by the window                                       |
-| `MI_VOICE_IMS_FILTER`                               | legacy                     | `service_flag` = fill Voice DRA/OCS/PCRF (changes results)               |
-| `MI_SKIP_INEFFECTIVE_QUERIES`                       | False                      | skip REG_Voice (Data) and Voice fallbacks; same response, smaller CSV dump |
-| `MI_EXECUTOR`                                       | worker                     | worker / thread / inline                                                   |
-| `MI_WORKER_FALLBACK`                                | local                      | local / none                                                               |
-| `MI_ENDPOINT_MODE` / `MI_LEGACY_ENDPOINT_MODE`    | async / sync               | default per path                                                           |
-| `MI_SYNC_WAIT_TIMEOUT_S`                            | 3600                       | then 202 + job_id                                                          |
-| `MI_MAX_CONCURRENT`                                 | 1                          | running jobs across all processes                                          |
-| `MI_MAX_QUEUED_JOBS`                                | 5                          | queued + running; beyond → 429                                            |
-| `MI_JOB_TTL_S` / `MI_JOB_STALE_S`                 | 86400 / 300                | job record lifetime / lost-worker detection                                |
+| Setting | Default | Meaning |
+|---|---|---|
+| `MI_OUTPUT_DIR` | `OUTPUT_DIR/MI` | absolute base for all MI logs/outputs |
+| `MI_LEGACY_EXPORT_DIR` | `/home/Shorouk/CallFlow` | fixed-name CSV copies; empty = off |
+| `MI_WRITE_LATEST` | True | `MI/latest/*.csv` |
+| `MI_LEGACY_STATIC_LOG` | False | old `static/CallFlow/output/logs.txt` |
+| `MI_LOG_RETENTION_DAYS` / `MI_JOB_RETENTION_DAYS` | 14 / 7 | retention |
+| `MI_SMARTCARE_USER` / `_PASSWORD` | – (required) | Smartcare account |
+| `MI_SMARTCARE_SOCKET_TIMEOUT_MS` | 1 800 000 | per query (same as core) |
+| `MI_SMARTCARE_MAX_ATTEMPTS` | 3 | was 5 with no backoff |
+| `MI_SMARTCARE_RETRY_BACKOFF_S` / `_MAX_S` | 10 / 120 | exponential backoff |
+| `MI_SMARTCARE_RETRY_BUDGET_S` | 2700 | no more retries after 45 min of Smartcare time |
+| `MI_QUERY_PARALLELISM` | 4 | Smartcare queries of one job running at once, each on its own session; 1 = sequential. Sessions open at once = `MI_MAX_CONCURRENT` × this |
+| `MI_JVM_MAX_HEAP` | 1g | `-Xmx` when MI starts the JVM (worker) |
+| `MI_FIX_MIDNIGHT_TABLES` | True | read every day touched by the window |
+| `MI_VOICE_IMS_FILTER` | legacy | `service_flag` = fill Voice DRA/OCS/PCRF (changes results) |
+| `MI_SKIP_INEFFECTIVE_QUERIES` | False | skip REG_Voice (Data) and Voice fallbacks; same response, smaller CSV dump |
+| `MI_EXECUTOR` | worker | worker / thread / inline |
+| `MI_WORKER_FALLBACK` | local | local / none |
+| `MI_ENDPOINT_MODE` / `MI_LEGACY_ENDPOINT_MODE` | async / sync | default per path |
+| `MI_SYNC_WAIT_TIMEOUT_S` | 3600 | then 202 + job_id |
+| `MI_MAX_CONCURRENT` | 1 | running jobs across all processes |
+| `MI_MAX_QUEUED_JOBS` | 5 | queued + running; beyond → 429 |
+| `MI_JOB_TTL_S` / `MI_JOB_STALE_S` | 86400 / 300 | job record lifetime / lost-worker detection |

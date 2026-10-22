@@ -86,11 +86,11 @@ def log_level() -> str:
 
 # ------------------------------------------------------------ Smartcare
 def smartcare_user():
-    return _get("STCC_SMARTCARE_DB_USER", None)
+    return _get("MI_SMARTCARE_USER", None)
 
 
 def smartcare_password():
-    return _get("STCC_SMARTCARE_DB_PASSWORD", None)
+    return _get("MI_SMARTCARE_PASSWORD", None)
 
 
 def smartcare_jdbc_url() -> str:
@@ -130,6 +130,15 @@ def retry_backoff_max_s() -> float:
     return _float("MI_SMARTCARE_RETRY_BACKOFF_MAX_S", 120.0)
 
 
+def query_parallelism() -> int:
+    """
+    Smartcare queries of ONE job that may run at the same time (each on its own
+    JDBC session). 1 = sequential (previous behaviour). Total Smartcare sessions
+    opened by MI at once = MI_MAX_CONCURRENT x MI_QUERY_PARALLELISM.
+    """
+    return max(1, _int("MI_QUERY_PARALLELISM", 4))
+
+
 def retry_budget_s() -> float:
     """Total Smartcare seconds per job after which failed queries are not retried."""
     return _float("MI_SMARTCARE_RETRY_BUDGET_S", 2700.0)
@@ -153,7 +162,7 @@ def voice_ims_filter() -> str:
                      these three metrics are always empty)
       "service_flag" Service_flag == 'VOLTE' (the column the Voice queries return)
     """
-    value = str(_get("MI_VOICE_IMS_FILTER", "service_flag")).lower()
+    value = str(_get("MI_VOICE_IMS_FILTER", "legacy")).lower()
     return value if value in ("legacy", "service_flag") else "legacy"
 
 
