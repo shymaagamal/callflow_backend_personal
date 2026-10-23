@@ -270,11 +270,17 @@ class RootCauseTests(MITestBase):
 # --------------------------------------------------------------------------
 class SmartcareTests(MITestBase):
 
-    def test_one_connection_per_job_and_closed(self):
+    def test_sessions_bounded_by_parallelism_and_all_closed(self):
         fake = fs.FakeSmartcare(fs.voice_fixture())
         self.post(body("Voice"), fake)
-        self.assertEqual((fake.opened, fake.closed), (1, 1))
+        self.assertLessEqual(fake.opened, config.query_parallelism())
+        self.assertEqual(fake.opened, fake.closed)
+        with override_settings(MI_QUERY_PARALLELISM=1):
+            fake = fs.FakeSmartcare(fs.voice_fixture())
+            self.post(body("Voice"), fake)
+            self.assertEqual((fake.opened, fake.closed), (1, 1))
 
+    @override_settings(MI_QUERY_PARALLELISM=1)
     def test_reconnect_after_timeout_then_recover(self):
         fake = fs.FakeSmartcare(fs.data_fixture(), fail={"scf": (2, fs.SOCKET_TIMEOUT)})
         resp = self.post(body(), fake)
@@ -306,6 +312,74 @@ class SmartcareTests(MITestBase):
         self.assertIn("event=retry_budget_exhausted",
                       (self.job_dir(resp["X-MI-Job-Id"]) / "job.log").read_text())
         self.assertEqual(resp.status_code, 200)
+
+
+# --------------------------------------------------------------------------
+# 3b. Parallel query execution
+# --------------------------------------------------------------------------
+class ParallelTests(MITestBase):
+
+    SCENARIOS = (
+        ("data_full", lambda: fs.data_fixture(), "Data", None),
+        ("data_pcrf_null", lambda: fs.data_fixture(pcrf_null=True), "Data", None),
+        ("data_no_scf", lambda: fs.data_fixture(scf_rows=False), "Data", None),
+        ("data_none", lambda: fs.data_fixture(False, False), "Data", None),
+        ("data_scf_timeout", lambda: fs.data_fixture(), "Data", {"scf": (999, fs.SOCKET_TIMEOUT)}),
+        ("voice", lambda: fs.voice_fixture(), "Voice", None),
+        ("voice_with_scf", lambda: fs.voice_fixture(with_scf=True), "Voice", None),
+        ("voice_tables_missing", lambda: fs.voice_fixture(), "Voice",
+         {"sgs": (99, fs.TABLE_NOT_FOUND), "hss": (99, fs.TABLE_NOT_FOUND)}),
+    )
+
+    def _run(self, parallelism, fixture, complain_type, fail):
+        with override_settings(MI_QUERY_PARALLELISM=parallelism):
+            fake = fs.FakeSmartcare(fixture, fail=dict(fail or {}))
+            resp = self.post(body(complain_type), fake)
+        csv = (self.job_dir(resp["X-MI-Job-Id"]) / "sc_nodes.csv").read_text()
+        return resp.status_code, json.loads(resp.content), csv, sorted(fake.executions)
+
+    def test_parallel_results_identical_to_sequential(self):
+        for name, fixture, ct, fail in self.SCENARIOS:
+            seq = self._run(1, fixture(), ct, fail)
+            par = self._run(5, fixture(), ct, fail)
+            self.assertEqual(seq[:2], par[:2], name)      # status + body
+            self.assertEqual(seq[2], par[2], name)        # sc_nodes.csv: same rows, same order
+            self.assertEqual(seq[3], par[3], name)        # same Smartcare executions
+
+    def test_queries_overlap_but_never_exceed_the_limit(self):
+        active, peak = [0], [0]
+        lock = threading.Lock()
+        real = fs.FakeCursor.execute
+
+        def slow(cursor, sql):
+            with lock:
+                active[0] += 1
+                peak[0] = max(peak[0], active[0])
+            time.sleep(0.15)
+            try:
+                return real(cursor, sql)
+            finally:
+                with lock:
+                    active[0] -= 1
+
+        with mock.patch.object(fs.FakeCursor, "execute", slow):
+            with override_settings(MI_QUERY_PARALLELISM=3):
+                t0 = time.monotonic()
+                resp = self.post(body("Voice"), fs.FakeSmartcare(fs.voice_fixture()))
+                elapsed = time.monotonic() - t0
+        self.assertEqual(json.loads(resp.content), GOLDEN["voice"]["body"])
+        self.assertEqual(peak[0], 3)
+        self.assertLess(elapsed, 12 * 0.15 * 0.6)          # 12 executions; sequential would be ~1.8 s
+
+    def test_no_fallbacks_when_main_queries_return_no_rows(self):
+        empty = {k: (cols, []) for k, (cols, _) in fs.voice_fixture().items()}
+        fake = fs.FakeSmartcare(empty)
+        resp = self.post(body("Voice"), fake)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(fake.executions), 10)          # before: + SCF + S1MME fallbacks
+        self.assertEqual(fake.count("scf") + fake.count("s1mme"), 0)
+        self.assertIn('reason="main queries returned no rows"',
+                      (self.job_dir(resp["X-MI-Job-Id"]) / "job.log").read_text())
 
 
 # --------------------------------------------------------------------------

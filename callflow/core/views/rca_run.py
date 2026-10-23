@@ -60,8 +60,7 @@ def _setting(name, default):
 
 
 def _tool_path():
-    return Path(_setting("RCA_TOOL_PATH", Path(settings.BASE_DIR) / "CallFlow-Frontend" / "src" /
-                         "assets" / "external" / "rca_tool_V24.html"))
+    return Path(_setting("RCA_TOOL_PATH", Path(settings.BASE_DIR) / "rca_tool_V24.html"))
 
 
 def _write_json(path, data):

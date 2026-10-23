@@ -8,12 +8,13 @@ run() returns (http_status, body). Bodies and error shapes match the old
 Prototype view. Each stage is timed and logged by JobContext.stage().
 """
 import time
+from collections import OrderedDict
 
 import pandas as pd
 
 from . import aggregation, catalog, config, hub, outputs, response, validation
-from .smartcare import Executor, Session, classify_error
-from callflow.core.utils.data_utils import convert_java_types
+from .smartcare import Executor, Session, SessionPool, classify_error
+
 
 def _connect_with_retries(session, ctx):
     attempts = config.max_attempts()
@@ -42,7 +43,13 @@ def _report_outcome(ctx, outcome, role="query"):
 
 def _apply_fallbacks(result, executor, main_ok, ctx, complain_type):
     """
-    The Prototype fallback rules, with two fixes:
+    The Prototype fallback rules, with these changes:
+      * no fallback at all when the main queries returned no rows: a left
+        merge into an empty frame is always empty, so they cannot change the
+        result (production log: 388 s of a 653 s job spent this way);
+      * the fallback queries that are needed run in parallel up front
+        (each distinct query once); the merges are then applied one by one in
+        the original column order, exactly as before;
       * skip when the fallback query is a main query that already succeeded:
         its rows are already in `result`, so a re-run adds nothing. (Before,
         the re-run was merged in and an existing all-null column became
@@ -50,6 +57,14 @@ def _apply_fallbacks(result, executor, main_ok, ctx, complain_type):
       * an all-null column is dropped before merging the fallback values in,
         so the merge cannot create _x/_y columns either.
     """
+    if result.empty:
+        ctx.event("fallback_skipped", column="*", reason="main queries returned no rows")
+        return result
+
+    # Which columns need a fallback. A left merge only copies existing rows, so
+    # merging one column never changes whether another column is missing or
+    # all-null: deciding up front gives the same answer as deciding in the loop.
+    needed = []
     for column, qname, template in catalog.FALLBACKS:
         if column in result.columns and not result[column].isna().all():
             continue
@@ -62,10 +77,22 @@ def _apply_fallbacks(result, executor, main_ok, ctx, complain_type):
             ctx.event("fallback_skipped", column=column, column_state=state, query=qname,
                       reason="query already succeeded in this job; its rows are already present")
             continue
+        needed.append((column, qname, template, state))
+
+    # run each distinct fallback query once, in parallel
+    first = OrderedDict()
+    for column, qname, template, state in needed:
+        first.setdefault(id(template), (f"fallback:{column}:{qname}", template))
+    prefetched = {}
+    if first:
+        outcomes = executor.run_many(list(first.values()), stage_name="fallback_query")
+        prefetched = dict(zip(first.keys(), outcomes))
+
+    for column, qname, template, state in needed:
         ctx.event("fallback_start", column=column, column_state=state, query=qname)
-        with ctx.stage("fallback_query", column=column, query=qname) as rec:
+        outcome = prefetched.pop(id(template), None)
+        if outcome is None:                  # same query as an earlier column: memo / gave up
             outcome = executor.run(f"fallback:{column}:{qname}", template)
-            rec["status"] = outcome.status
         _report_outcome(ctx, outcome, role="fallback")
         fb = outcome.frame
         if fb.empty or "MSISDN" not in fb.columns or column not in fb.columns:
@@ -81,7 +108,7 @@ def _apply_fallbacks(result, executor, main_ok, ctx, complain_type):
 
 
 def run(params, ctx, connect_fn=None):
-    session = None
+    session = pool = None
     try:
         with ctx.stage("input_validation"):
             try:
@@ -99,24 +126,28 @@ def run(params, ctx, connect_fn=None):
         if not connected:
             return 500, response.error_body('Database connection failed')
 
-        executor = Executor(ctx, req, session)
+        pool = SessionPool(ctx, connect_fn, first=session)
+        executor = Executor(ctx, req, pool)
+        queries = list(catalog.query_set(req.complain_type).items())
         ctx.event("query_plan", complain_type=req.complain_type, tables=",".join(map(str, executor.tables)),
-                  queries=",".join(catalog.query_set(req.complain_type).keys()))
+                  queries=",".join(name for name, _ in queries), parallelism=config.query_parallelism())
         frames, main_ok = [], set()
-        with ctx.stage("query_execution"):
-            for name, template in catalog.query_set(req.complain_type).items():
-                with ctx.stage("query", query=name) as rec:
-                    outcome = executor.run(name, template)
-                    rec["status"], rec["rows"] = outcome.status, len(outcome.frame)
+        with ctx.stage("query_execution", parallelism=config.query_parallelism()):
+            outcomes = executor.run_many(queries)
+            for (name, template), outcome in zip(queries, outcomes):    # original order
                 _report_outcome(ctx, outcome)
                 if outcome.complete:
                     main_ok.add(id(template))
                 frames.append(outcome.frame)
         result = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-        result = convert_java_types(result)  # convert JPype/Java types to native Python types for pickling
+        csv_path = outputs.export_csv(result, 'sc_nodes_before_fallback.csv', ctx.dir, job_log=ctx.log)
+        ctx.event("extract csv before fallback", message=f"MI job {ctx.job_id} complain_type={req.complain_type} rows={len(result)} csv={csv_path}")
         with ctx.stage("fallback_queries"):
             result = _apply_fallbacks(result, executor, main_ok, ctx, req.complain_type)
-        session.close()                        # no more Smartcare work in this job
+            csv_path = outputs.export_csv(result, 'sc_nodes_after_fallback.csv', ctx.dir, job_log=ctx.log)
+            ctx.event("extract csv after fallback", message=f"MI job {ctx.job_id} complain_type={req.complain_type} rows={len(result)} csv={csv_path}")
+        ctx.event("smartcare_sessions", opened=pool.connects)
+        pool.close()                           # no more Smartcare work in this job
 
         with ctx.stage("data_validation") as rec:
             requirements = (catalog.DATA_METRICS if req.complain_type == catalog.DATA
@@ -135,6 +166,7 @@ def run(params, ctx, connect_fn=None):
                 metrics, cells = aggregation.aggregate_voice(result, ctx, export=export)
 
         with ctx.stage("hub_metrics", cells=len(cells)):
+            ctx.event("hub_metrics_start", complain_type=req.complain_type, cells=cells)
             hub_counts = hub.affected_hub_metrics(result, cells, ctx, ctx.dir)
 
         with ctx.stage("result_generation"):
@@ -147,5 +179,7 @@ def run(params, ctx, connect_fn=None):
         ctx.exception("analysis_error")
         return 500, response.error_body(str(e))
     finally:
-        if session is not None:
+        if pool is not None:
+            pool.close()                       # closes every session, including the first
+        elif session is not None:
             session.close()

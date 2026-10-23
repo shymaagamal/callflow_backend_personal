@@ -73,11 +73,11 @@ def affected_hub_metrics(nodesdata, affected_cells, ctx, job_dir):
 
         nodesdata.loc[:, 'modified_site_name'] = nodesdata['modified_site_name'].replace('', None)
         subs_per_site = nodesdata.groupby('modified_site_name')['MSISDN'].nunique().dropna().to_dict()
-
         master_df = master_sheet()
         site_list = list(subs_per_site.keys())
         matched_df = master_df[master_df['SITE_ID'].isin(site_list)]
         if matched_df.empty:
+            ctx.event("site_metrics", sites=subs_per_site, cells=len(affected_cells))
             ctx.event("hub_metrics_skipped", reason="no SITE_ID match", sites=len(site_list))
             return {'subs_per_hub': []}
 

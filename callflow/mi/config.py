@@ -130,6 +130,15 @@ def retry_backoff_max_s() -> float:
     return _float("MI_SMARTCARE_RETRY_BACKOFF_MAX_S", 120.0)
 
 
+def query_parallelism() -> int:
+    """
+    Smartcare queries of ONE job that may run at the same time (each on its own
+    JDBC session). 1 = sequential (previous behaviour). Total Smartcare sessions
+    opened by MI at once = MI_MAX_CONCURRENT x MI_QUERY_PARALLELISM.
+    """
+    return max(1, _int("MI_QUERY_PARALLELISM", 4))
+
+
 def retry_budget_s() -> float:
     """Total Smartcare seconds per job after which failed queries are not retried."""
     return _float("MI_SMARTCARE_RETRY_BUDGET_S", 2700.0)

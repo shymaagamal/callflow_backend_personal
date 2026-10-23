@@ -49,7 +49,7 @@ class NppAnalyzer:
         return KPIAnalyzer().analyze_npp(
             npp_raw, ctx.get("analyzer_freq", "1H"),
             qtr["current_start"], qtr["current_end"],
-            qtr["prev_start_1day"], qtr["prev_end_1day"], ctx.get("ts", ""),
+            qtr["prev_start_1day"], qtr["prev_end_1day"], ctx.get("ts", ""),"site"
         )
 
     def _enrich(self, smartcare, affected_list, ctx, counts=None) -> Dict[str, Any]:

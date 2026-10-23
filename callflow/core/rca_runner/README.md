@@ -12,8 +12,7 @@ and returns the tool's own results. No RCA logic is re-implemented in Python.
    Viavi, Remedy), which writes the request-scoped CSVs and `manifest.json` to
    `OUTPUT_DIR/rca_engine/rca/<request_id>/`.
 2. When no file is still being written, `browser_runner.run_rca_tool` opens the tool
-   in Chromium and calls the tool's own `callAPIWithPayload({rca_files_url, start_date,
-   end_date})`, which is what the portal iframe calls. That runs
+   in Chromium and calls the tool's own `callAPIWithPayload({rca_files_url, start_date, end_date})`, which is what the portal iframe calls. That runs
    `handleApiResponse` -> `loadFiles` -> `startAnalysis`.
 3. Every request from the page is answered by Playwright interception: the file
    list and files of this request only, local copies of the CDN libraries (`vendor/`),
@@ -84,15 +83,15 @@ They outlive the 30-minute job record, so `GET` keeps working.
 
 ## Settings (all optional)
 
-| Setting | Default | Meaning |
-|---|---|---|
-| `RCA_TOOL_PATH` | `BASE_DIR/CallFlow-Frontend/src/assets/external/rca_tool_V24.html` | The tool file to run |
-| `RCA_TOOL_TIMEOUT_S` | 300 | Limit for loading + analysis in the browser |
-| `RCA_FILES_WAIT_S` | 60 | Wait for files still being written |
-| `RCA_RUN_MAX_SYSTEM_JOBS` | 2 | rca/run jobs querying the systems at once (all workers) |
-| `RCA_RUN_MAX_BROWSERS` | 1 | Headless browsers at once (all workers) |
-| `RCA_RUN_SLOT_WAIT_S` | 1800 | Longest a job waits in the queue |
-| `RCA_BROWSER_ARGS` | `["--no-sandbox", "--disable-dev-shm-usage"]` | Chromium flags (`--no-sandbox` is required when Gunicorn runs as root) |
+| Setting                     | Default                                                              | Meaning                                                                  |
+| --------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `RCA_TOOL_PATH`           | `BASE_DIR/CallFlow-Frontend/src/assets/external/rca_tool_V24.html` | The tool file to run                                                     |
+| `RCA_TOOL_TIMEOUT_S`      | 300                                                                  | Limit for loading + analysis in the browser                              |
+| `RCA_FILES_WAIT_S`        | 60                                                                   | Wait for files still being written                                       |
+| `RCA_RUN_MAX_SYSTEM_JOBS` | 2                                                                    | rca/run jobs querying the systems at once (all workers)                  |
+| `RCA_RUN_MAX_BROWSERS`    | 1                                                                    | Headless browsers at once (all workers)                                  |
+| `RCA_RUN_SLOT_WAIT_S`     | 1800                                                                 | Longest a job waits in the queue                                         |
+| `RCA_BROWSER_ARGS`        | `["--no-sandbox", "--disable-dev-shm-usage"]`                      | Chromium flags (`--no-sandbox` is required when Gunicorn runs as root) |
 
 ## Deployment (server: Python 3.7, Gunicorn as root)
 
