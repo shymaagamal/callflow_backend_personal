@@ -4,10 +4,10 @@
 
 | Symptom in the log | Cause in the old code | MI behaviour |
 |---|---|---|
-| `KeyError: 'VPCRF_NAME'` (36 times, ~7 per request) | SCF returns rows whose `VPCRF_NAME` is all null, so the fallback **re-runs the same SCF query** and merges `VPCRF_NAME` again. pandas renames both columns to `VPCRF_NAME_x`/`_y`, and `distinct_count(..., 'VPCRF_NAME')` raises. Everything computed after it (RAT, region, subregion, TAC, SGSN, MME, sites, SGWs) comes back **empty**. The 6-attempt loop repeats the identical crash. | A fallback that would re-run a main query that already succeeded is skipped (its rows are already present). All-null columns are dropped before a merge. Every metric is computed independently. Result: full Data response, `PCRF={}`. |
-| `KeyError: 'Voice_Data_Flag'` (Voice) | The Voice DRA/OCS/PCRF queries return `Service_flag` (`'VOLTE'`/`'Data'`), but the aggregation filters on `Voice_Data_Flag == 'Voice'`. That column only comes from the SCF fallback, which only yields `'Data'` (`WHERE left(MS_IP,3)='10.'`). The result is a crash when SCF is empty, and silently empty Voice DRA/OCS/PCRF otherwise. | Same response by default, no crash, plus warning `metric_unavailable` / `voice_ims_filter_empty`. `MI_VOICE_IMS_FILTER=service_flag` fills DRA/OCS/PCRF from `Service_flag='VOLTE'` (business decision, off by default). |
+| `KeyError: 'VPCRF_NAME'` (36 times, ~7 per request) | SCF returns rows whose `VPCRF_NAME` is all null, so the fallback **re-runs the same SCF query** and merges `VPCRF_NAME` again. pandas renames both columns to `VPCRF_NAME_x`/`_y`, and `distinct_count(..., 'VPCRF_NAME')` raises. Everything computed after it (RAT, region, subregion, TAC, SGSN, MME, sites, SGWs) comes back **empty**. The 6-attempt loop repeats the identical crash. | No fallback queries any more (removed 2026-10-23), so there is no re-merge. Every metric is computed independently. Result: full Data response, `PCRF={}`. |
+| `KeyError: 'Voice_Data_Flag'` (Voice) | The Voice DRA/OCS/PCRF queries return `Service_flag` (`'VOLTE'`/`'Data'`), but the aggregation filters on `Voice_Data_Flag == 'Voice'`. That column only comes from the SCF fallback, which only yields `'Data'` (`WHERE left(MS_IP,3)='10.'`). The result is a crash when SCF is empty, and silently empty Voice DRA/OCS/PCRF otherwise. | DRA/OCS/PCRF are now counted as is from the rows `smartcare_DRA_Voice` / `_OCS_Voice` / `_PCRF_Voice` return (distinct MSISDN per name, no row filter). Since 2026-10-23 there is no flag. |
 | `Table or view not found: ps.DETAIL_CDR_SGS_20463`, `cs.TDR_IMS_HSS_TRANS_20463` | 20463 = **2026-01-10**: a 9-month-old window. Missing tables were retried 5×. | Classified as `unavailable`, never retried, reported as `query_unavailable` (partial result). |
-| `SocketTimeoutException: timeout`, "all 5 attempts" | The Prototype passed its timeouts in jaydebeapi's `libs` argument (ignored). Retries were immediate, plus 4 more full retry cycles from the fallbacks. | Socket/connect timeouts applied, 3 attempts with backoff (10 s, 20 s), reconnect after a failure, retry budget per job, a failed query retried once more by a fallback and then given up. An SCF timeout costs 4 executions instead of 25. |
+| `SocketTimeoutException: timeout`, "all 5 attempts" | The Prototype passed its timeouts in jaydebeapi's `libs` argument (ignored). Retries were immediate, plus 4 more full retry cycles from the fallbacks. | Socket/connect timeouts applied, 3 attempts with backoff (10 s, 20 s), reconnect after a failure, retry budget per job, no fallback re-runs. An SCF timeout costs 3 executions instead of 25. |
 | Two "Smartcare Request" lines in the same second | No duplicate protection | Identical submissions while a job is queued or running return that job. |
 | (not in the log) | A window crossing midnight never read the next day's table. One JDBC connection leaked per request. All rows printed to stdout. | Every calendar day read (`MI_FIX_MIDNIGHT_TABLES`). One connection per job, always closed. `logging` only. |
 
@@ -22,10 +22,11 @@ callflow/mi/
   __init__.py       package doc (not a Django app: no models, migrations, INSTALLED_APPS entry)
   config.py         every MI_* setting with its default (settings.py > environment/.env > default)
   validation.py     request parsing + rules/messages of the old view; DataFrame column report
-  sql.py            Smartcare SQL, moved verbatim from prototype/constants.py (no credentials)
-  catalog.py        query sets per Complain_Type, fallback rules, columns each metric needs
+  Queries/          Smartcare SQL: data_queries.smartcare_Data_QUERIES, voice_queries.smartcare_Voice_QUERIES
+                    (your package; MI only needs those two dicts)
+  catalog.py        query sets per Complain_Type, CS subscriber-column mapping, columns each metric needs
   smartcare.py      JDBC connection, error classification, per-day tables, retries, memo
-  pipeline.py       stages: validation -> connection -> queries -> fallbacks -> data validation
+  pipeline.py       stages: validation -> connection -> queries -> data validation
                     -> aggregation -> hub metrics -> result generation
   aggregation.py    Data / Voice metrics (same pandas expressions), guarded per metric
   hub.py            HUB metrics (unchanged logic and return shapes), cached master sheet
@@ -129,6 +130,54 @@ package, no nginx change and no Gunicorn change.
 Its cost is shared nginx configuration and a second API process to operate. Start with A, and move
 to B only if one of those applies.
 
+### No fallback queries (since 2026-10-23)
+
+Each Complain_Type runs only its own queries: Data runs 4 (S1MME, REG_Voice, GBIUPS, SCF) and Voice
+runs 10. The Prototype re-ran SCF and S1MME for missing columns, including for Voice.
+- **Voice:** that re-run never changed the response.
+- **Data:** the re-run only happened when SCF or S1MME had failed, which is now reported as
+  `query_failed` instead of being retried through a fallback.
+
+### Java values from JDBC (since 2026-10-23)
+
+jaydebeapi returns VARCHAR columns as `java.lang.String` objects when the calling thread isn't
+attached to the JVM, and MI's query threads weren't. Those objects:
+- break pandas `.str` methods;
+- never match Python strings in `isin()` or dict lookups (server result:
+  `HUB_Counts {"subs_per_hub": []}` because no `CELL_NAME` "matched");
+- cannot be pickled into the Redis job record.
+
+MI now does what `core/services/smartcare_query_runner.py` does: each thread attaches itself to the
+JVM. Every fetched value and column name is also converted to plain Python (`smartcare.to_python`):
+strings become `str`, Long/Integer become `int`, Double/BigDecimal become `float`, anything else
+becomes `str`. The job result is converted again before it is stored (`to_python_deep`, also
+available as `hub.to_native`).
+
+Only `Data` and `Voice` are accepted as `Complain_Type`; anything else returns 400
+`{"error": "Complain_Type must be Data or Voice"}` before a job is created. Each job also writes
+`sc_nodes_raw.csv`, the combined query result before aggregation.
+
+### Voice DRA / OCS / PCRF (since 2026-10-23)
+
+These come straight from what `smartcare_DRA_Voice`, `smartcare_OCS_Voice` and `smartcare_PCRF_Voice`
+return: the number of distinct MSISDNs per `DRA_NAME` / `OCS_NAME` / `VPCRF_NAME`, with no row filter.
+That includes rows where the query's `Service_flag` is `'Data'`. Rows from other queries don't carry
+these columns and are ignored (empty names are skipped). If one of the three queries fails, only its
+metric is empty and the job reports `query_failed` / `query_unavailable`.
+
+### CS subscriber column (since 2026-10-23)
+
+`smartcare_network_CS_MOC` returns `callerno` and `smartcare_network_CS_MTC` returns `calledno`.
+These are the requested MSISDNs, but neither query has a column named `MSISDN`. Every CS row was
+therefore counted as the same empty subscriber: all Voice counts were 1, and `HUB_Counts` could count
+no one. MI renames these columns to `MSISDN` (logged as `event=subscriber_column_mapped`).
+
+When `HUB_Counts` is empty, the job log now says why:
+- `hub_no_overlap`: no row has one of the affected cells;
+- `hub_no_site_match`: the sites are not `SITE_ID`s in the master sheet (with sample sites and the
+  sheet's path);
+- `hub_no_subscribers`: the matched rows have no MSISDN or no Hub.
+
 ### Parallel queries
 
 Within a job, the main queries run in parallel (`MI_QUERY_PARALLELISM`, default 4), each on its own
@@ -136,13 +185,9 @@ JDBC session. Results are put back in the original query order, so concatenation
 are identical to sequential execution (`ParallelTests` compares 1 vs 5 on all scenarios: body,
 `sc_nodes.csv` and the executions).
 
-The fallback queries that are needed also run in parallel, once per distinct query, and their merges
-are then applied in the original column order. When the main queries return no rows, the fallbacks
-are skipped entirely, because a merge into an empty frame stays empty.
-
 On the 15 Oct production job (Voice, 0 rows) the job took 653 s: 263 s of queries plus 388 s of
-fallbacks. At parallelism 4 this becomes roughly 101 s (the longest single query, DRA) and no fallback
-time. Two caveats:
+fallbacks. Fallbacks are now removed, and at parallelism 4 the job becomes roughly 101 s (the longest
+single query, DRA). Two caveats:
 - Smartcare may slow individual queries down when more run at once.
 - Something in Smartcare or its driver ends queries at 120 s, and DRA already takes 101 s.
 
@@ -163,8 +208,8 @@ curl -s -X POST https://<host>/callflow/prototype/api/smartcare -H 'Content-Type
 # 1. credentials (previously hard-coded in callflow/prototype/constants.py)
 grep -n "db_user\|db_password" callflow/prototype/constants.py      # copy the values
 cat >> .env <<'EOF'
-MI_SMARTCARE_USER=E2E_DataCube
-MI_SMARTCARE_PASSWORD=<value>
+STCC_SMARTCARE_DB_USER=<Smartcare user>
+STCC_SMARTCARE_DB_PASSWORD=<value>
 EOF
 
 # 2. code (patch or copy callflow/mi/, callflow/prototype/, callflow/urls.py)
@@ -223,7 +268,7 @@ The `.env` lines and `callflow_output/MI/` are harmless to keep. Nothing in the 
 | `MI_WRITE_LATEST` | True | `MI/latest/*.csv` |
 | `MI_LEGACY_STATIC_LOG` | False | old `static/CallFlow/output/logs.txt` |
 | `MI_LOG_RETENTION_DAYS` / `MI_JOB_RETENTION_DAYS` | 14 / 7 | retention |
-| `MI_SMARTCARE_USER` / `_PASSWORD` | – (required) | Smartcare account |
+| `STCC_SMARTCARE_DB_USER` / `STCC_SMARTCARE_DB_PASSWORD` | – (required) | Smartcare account (.env) |
 | `MI_SMARTCARE_SOCKET_TIMEOUT_MS` | 1 800 000 | per query (same as core) |
 | `MI_SMARTCARE_MAX_ATTEMPTS` | 3 | was 5 with no backoff |
 | `MI_SMARTCARE_RETRY_BACKOFF_S` / `_MAX_S` | 10 / 120 | exponential backoff |
@@ -231,8 +276,8 @@ The `.env` lines and `callflow_output/MI/` are harmless to keep. Nothing in the 
 | `MI_QUERY_PARALLELISM` | 4 | Smartcare queries of one job running at once, each on its own session; 1 = sequential. Sessions open at once = `MI_MAX_CONCURRENT` × this |
 | `MI_JVM_MAX_HEAP` | 1g | `-Xmx` when MI starts the JVM (worker) |
 | `MI_FIX_MIDNIGHT_TABLES` | True | read every day touched by the window |
-| `MI_VOICE_IMS_FILTER` | legacy | `service_flag` = fill Voice DRA/OCS/PCRF (changes results) |
-| `MI_SKIP_INEFFECTIVE_QUERIES` | False | skip REG_Voice (Data) and Voice fallbacks; same response, smaller CSV dump |
+| `MI_SKIP_INEFFECTIVE_QUERIES` | False | skip REG_Voice in the Data path; same response, smaller CSV dump |
+| `MI_MAP_CS_SUBSCRIBER_TO_MSISDN` | True | CS_MOC `callerno` / CS_MTC `calledno` → `MSISDN` (False = old behaviour: every Voice count is 1) |
 | `MI_EXECUTOR` | worker | worker / thread / inline |
 | `MI_WORKER_FALLBACK` | local | local / none |
 | `MI_ENDPOINT_MODE` / `MI_LEGACY_ENDPOINT_MODE` | async / sync | default per path |

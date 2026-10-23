@@ -66,20 +66,28 @@ def voice_fixture(with_scf=False):
             ["2026/10/15 10:00", "602020000000002", "1112345678", "VOLTE", f"{name}_2", "EUTRAN"],
             ["2026/10/15 10:00", "602020000000003", "1212345678", "Data", f"{name}_3", "EUTRAN"],
         ])
-    cs_cols = ["myday", "MSISDN", "MSC_NAME", "CELL_NAME", "CLUSTER", "SUBREGION", "REGION"]
+    # real SELECT lists: CS_MOC returns callerno, CS_MTC calledno (no MSISDN column),
+    # and MSC_NAME AS MSC_NODE
+    def cs_cols(subscriber):
+        return ["myday", subscriber, "MSC_NODE", "CELL_NAME", "SITE_NAME", "CLUSTER", "SUBREGION", "REGION"]
     fx = {
         "dra_voice": sgid("DRA_NAME"),
         "ocs_voice": sgid("OCS_NAME"),
         "pcrf_voice": sgid("VPCRF_NAME"),
-        "cs_moc": (cs_cols, [["2026/10/15 10:00", "1012345678", "MSC1", "CAI_LCAI0123_1", "CL1", "Giza", "Cairo"],
-                             ["2026/10/15 10:00", "1112345678", "MSC2", "ALX_LALX45_1", "CL2", "Alex", "Delta"]]),
-        "cs_mtc": (cs_cols, [["2026/10/15 10:00", "1212345678", "MSC2", "ALX_LALX45_2", "CL2", "Alex", "Delta"]]),
+        "cs_moc": (cs_cols("callerno"), [
+            ["2026/10/15 10:00", "1012345678", "MSC1", "CAI_LCAI0123_1", "CAI0123", "CL1", "Giza", "Cairo"],
+            ["2026/10/15 10:00", "1112345678", "MSC2", "ALX_LALX45_1", "ALX45", "CL2", "Alex", "Delta"],
+            ["2026/10/15 10:05", "1512345678", "MSC2", "ALX_LALX45_1", "ALX45", "CL2", "Alex", "Delta"]]),
+        "cs_mtc": (cs_cols("calledno"), [
+            ["2026/10/15 10:00", "1212345678", "MSC2", "ALX_LALX45_2", "ALX45", "CL2", "Alex", "Delta"]]),
         "reg": (["myday", "IMPU_TEL_URI1", "p_cscf_Name", "I_cscf_Name", "S_cscf_Name", "AS_NAME"],
                 [["2026/10/15 10:00", "1012345678", "PCSCF1", "ICSCF1", "SCSCF1", "AS1"],
                  ["2026/10/15 10:00", "1112345678", "PCSCF1", "ICSCF1", "SCSCF1", "AS2"]]),
         "volte_mo": (["myday", "MSISDN", "NODE", "CLUSTER", "SUBREGION", "REGION"], []),
         "volte_mt": (["myday", "MSISDN", "NODE", "CLUSTER", "SUBREGION", "REGION"], []),
-        "sgs": (["myday", "MSISDN", "MME_Name", "MSC_NAME"], []),
+        "sgs": (["myday", "MSISDN", "MME_Name", "MSC_NAME"],
+                [["2026/10/15 10:00", "1012345678", "MME01", "MSCBC6"],
+                 ["2026/10/15 10:00", "1112345678", "MME01", "MSCBC6"]]),
         "hss": (["myday", "IMPU_TEL_URI", "dest_host"], []),
     }
     if with_scf:
@@ -87,11 +95,44 @@ def voice_fixture(with_scf=False):
     return fx
 
 
-class FakeSmartcare:
-    """`fail`: {fixture_key: count} or {fixture_key: (count, message)}."""
+class JavaString:
+    """Stands in for a JPype java.lang.String: not a Python str, identity hash/eq."""
 
-    def __init__(self, fixture, fail=None):
+    def __init__(self, value):
+        self._value = value
+
+    def __str__(self):
+        return self._value
+
+    def __repr__(self):
+        return f"<java.lang.String {self._value!r}>"
+
+
+JavaString.__name__ = "java.lang.String"
+
+
+class JavaLong(JavaString):
+    pass
+
+
+JavaLong.__name__ = "java.lang.Long"
+
+
+def _javaify(value):
+    if isinstance(value, str):
+        return JavaString(value)
+    if isinstance(value, int) and not isinstance(value, bool):
+        return JavaLong(str(value))
+    return value
+
+
+class FakeSmartcare:
+    """`fail`: {fixture_key: count} or {fixture_key: (count, message)}.
+    `java_values=True`: return strings/ints the way an unattached JPype thread does."""
+
+    def __init__(self, fixture, fail=None, java_values=False):
         self.fixture = fixture
+        self.java_values = java_values
         self.fail = {}
         for k, v in (fail or {}).items():
             self.fail[k] = list(v) if isinstance(v, tuple) else [v, f"injected failure for {k}"]
@@ -145,8 +186,12 @@ class FakeCursor:
                 spec[0] -= 1
                 raise RuntimeError(spec[1])
         cols, rows = self.owner.fixture.get(key, (["MSISDN"], []))
-        self.description = [(c,) for c in cols]
-        self._rows = [tuple(r) for r in rows]
+        if self.owner.java_values:
+            self.description = [(JavaString(c),) for c in cols]
+            self._rows = [tuple(_javaify(v) for v in r) for r in rows]
+        else:
+            self.description = [(c,) for c in cols]
+            self._rows = [tuple(r) for r in rows]
 
     def fetchall(self):
         return list(self._rows)

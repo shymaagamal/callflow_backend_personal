@@ -268,7 +268,7 @@
   "status": 200,
   "body": {
    "Suspected_Sites": {
-    "ALX0045": 2,
+    "ALX0045": 1,
     "CAI0123": 1
    },
    "Suspected_Cells": {
@@ -278,21 +278,18 @@
    },
    "Cluster_Counts": {
     "CL1": 1,
-    "CL2": 2
+    "CL2": 1
    },
    "Region_Counts": {
     "Cairo": 1,
-    "Delta": 2
+    "Delta": 1
    },
    "Sub_Region_Counts": {
-    "Alex": 2,
+    "Alex": 1,
     "Giza": 1
    },
    "HUB_Counts": {
-    "HUB_Counts": {
-     "HUB_A": 2,
-     "HUB_C": 1
-    }
+    "HUB_Counts": {}
    },
    "CSCF_Name": {
     "PCSCF1": 2
@@ -302,15 +299,14 @@
     "AS2": 1
    },
    "MSC_Name": {
-    "MSC1": 1,
-    "MSC2": 2
+    "MSCBC6": 2
    },
    "DRA_NAME": {},
    "OCS_NAME": {},
    "PCRF": {}
   },
-  "legacy_executions": 13,
-  "legacy_connections": 14,
+  "legacy_executions": 12,
+  "legacy_connections": 13,
   "legacy_keyerrors": [
    "Voice_Data_Flag"
   ]
@@ -319,7 +315,7 @@
   "status": 200,
   "body": {
    "Suspected_Sites": {
-    "ALX0045": 2,
+    "ALX0045": 1,
     "CAI0123": 1
    },
    "Suspected_Cells": {
@@ -329,21 +325,18 @@
    },
    "Cluster_Counts": {
     "CL1": 1,
-    "CL2": 2
+    "CL2": 1
    },
    "Region_Counts": {
     "Cairo": 1,
-    "Delta": 2
+    "Delta": 1
    },
    "Sub_Region_Counts": {
-    "Alex": 2,
+    "Alex": 1,
     "Giza": 1
    },
    "HUB_Counts": {
-    "HUB_Counts": {
-     "HUB_A": 2,
-     "HUB_C": 1
-    }
+    "HUB_Counts": {}
    },
    "CSCF_Name": {
     "PCSCF1": 2
@@ -353,22 +346,21 @@
     "AS2": 1
    },
    "MSC_Name": {
-    "MSC1": 1,
-    "MSC2": 2
+    "MSCBC6": 2
    },
    "DRA_NAME": {},
    "OCS_NAME": {},
    "PCRF": {}
   },
-  "legacy_executions": 13,
-  "legacy_connections": 14,
+  "legacy_executions": 12,
+  "legacy_connections": 13,
   "legacy_keyerrors": []
  },
  "voice_tables_missing": {
   "status": 200,
   "body": {
    "Suspected_Sites": {
-    "ALX0045": 2,
+    "ALX0045": 1,
     "CAI0123": 1
    },
    "Suspected_Cells": {
@@ -378,21 +370,18 @@
    },
    "Cluster_Counts": {
     "CL1": 1,
-    "CL2": 2
+    "CL2": 1
    },
    "Region_Counts": {
     "Cairo": 1,
-    "Delta": 2
+    "Delta": 1
    },
    "Sub_Region_Counts": {
-    "Alex": 2,
+    "Alex": 1,
     "Giza": 1
    },
    "HUB_Counts": {
-    "HUB_Counts": {
-     "HUB_A": 2,
-     "HUB_C": 1
-    }
+    "HUB_Counts": {}
    },
    "CSCF_Name": {
     "PCSCF1": 2
@@ -401,10 +390,7 @@
     "AS1": 1,
     "AS2": 1
    },
-   "MSC_Name": {
-    "MSC1": 1,
-    "MSC2": 2
-   },
+   "MSC_Name": {},
    "DRA_NAME": {},
    "OCS_NAME": {},
    "PCRF": {}
@@ -412,7 +398,7 @@
   "legacy_executions": 21,
   "legacy_connections": 22,
   "legacy_keyerrors": [
-   "Voice_Data_Flag"
+   "MSC_NAME"
   ]
  }
 }

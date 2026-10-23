@@ -56,6 +56,8 @@ def parse_request(params) -> AnalysisRequest:
         raise RequestError("Missing start_date or end_date", legacy_status=400)
     if not msisdn_list:
         raise RequestError("msisdn_list is required", legacy_status=400)
+    if params.get("Complain_Type") not in ("Data", "Voice"):
+        raise RequestError("Complain_Type must be Data or Voice", legacy_status=400)
 
     # strptime errors surfaced as 500 in the old view (raised inside its try)
     try:

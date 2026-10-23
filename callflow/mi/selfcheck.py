@@ -41,7 +41,7 @@ def main(argv=None):
     if legacy:
         check("legacy export dir exists", os.path.isdir(legacy), legacy, required=False)
 
-    check("Smartcare credentials configured (MI_SMARTCARE_USER/PASSWORD)",
+    check("Smartcare credentials configured (STCC_SMARTCARE_DB_USER/PASSWORD)",
           bool(config.smartcare_user() and config.smartcare_password()))
     check("JDBC driver jar present", os.path.isfile(config.smartcare_jdbc_jar()), config.smartcare_jdbc_jar())
 
@@ -56,7 +56,7 @@ def main(argv=None):
           required=config.executor() == "worker" and config.worker_fallback() == "none")
     print(f"executor={config.executor()} fallback={config.worker_fallback()} "
           f"max_concurrent={config.max_concurrent()} legacy_mode={config.legacy_endpoint_mode()} "
-          f"new_mode={config.new_endpoint_mode()} voice_ims_filter={config.voice_ims_filter()}")
+          f"new_mode={config.new_endpoint_mode()} query_parallelism={config.query_parallelism()}")
 
     if "--smartcare" in argv:
         try:

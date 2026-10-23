@@ -1,7 +1,7 @@
 """
-Which Smartcare queries MI runs, the fallback rules, and which columns each
-response metric needs. Query sets and fallback order are the ones the
-Prototype code used.
+Which Smartcare queries MI runs for each Complain_Type (the Prototype's query
+sets, unchanged), subscriber-column mapping, and which columns each response
+metric needs. There are no fallback queries.
 """
 from collections import OrderedDict
 
@@ -32,23 +32,28 @@ def query_set(complain_type):
 # not used by any Data metric.
 INEFFECTIVE_DATA_QUERIES = ("smartcare_nodes_REG_Voice",)
 
-# (column, query name, template) - checked in this order, as before.
-FALLBACKS = (
-    ("Voice_Data_Flag", "SCF_CCI_U_T_Data", smartcare_Data_QUERIES["SCF_CCI_U_T_Data"]),
-    ("DRA_NAME", "SCF_CCI_U_T_Data", smartcare_Data_QUERIES["SCF_CCI_U_T_Data"]),
-    ("VPCRF_NAME", "SCF_CCI_U_T_Data", smartcare_Data_QUERIES["SCF_CCI_U_T_Data"]),
-    ("OCS_NAME", "SCF_CCI_U_T_Data", smartcare_Data_QUERIES["SCF_CCI_U_T_Data"]),
-)
+# No fallback queries: each Complain_Type runs only its own query set above.
+# (The Prototype re-ran SCF_CCI_U_T_Data / smartcare_nodes_S1mme for missing
+#  columns, also for Voice; removed on request, 2026-10-23.)
+
+# The subscriber number under another name. CS_MOC filters on `callerno` and
+# CS_MTC on `calledno` (both are the requested MSISDNs) but neither returns a
+# column called MSISDN, so before this mapping every CS row had an empty
+# MSISDN: all Voice counts collapsed to 1 and HUB_Counts could not count
+# anyone. VoLTE queries already alias IMPU_TEL_URI AS MSISDN.
+SUBSCRIBER_COLUMNS = {
+    "smartcare_network_CS_MOC": "callerno",
+    "smartcare_network_CS_MTC": "calledno",
+}
 
 
-def fallbacks_are_ineffective(complain_type):
-    """
-    Under the legacy Voice IMS filter (Voice_Data_Flag == 'Voice') no fallback
-    can change the Voice response: SCF only ever yields 'Data', and TAC/MME are
-    not Voice metrics. Used only when MI_SKIP_INEFFECTIVE_QUERIES is on.
-    """
-    return (complain_type != DATA and config.voice_ims_filter() == "legacy"
-            and config.skip_ineffective_queries())
+def normalise_subscriber_column(name, frame):
+    """Return (frame, renamed_from) with the query's subscriber column named MSISDN."""
+    source = SUBSCRIBER_COLUMNS.get(name)
+    if (not config.map_cs_subscriber_to_msisdn() or source is None
+            or source not in frame.columns or "MSISDN" in frame.columns):
+        return frame, None
+    return frame.rename(columns={source: "MSISDN"}), source
 
 
 # Columns each response metric depends on (diagnostics + guards).
@@ -71,12 +76,7 @@ DATA_METRICS = OrderedDict([
 VOICE_BASE = ("MSISDN", "CELL_NAME")
 
 
-def voice_flag_column():
-    return "Voice_Data_Flag" if config.voice_ims_filter() == "legacy" else "Service_flag"
-
-
 def voice_metrics():
-    flag = voice_flag_column()
     return OrderedDict([
         ("Suspected_Sites", VOICE_BASE),
         ("Suspected_Cells", VOICE_BASE),
@@ -86,7 +86,7 @@ def voice_metrics():
         ("CSCF_Name", ("p_cscf_Name", "IMPU_TEL_URI1")),
         ("AS_Name", ("AS_NAME", "IMPU_TEL_URI1")),
         ("MSC_Name", ("MSC_NAME", "MSISDN")),
-        ("DRA_NAME", ("MSISDN", flag, "DRA_NAME")),
-        ("OCS_NAME", ("MSISDN", flag, "OCS_NAME")),
-        ("PCRF", ("MSISDN", flag, "VPCRF_NAME")),
+        ("DRA_NAME", ("MSISDN", "DRA_NAME")),           # from smartcare_DRA_Voice, as returned
+        ("OCS_NAME", ("MSISDN", "OCS_NAME")),           # from smartcare_OCS_Voice
+        ("PCRF", ("MSISDN", "VPCRF_NAME")),             # from smartcare_PCRF_Voice
     ])

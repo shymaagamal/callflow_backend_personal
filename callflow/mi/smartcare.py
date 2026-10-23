@@ -19,7 +19,8 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 import pandas as pd
-
+import jaydebeapi
+import jpype
 from . import config
 
 _jvm_lock = threading.Lock()
@@ -58,14 +59,88 @@ def short_error(exc, limit=600):
     return head[:limit]
 
 
+# ---------------------------------------------------------- Java values
+_NATIVE = (str, int, float, bool, type(None))
+_JAVA_INT = ("java.lang.Long", "java.lang.Integer", "java.lang.Short", "java.lang.Byte",
+             "java.math.BigInteger")
+_JAVA_FLOAT = ("java.lang.Double", "java.lang.Float", "java.math.BigDecimal")
+
+
+def _java_class_name(value):
+    """'java.lang.String' for a JPype-boxed object, else None."""
+    cls = type(value)
+    name = getattr(cls, "__name__", "")
+    if name.startswith("java.") or str(cls).startswith("<java"):
+        return name or str(cls)
+    return None
+
+
+def to_python(value):
+    """
+    One Smartcare value as a plain Python value. jaydebeapi hands VARCHAR
+    columns back as java.lang.String objects (JPype) when they are not
+    converted: those break pandas .str methods, never compare equal in
+    isin()/dict lookups with Python str (production: HUB_Counts
+    {"subs_per_hub": []} because no CELL_NAME "matched"), and cannot be
+    pickled into the Redis job record.
+    """
+    if isinstance(value, _NATIVE):
+        return value
+    java = _java_class_name(value)
+    if java is None:
+        return value                      # datetime, Decimal, ... already Python
+    try:
+        if java in _JAVA_INT:
+            return int(str(value))
+        if java in _JAVA_FLOAT:
+            return float(str(value))
+        if java == "java.lang.Boolean":
+            return str(value).lower() == "true"
+        return str(value)                 # String, Timestamp, Date, anything else
+    except Exception:
+        return str(value)
+
+
+def to_python_deep(obj):
+    """to_python over dict keys/values and lists (job results before pickling)."""
+    if isinstance(obj, dict):
+        return {to_python_deep(k): to_python_deep(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return type(obj)(to_python_deep(v) for v in obj)
+    return to_python(obj)
+
+
+def _native_rows(rows):
+    out = []
+    for row in rows:
+        if all(isinstance(v, _NATIVE) for v in row):
+            out.append(tuple(row))
+        else:
+            out.append(tuple(to_python(v) for v in row))
+    return out
+
+
+def attach_thread_to_jvm():
+    """
+    Same fix as core/services/smartcare_query_runner.py: a thread that was not
+    attached to the JVM gets raw Java objects back from jaydebeapi. MI queries
+    run in pool threads (and the worker/thread executors), so each attaches
+    itself once the JVM exists.
+    """
+    try:
+        if jpype.isJVMStarted() and not jpype.isThreadAttachedToJVM():
+            jpype.attachThreadToJVM()
+    except Exception:
+        pass
+
+
 # ------------------------------------------------------------- connection
 def connect():
     """Open a Smartcare cursor (cursor._connection is the JDBC connection)."""
     user, password = config.smartcare_user(), config.smartcare_password()
     if not user or not password:
-        raise SmartcareConfigError("MI_SMARTCARE_USER / MI_SMARTCARE_PASSWORD are not configured")
-    import jaydebeapi
-    import jpype
+        raise SmartcareConfigError("STCC_SMARTCARE_DB_USER / STCC_SMARTCARE_DB_PASSWORD are not configured")
+  
 
     jar = config.smartcare_jdbc_jar()
     with _jvm_lock:
@@ -259,7 +334,8 @@ class Executor:
             return QueryOutcome(name=name, frame=cached.frame, status="ok", tables=cached.tables, memo_hit=True)
 
         if failures >= 2:
-            # failed its full retry cycle AND its single fallback retry in this job
+            # the same query already failed twice in this job (safety net; with
+            # no fallbacks each query normally runs once per job)
             self.ctx.record_query(name=name, ok=False, skipped=True, kind="gave_up",
                                   error="query already failed twice in this job; not executed again")
             return QueryOutcome(name=name, frame=pd.DataFrame(), status="gave_up",
@@ -308,14 +384,15 @@ class Executor:
             exec_s = fetch_s = 0.0
             try:
                 cursor = session.cursor()
+                attach_thread_to_jvm()           # after connect: the JVM exists now
                 cursor.execute(sql_text)
                 exec_s = time.perf_counter() - t0
                 t1 = time.perf_counter()
-                rows = cursor.fetchall()
+                rows = _native_rows(cursor.fetchall())
                 fetch_s = time.perf_counter() - t1
                 df, columns = None, 0
                 if cursor.description:
-                    cols = [d[0] for d in cursor.description]
+                    cols = [str(to_python(d[0])) for d in cursor.description]
                     df = pd.DataFrame(rows, columns=cols) if rows else pd.DataFrame(columns=cols)
                     columns = len(cols)
                 self._add_seconds(exec_s + fetch_s)

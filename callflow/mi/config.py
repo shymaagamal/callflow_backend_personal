@@ -154,25 +154,20 @@ def fix_midnight_tables() -> bool:
     return _bool("MI_FIX_MIDNIGHT_TABLES", True)
 
 
-def voice_ims_filter() -> str:
-    """
-    Which rows feed Voice DRA/OCS/PCRF:
-      "legacy"       Voice_Data_Flag == 'Voice'  (old behaviour; that column only
-                     comes from the SCF fallback, which only yields 'Data', so
-                     these three metrics are always empty)
-      "service_flag" Service_flag == 'VOLTE' (the column the Voice queries return)
-    """
-    value = str(_get("MI_VOICE_IMS_FILTER", "service_flag")).lower()
-    return value if value in ("legacy", "service_flag") else "legacy"
-
-
 def skip_ineffective_queries() -> bool:
     """
-    Skip queries that provably cannot change the API response (REG_Voice in the
-    Data path; Voice-path fallbacks under the legacy IMS filter). They still
-    shape the sc_nodes.csv dump, so OFF until no consumer needs those columns.
+    Skip smartcare_nodes_REG_Voice in the Data path: none of its columns reach
+    the Data response, but they are in the sc_nodes.csv dump, so OFF by default.
     """
     return _bool("MI_SKIP_INEFFECTIVE_QUERIES", False)
+
+
+def map_cs_subscriber_to_msisdn() -> bool:
+    """
+    Rename CS_MOC.callerno / CS_MTC.calledno to MSISDN (see catalog.SUBSCRIBER_COLUMNS).
+    False = previous behaviour (CS rows without MSISDN -> every Voice count is 1).
+    """
+    return _bool("MI_MAP_CS_SUBSCRIBER_TO_MSISDN", True)
 
 
 # ------------------------------------------------------------ validation

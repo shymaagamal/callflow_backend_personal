@@ -26,6 +26,34 @@ from callflow.mi.tests import fake_smartcare as fs
 
 GOLDEN = json.loads((Path(__file__).parent / "golden_legacy_responses.json").read_text())
 
+# Voice counts once CS_MOC.callerno / CS_MTC.calledno are mapped to MSISDN.
+# The original code counted every CS row as the same empty MSISDN -> all 1s, and
+# its HUB_Counts was empty because no CS row had a subscriber.
+VOICE_CS_FIX = {
+    "Suspected_Sites": {"ALX0045": 3, "CAI0123": 1},
+    "Suspected_Cells": {"ALX_LALX45_1": 2, "ALX_LALX45_2": 1, "CAI_LCAI0123_1": 1},
+    "Cluster_Counts": {"CL1": 1, "CL2": 3},
+    "Region_Counts": {"Cairo": 1, "Delta": 3},
+    "Sub_Region_Counts": {"Alex": 3, "Giza": 1},
+    "HUB_Counts": {"HUB_Counts": {"HUB_A": 3, "HUB_C": 1}},
+}
+
+
+# Voice DRA/OCS/PCRF, as returned by smartcare_DRA_Voice / _OCS_Voice / _PCRF_Voice
+# (the original code filtered on Voice_Data_Flag == 'Voice', matched nothing -> {}).
+VOICE_IMS = {
+    "DRA_NAME": {"DRA_NAME_1": 1, "DRA_NAME_2": 1, "DRA_NAME_3": 1},
+    "OCS_NAME": {"OCS_NAME_1": 1, "OCS_NAME_2": 1, "OCS_NAME_3": 1},
+    "PCRF": {"VPCRF_NAME_1": 1, "VPCRF_NAME_2": 1, "VPCRF_NAME_3": 1},
+}
+
+
+def voice_expected(name, cs_mapping=True):
+    expected = dict(GOLDEN[name]["body"], **VOICE_IMS)
+    if cs_mapping:
+        expected.update(VOICE_CS_FIX)
+    return expected
+
 
 def body(complain_type="Data", **extra):
     b = {"msisdn_list": fs.MSISDNS, "start_date": "2026-10-15T10:00", "end_date": "2026-10-15T11:00",
@@ -57,7 +85,7 @@ class MITestBase(SimpleTestCase):
             MI_EXECUTOR="inline",
             MI_CONCURRENCY_BACKEND="local",
             MI_SMARTCARE_RETRY_BACKOFF_S=0,
-            MI_SMARTCARE_USER="test", MI_SMARTCARE_PASSWORD="test",
+            STCC_SMARTCARE_DB_USER="test", STCC_SMARTCARE_DB_PASSWORD="test",
         )
         self.override.enable()
         jobs.set_backend_for_tests(None)
@@ -116,13 +144,50 @@ class LegacyContractTests(MITestBase):
     def test_data_without_scf_and_s1mme_rows_identical(self):
         self.assert_golden("data_none", fs.data_fixture(False, False), "Data")
 
-    def test_voice_identical_to_original(self):
-        self.assert_golden("voice", fs.voice_fixture(), "Voice")
-        self.assert_golden("voice_with_scf", fs.voice_fixture(with_scf=True), "Voice")
+    @override_settings(MI_MAP_CS_SUBSCRIBER_TO_MSISDN=False)
+    def test_voice_matches_original_except_dra_ocs_pcrf_without_cs_mapping(self):
+        cases = [("voice", fs.voice_fixture(), None),
+                 ("voice_with_scf", fs.voice_fixture(with_scf=True), None),
+                 ("voice_tables_missing", fs.voice_fixture(),
+                  {"sgs": (99, fs.TABLE_NOT_FOUND), "hss": (99, fs.TABLE_NOT_FOUND)})]
+        for name, fixture, fail in cases:
+            resp = self.post(body("Voice"), fs.FakeSmartcare(fixture, fail=fail))
+            self.assertEqual(json.loads(resp.content), voice_expected(name, cs_mapping=False), name)
+            for key in ("DRA_NAME", "OCS_NAME", "PCRF"):
+                self.assertEqual(GOLDEN[name]["body"][key], {})          # original: always empty
 
-    def test_voice_with_missing_tables_identical(self):
-        self.assert_golden("voice_tables_missing", fs.voice_fixture(), "Voice",
-                           fail={"sgs": (99, fs.TABLE_NOT_FOUND), "hss": (99, fs.TABLE_NOT_FOUND)})
+    def test_java_string_values_from_jdbc(self):
+        # an unattached JPype thread returns java.lang.String / java.lang.Long objects;
+        # before, the hub's isin() matched nothing -> {"subs_per_hub": []} (server, 23 Oct)
+        for complain_type, expected in (("Voice", voice_expected("voice")), ("Data", GOLDEN["data_full"]["body"])):
+            fixture = fs.voice_fixture() if complain_type == "Voice" else fs.data_fixture()
+            resp = self.post(body(complain_type), fs.FakeSmartcare(fixture, java_values=True))
+            self.assertEqual(resp.status_code, 200, complain_type)
+            got = json.loads(resp.content)
+            self.assertEqual(got, json.loads(json.dumps(expected)), complain_type)
+            job = self.job_record(resp["X-MI-Job-Id"])          # stored (pickled) without error
+            self.assertEqual(job["status"], "DONE")
+
+    def test_to_python(self):
+        self.assertEqual(smartcare.to_python(fs.JavaString("L21_LU0742_01")), "L21_LU0742_01")
+        self.assertIs(type(smartcare.to_python(fs.JavaString("x"))), str)
+        self.assertEqual(smartcare.to_python(fs.JavaLong("2101")), 2101)
+        self.assertEqual(smartcare.to_python_deep({fs.JavaString("k"): [fs.JavaLong("1")]}), {"k": [1]})
+        for v in (None, "a", 1, 1.5, True):
+            self.assertEqual(smartcare.to_python(v), v)
+
+    def test_voice_counts_real_subscribers_with_cs_mapping(self):
+        # original: every count 1 and HUB_Counts {} (the symptom reported on 23 Oct)
+        self.assertEqual(GOLDEN["voice"]["body"]["Cluster_Counts"], {"CL1": 1, "CL2": 1})
+        self.assertEqual(GOLDEN["voice"]["body"]["HUB_Counts"], {"HUB_Counts": {}})
+        resp = self.post(body("Voice"), fs.FakeSmartcare(fs.voice_fixture()))
+        self.assertEqual(json.loads(resp.content), voice_expected("voice"))
+        text = (self.job_dir(resp["X-MI-Job-Id"]) / "job.log").read_text()
+        self.assertIn("event=subscriber_column_mapped query=smartcare_network_CS_MOC column=callerno", text)
+        self.assertIn("event=subscriber_column_mapped query=smartcare_network_CS_MTC column=calledno", text)
+        resp = self.post(body("Voice"), fs.FakeSmartcare(
+            fs.voice_fixture(), fail={"sgs": (99, fs.TABLE_NOT_FOUND), "hss": (99, fs.TABLE_NOT_FOUND)}))
+        self.assertEqual(json.loads(resp.content), voice_expected("voice_tables_missing"))
 
     def test_error_shapes_on_old_path(self):
         fake = fs.FakeSmartcare(fs.data_fixture())
@@ -140,6 +205,15 @@ class LegacyContractTests(MITestBase):
             self.assertIn(text, json.loads(resp.content)["error"])
         self.assertEqual(fake.executions, [])
 
+    def test_complain_type_must_be_data_or_voice(self):
+        for path in ("/callflow/prototype/api/smartcare", "/callflow/mi/api/smartcare"):
+            for value in ("Both", None):
+                fake = fs.FakeSmartcare(fs.data_fixture())
+                resp = self.post(body(value), fake, path=path)
+                self.assertEqual((resp.status_code, json.loads(resp.content)),
+                                 (400, {"error": "Complain_Type must be Data or Voice"}), (path, value))
+                self.assertEqual(fake.executions, [])
+
     def test_validation_errors_are_400_on_mi_path(self):
         resp = self.post(body(msisdn_list=["99"]), fs.FakeSmartcare({}), path="/callflow/mi/api/smartcare")
         self.assertEqual(resp.status_code, 400)
@@ -155,7 +229,7 @@ class LegacyContractTests(MITestBase):
         self.assertIn("smartcare_unreachable", resp["X-MI-Warnings"])
 
     def test_missing_credentials_reported(self):
-        with override_settings(MI_SMARTCARE_USER=None, MI_SMARTCARE_PASSWORD=None):
+        with override_settings(STCC_SMARTCARE_DB_USER=None, STCC_SMARTCARE_DB_PASSWORD=None):
             req = APIRequestFactory().post("/x", body(), format="json")
             resp = views.LegacySmartcareView.as_view()(req)
             resp.render()
@@ -191,8 +265,8 @@ class RootCauseTests(MITestBase):
         self.assertEqual(json.loads(resp.content), GOLDEN["data_no_scf"]["body"])
         self.assertEqual(resp["X-MI-Partial"], "true")
         self.assertIn("query_failed", resp["X-MI-Warnings"])
-        # 3 attempts + 1 fallback retry, then given up (original: 5 + 4x5 = 25 SCF executions)
-        self.assertEqual(fake.count("scf"), 4)
+        # 3 attempts, no fallback re-runs (original: 5 + 4x5 = 25 SCF executions)
+        self.assertEqual(fake.count("scf"), 3)
         job = self.job_record(resp["X-MI-Job-Id"])
         failed = [w for w in job["warnings"] if w["code"] == "query_failed"][0]
         self.assertEqual((failed["query"], failed["kind"]), ("SCF_CCI_U_T_Data", "timeout"))
@@ -206,23 +280,22 @@ class RootCauseTests(MITestBase):
         self.assertEqual(w[0]["query"], "smartcare_SGS_Voice")
         self.assertIn("Table or view not found: ps.DETAIL_CDR_SGS_20741", w[0]["error"])
 
-    def test_voice_ims_filter_legacy_explains_empty_metrics(self):
-        resp = self.post(body("Voice"), fs.FakeSmartcare(fs.voice_fixture()))
-        warnings = self.job_record(resp["X-MI-Job-Id"])["warnings"]
-        self.assertIn({"code": "metric_unavailable", "metric": "DRA_NAME",
-                       "missing_columns": "Voice_Data_Flag"}, warnings)
-
-    @override_settings(MI_VOICE_IMS_FILTER="service_flag")
-    def test_voice_service_flag_filter(self):
+    def test_voice_dra_ocs_pcrf_come_from_voice_queries_as_is(self):
         resp = self.post(body("Voice"), fs.FakeSmartcare(fs.voice_fixture()))
         got = json.loads(resp.content)
-        self.assertEqual(got["DRA_NAME"], {"DRA_NAME_1": 1, "DRA_NAME_2": 1})
-        self.assertEqual(got["OCS_NAME"], {"OCS_NAME_1": 1, "OCS_NAME_2": 1})
-        self.assertEqual(got["PCRF"], {"VPCRF_NAME_1": 1, "VPCRF_NAME_2": 1})
-        expected = dict(GOLDEN["voice"]["body"])
-        for key in ("DRA_NAME", "OCS_NAME", "PCRF"):
-            expected[key] = got[key]
-        self.assertEqual(got, expected)                    # nothing else changes
+        for key, value in VOICE_IMS.items():
+            self.assertEqual(got[key], value, key)          # every row the query returned, no filter
+        codes = {w["code"] for w in self.job_record(resp["X-MI-Job-Id"])["warnings"]}
+        self.assertNotIn("metric_unavailable", codes)
+
+    def test_voice_dra_query_failure_only_empties_dra(self):
+        resp = self.post(body("Voice"), fs.FakeSmartcare(fs.voice_fixture(),
+                                                          fail={"dra_voice": (99, fs.TABLE_NOT_FOUND)}))
+        got = json.loads(resp.content)
+        self.assertEqual(got["DRA_NAME"], {})
+        self.assertEqual((got["OCS_NAME"], got["PCRF"]), (VOICE_IMS["OCS_NAME"], VOICE_IMS["PCRF"]))
+        warnings = self.job_record(resp["X-MI-Job-Id"])["warnings"]
+        self.assertIn("smartcare_DRA_Voice", [w.get("query") for w in warnings if w["code"] == "query_unavailable"])
 
     def test_window_crossing_midnight_reads_both_day_tables(self):
         fake = fs.FakeSmartcare(fs.data_fixture())
@@ -233,11 +306,17 @@ class RootCauseTests(MITestBase):
             self.post(body(start_date="2026-10-15T23:00", end_date="2026-10-16T01:00"), fake)
             self.assertEqual(fake.count("s1mme"), 1)
 
-    def test_fallback_reruns_of_successful_queries_removed(self):
+    def test_each_complain_type_runs_only_its_own_queries(self):
         fake = fs.FakeSmartcare(fs.data_fixture(False, False))
-        self.post(body(), fake)
-        self.assertEqual(len(fake.executions), 4)          # original: 10
+        resp = self.post(body(), fake)
+        self.assertEqual(json.loads(resp.content), GOLDEN["data_none"]["body"])
+        self.assertEqual(sorted(fake.executions), ["gbiups", "reg", "s1mme", "scf"])   # original: 10
         self.assertEqual(GOLDEN["data_none"]["legacy_executions"], 10)
+        fake = fs.FakeSmartcare(fs.voice_fixture(with_scf=True))
+        resp = self.post(body("Voice"), fake)
+        self.assertEqual(len(fake.executions), 10)          # the 10 Voice queries, no SCF/S1MME
+        self.assertEqual(fake.count("scf") + fake.count("s1mme"), 0)
+        self.assertNotIn("fallback", (self.job_dir(resp["X-MI-Job-Id"]) / "job.log").read_text())
 
     def test_aggregation_runs_once(self):
         with mock.patch.object(aggregation, "aggregate_data", wraps=aggregation.aggregate_data) as spy:
@@ -260,9 +339,15 @@ class RootCauseTests(MITestBase):
         fake = fs.FakeSmartcare(fs.data_fixture())
         self.assertEqual(json.loads(self.post(body(), fake).content), GOLDEN["data_full"]["body"])
         self.assertEqual(fake.count("reg"), 0)
-        fake = fs.FakeSmartcare(fs.voice_fixture(with_scf=True))
-        self.assertEqual(json.loads(self.post(body("Voice"), fake).content), GOLDEN["voice_with_scf"]["body"])
-        self.assertEqual(fake.count("scf") + fake.count("s1mme"), 0)
+
+    def test_hub_explains_missing_site_match(self):
+        pd.DataFrame({"SITE_ID": ["X0001"], "Hub": ["H"]}).to_excel(self.master, index=False)
+        resp = self.post(body("Voice"), fs.FakeSmartcare(fs.voice_fixture()))
+        self.assertEqual(json.loads(resp.content)["HUB_Counts"], {"subs_per_hub": []})
+        w = [w for w in self.job_record(resp["X-MI-Job-Id"])["warnings"] if w["code"] == "hub_no_site_match"]
+        self.assertEqual(w[0]["sample_sites"], "ALX0045,CAI0123")
+        self.assertIn("event=hub_sites cell_column=CELL_NAME",
+                      (self.job_dir(resp["X-MI-Job-Id"]) / "job.log").read_text())
 
 
 # --------------------------------------------------------------------------
@@ -302,13 +387,13 @@ class SmartcareTests(MITestBase):
     def test_max_attempts(self):
         fake = fs.FakeSmartcare(fs.data_fixture(), fail={"s1mme": (99, fs.SOCKET_TIMEOUT)})
         self.post(body(), fake)
-        self.assertEqual(fake.count("s1mme"), 1 + 1)       # main + one fallback retry, then given up
+        self.assertEqual(fake.count("s1mme"), 1)           # no fallback re-runs
 
     @override_settings(MI_SMARTCARE_RETRY_BUDGET_S=0)
     def test_retry_budget(self):
         fake = fs.FakeSmartcare(fs.data_fixture(), fail={"s1mme": (99, fs.SOCKET_TIMEOUT)})
         resp = self.post(body(), fake)
-        self.assertEqual(fake.count("s1mme"), 2)           # no retries once the budget is spent
+        self.assertEqual(fake.count("s1mme"), 1)           # no retries once the budget is spent
         self.assertIn("event=retry_budget_exhausted",
                       (self.job_dir(resp["X-MI-Job-Id"]) / "job.log").read_text())
         self.assertEqual(resp.status_code, 200)
@@ -367,19 +452,17 @@ class ParallelTests(MITestBase):
                 t0 = time.monotonic()
                 resp = self.post(body("Voice"), fs.FakeSmartcare(fs.voice_fixture()))
                 elapsed = time.monotonic() - t0
-        self.assertEqual(json.loads(resp.content), GOLDEN["voice"]["body"])
+        self.assertEqual(json.loads(resp.content), voice_expected("voice"))
         self.assertEqual(peak[0], 3)
-        self.assertLess(elapsed, 12 * 0.15 * 0.6)          # 12 executions; sequential would be ~1.8 s
+        self.assertLess(elapsed, 10 * 0.15 * 0.7)          # 10 executions; sequential would be ~1.5 s
 
-    def test_no_fallbacks_when_main_queries_return_no_rows(self):
+    def test_empty_results_run_only_the_main_queries(self):
         empty = {k: (cols, []) for k, (cols, _) in fs.voice_fixture().items()}
         fake = fs.FakeSmartcare(empty)
         resp = self.post(body("Voice"), fake)
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(len(fake.executions), 10)          # before: + SCF + S1MME fallbacks
+        self.assertEqual(len(fake.executions), 10)          # the production log showed 14 (with fallbacks)
         self.assertEqual(fake.count("scf") + fake.count("s1mme"), 0)
-        self.assertIn('reason="main queries returned no rows"',
-                      (self.job_dir(resp["X-MI-Job-Id"]) / "job.log").read_text())
 
 
 # --------------------------------------------------------------------------
@@ -391,7 +474,7 @@ class OutputAndLoggingTests(MITestBase):
         resp = self.post(body("Voice"), fs.FakeSmartcare(fs.voice_fixture()))
         d = self.job_dir(resp["X-MI-Job-Id"])
         self.assertEqual(d.parent.parent.parent, self.mi_root)
-        for name in ("job.log", "request.json", "result.json", "summary.json", "sc_nodes.csv",
+        for name in ("job.log", "request.json", "result.json", "summary.json", "sc_nodes.csv", "sc_nodes_raw.csv",
                      "sc_nodes_before_voice.csv", "sc_data.csv", "matched_master.csv"):
             self.assertTrue((d / name).exists(), name)
         for name in ("sc_nodes.csv", "sc_nodes_before_voice.csv", "sc_data.csv"):
@@ -411,7 +494,7 @@ class OutputAndLoggingTests(MITestBase):
         jid = resp["X-MI-Job-Id"]
         text = (self.job_dir(jid) / "job.log").read_text()
         for stage in ("wait_for_slot", "input_validation", "database_connection", "query_execution",
-                      "fallback_queries", "data_validation", "aggregation", "hub_metrics", "result_generation"):
+                      "data_validation", "aggregation", "hub_metrics", "result_generation"):
             self.assertIn(f"event=stage_done stage={stage}", text)
         self.assertIn("name=SCF_CCI_U_T_Data table=20741 attempt=1 ok=False kind=timeout", text)
         self.assertIn("name=SCF_CCI_U_T_Data table=20741 attempt=2 ok=True", text)

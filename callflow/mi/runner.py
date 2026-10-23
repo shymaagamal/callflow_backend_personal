@@ -1,12 +1,13 @@
 """
 Runs one MI job end to end: slot -> heartbeat -> pipeline -> job record.
-Used by the MI worker process and by the local fallback executors.
+Used by the MI worker process and, when no worker is alive, by the local executors.
 """
 import logging
 
 from django import db
 
 from . import config, jobs, outputs, pipeline
+from .smartcare import to_python_deep
 from .mi_logging import JobContext, setup_app_logging
 
 logger = logging.getLogger("callflow.mi.runner")
@@ -36,6 +37,7 @@ def execute_job(job_id, params, fp=None, mode="worker", day=None, connect_fn=Non
                     jobs.update_job(job_id, status="RUNNING", step="analysis", progress_percent=10,
                                     started_by=mode)
                     http_status, body = pipeline.run(params, ctx, connect_fn=connect_fn)
+                    body = to_python_deep(body)      # never pickle Java objects into Redis
             finally:
                 slot.__exit__(None, None, None)
 
