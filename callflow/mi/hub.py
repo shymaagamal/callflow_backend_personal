@@ -17,6 +17,17 @@ _lock = threading.Lock()
 _cache = {}
 
 
+
+def to_native(obj): 
+    """Recursively turn JPype/Java objects into pure Python types so pickle works."""
+    if obj is None or isinstance(obj, (bool, int, float, str)): 
+        return obj 
+    if isinstance(obj, dict): 
+        return {to_native(k): to_native(v) for k, v in obj.items()} 
+    if isinstance(obj, (list, tuple)): 
+        return type(obj)(to_native(x) for x in obj) # java.lang.String, BigDecimal, Timestamp, etc. try: return str(obj) except Exception: return repr(obj) 
+
+ 
 def master_sheet(path=None):
     path = str(path or settings.MASTER_SHEET_PATH)
     st = os.stat(path)
@@ -62,11 +73,11 @@ def affected_hub_metrics(nodesdata, affected_cells, ctx, job_dir):
 
         nodesdata.loc[:, 'modified_site_name'] = nodesdata['modified_site_name'].replace('', None)
         subs_per_site = nodesdata.groupby('modified_site_name')['MSISDN'].nunique().dropna().to_dict()
-
         master_df = master_sheet()
         site_list = list(subs_per_site.keys())
         matched_df = master_df[master_df['SITE_ID'].isin(site_list)]
         if matched_df.empty:
+            ctx.event("site_metrics", sites=subs_per_site, cells=len(affected_cells))
             ctx.event("hub_metrics_skipped", reason="no SITE_ID match", sites=len(site_list))
             return {'subs_per_hub': []}
 

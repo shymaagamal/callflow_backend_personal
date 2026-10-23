@@ -140,9 +140,12 @@ def run(params, ctx, connect_fn=None):
                     main_ok.add(id(template))
                 frames.append(outcome.frame)
         result = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-
+        csv_path = outputs.export_csv(result, 'sc_nodes_before_fallback.csv', ctx.dir, job_log=ctx.log)
+        ctx.event("extract csv before fallback", message=f"MI job {ctx.job_id} complain_type={req.complain_type} rows={len(result)} csv={csv_path}")
         with ctx.stage("fallback_queries"):
             result = _apply_fallbacks(result, executor, main_ok, ctx, req.complain_type)
+            csv_path = outputs.export_csv(result, 'sc_nodes_after_fallback.csv', ctx.dir, job_log=ctx.log)
+            ctx.event("extract csv after fallback", message=f"MI job {ctx.job_id} complain_type={req.complain_type} rows={len(result)} csv={csv_path}")
         ctx.event("smartcare_sessions", opened=pool.connects)
         pool.close()                           # no more Smartcare work in this job
 
@@ -163,6 +166,7 @@ def run(params, ctx, connect_fn=None):
                 metrics, cells = aggregation.aggregate_voice(result, ctx, export=export)
 
         with ctx.stage("hub_metrics", cells=len(cells)):
+            ctx.event("hub_metrics_start", complain_type=req.complain_type, cells=cells)
             hub_counts = hub.affected_hub_metrics(result, cells, ctx, ctx.dir)
 
         with ctx.stage("result_generation"):

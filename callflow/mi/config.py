@@ -86,11 +86,11 @@ def log_level() -> str:
 
 # ------------------------------------------------------------ Smartcare
 def smartcare_user():
-    return _get("MI_SMARTCARE_USER", None)
+    return _get("STCC_SMARTCARE_DB_USER", None)
 
 
 def smartcare_password():
-    return _get("MI_SMARTCARE_PASSWORD", None)
+    return _get("STCC_SMARTCARE_DB_PASSWORD", None)
 
 
 def smartcare_jdbc_url() -> str:
@@ -162,7 +162,7 @@ def voice_ims_filter() -> str:
                      these three metrics are always empty)
       "service_flag" Service_flag == 'VOLTE' (the column the Voice queries return)
     """
-    value = str(_get("MI_VOICE_IMS_FILTER", "legacy")).lower()
+    value = str(_get("MI_VOICE_IMS_FILTER", "service_flag")).lower()
     return value if value in ("legacy", "service_flag") else "legacy"
 
 

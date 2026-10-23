@@ -70,6 +70,7 @@ def convert_java_types(df: pd.DataFrame) -> pd.DataFrame:
     return df
 def process_sitename(data,cell_col_name ,logs_file):
     try:
+        col = data[cell_col_name].fillna('').astype(str)
         data['site_name'] = (
             data[cell_col_name]
             .str.split('_L')

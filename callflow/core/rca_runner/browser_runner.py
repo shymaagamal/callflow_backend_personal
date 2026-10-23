@@ -34,7 +34,8 @@ import logging
 import re
 import time
 from pathlib import Path
-
+import asyncio
+import threading
 logger = logging.getLogger(__name__)
 
 TOOL_ORIGIN = "http://rca-runner.local"
@@ -191,9 +192,15 @@ def run_rca_tool(*, request_id, tool_path, files_listing, resolve_file, start_da
     missing_vendor = [f for _, f in VENDOR_FILES if not (VENDOR_DIR / f).is_file()]
     if missing_vendor:
         raise RCARunError("RCA_VENDOR_MISSING", f"missing local libraries in {VENDOR_DIR}: {missing_vendor}")
-
+    
+    try: 
+        asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
     try:
         from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+       
     except Exception as e:
         raise RCARunError("BROWSER_START_FAILED", f"playwright is not installed: {e}")
 
