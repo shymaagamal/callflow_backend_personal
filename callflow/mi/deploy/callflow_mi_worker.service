@@ -1,0 +1,33 @@
+# /etc/systemd/system/callflow_mi_worker.service
+# MI background worker - same code, settings and virtualenv as the CallFlow portal.
+# The Gunicorn unit (callflow_gunicorn.service) is not modified.
+[Unit]
+Description=CallFlow MI (Smartcare analysis) worker
+After=network-online.target redis.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/home/AutomationProjects/CallFlowTool/backend/callflow_portal
+Environment=DJANGO_SETTINGS_MODULE=callflow_portal.settings
+Environment=PYTHONPATH=/home/AutomationProjects/CallFlowTool/backend/callflow_portal
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/AutomationProjects/CallFlowTool/backend/portalenv/bin/python -m callflow.mi.worker
+
+# keep CORE/NCI responsive: lower CPU/IO priority and hard caps for this process
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+CPUQuota=100%
+MemoryMax=4G
+
+Restart=always
+RestartSec=10
+# SIGTERM -> the worker finishes the current job, then exits
+KillSignal=SIGTERM
+TimeoutStopSec=1800
+
+[Install]
+WantedBy=multi-user.target

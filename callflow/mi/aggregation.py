@@ -15,7 +15,7 @@ smartcareOutput_Aggregated_Voice used, so values are unchanged. What changed:
 """
 import pandas as pd
 
-from . import catalog, config
+from . import catalog
 
 
 def distinct_count(df, group_col, value_col):
@@ -148,12 +148,6 @@ VOICE_KEYS = ("Suspected_Sites", "Suspected_Cells", "Cluster_Counts", "Region_Co
               "CSCF_Name", "AS_Name", "MSC_Name", "DRA_NAME", "OCS_NAME", "PCRF")
 
 
-def _voice_ims_rows(ims):
-    if config.voice_ims_filter() == "service_flag":
-        return ims[ims['Service_flag'].astype(str).str.upper() == 'VOLTE']
-    return ims[ims['Voice_Data_Flag'] == 'Voice']
-
-
 def aggregate_voice(nodes, ctx, export=None):
     """Returns (metrics dict keyed like the Voice response minus HUB_Counts, cell_list)."""
     out = {k: {} for k in VOICE_KEYS}
@@ -196,20 +190,17 @@ def aggregate_voice(nodes, ctx, export=None):
     m.compute("AS_Name", lambda: distinct_count(ims, 'AS_NAME', 'IMPU_TEL_URI1'), ims)
     m.compute("MSC_Name", lambda: distinct_count(ims, 'MSC_NAME', 'MSISDN'), ims)
 
-    flag = catalog.voice_flag_column()
-    if flag in ims.columns:
-        ims_rows = _voice_ims_rows(ims)
-        if config.voice_ims_filter() == "legacy" and ims_rows.empty:
-            ctx.add_warning("voice_ims_filter_empty", filter="Voice_Data_Flag == 'Voice'",
-                            note="Voice queries return Service_flag; see MI_VOICE_IMS_FILTER")
-    else:
-        ims_rows = ims
-    m.compute("DRA_NAME", lambda: distinct_count(ims_rows, 'DRA_NAME', 'MSISDN'), ims)
-    m.compute("OCS_NAME", lambda: distinct_count(ims_rows, 'OCS_NAME', 'MSISDN'), ims)
-    m.compute("PCRF", lambda: distinct_count(ims_rows, 'VPCRF_NAME', 'MSISDN'), ims)
+    # DRA / OCS / PCRF: taken as is from what smartcare_DRA_Voice / _OCS_Voice /
+    # _PCRF_Voice return (only those rows carry DRA_NAME / OCS_NAME / VPCRF_NAME;
+    # distinct_count ignores rows where the name is empty). No row filter - the
+    # old Voice_Data_Flag == 'Voice' filter matched no Voice row, so these three
+    # metrics were always empty.
+    m.compute("DRA_NAME", lambda: distinct_count(ims, 'DRA_NAME', 'MSISDN'), ims)
+    m.compute("OCS_NAME", lambda: distinct_count(ims, 'OCS_NAME', 'MSISDN'), ims)
+    m.compute("PCRF", lambda: distinct_count(ims, 'VPCRF_NAME', 'MSISDN'), ims)
 
     ctx.event("aggregation_result", complain_type=ctx.complain_type, rows=len(data),
-              base_rows=0 if base is None else len(base), ims_filter=config.voice_ims_filter(),
+              base_rows=0 if base is None else len(base),
               unavailable=",".join(m.unavailable) or "none",
               **{f"n_{k}": len(v) for k, v in out.items()})
     return out, list(out["Suspected_Cells"].keys())
