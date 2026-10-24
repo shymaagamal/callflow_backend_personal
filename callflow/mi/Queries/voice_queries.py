@@ -247,6 +247,46 @@ B.LAYER3NAME,
 B.LAYER2NAME
 ORDER BY A.IMPU_TEL_URI, myday;"""
 
+smartcare_nodes_REG_Voice ="""SELECT
+from_unixtime(
+floor(unix_timestamp(from_unixtime(STARTTIME)) / 300) * 300
+, 'yyyy/MM/dd HH:mm') AS myday,
+IMPU_TEL_URI1,
+D.NE_NAME as p_cscf_Name,
+E.NE_NAME as I_cscf_Name,
+G.NE_NAME as S_cscf_Name,
+I.NE_NAME as AS_NAME
+from cs.tdr_ims_register_sip_comm_{tablename} a
+LEFT JOIN 
+nethouse.dim_dyn_ims_ne d 
+ON a.p_cscf_id = d.GLOBAL_NE_ID
+LEFT JOIN 
+nethouse.dim_dyn_ims_ne E
+ON a.i_cscf_id = E.GLOBAL_NE_ID
+LEFT JOIN 
+nethouse.dim_dyn_ims_ne G
+ON a.s_cscf_id = G.GLOBAL_NE_ID
+LEFT JOIN 
+nethouse.dim_dyn_ims_ne H
+ON a.hss_id = H.GLOBAL_NE_ID
+LEFT JOIN 
+nethouse.dim_dyn_ims_ne I
+ON a.as_id = I.GLOBAL_NE_ID
+LEFT JOIN 
+nethouse.dim_dyn_ims_ne K
+ON a.sgw_id = K.GLOBAL_NE_ID
+LEFT JOIN 
+nethouse.cfg_ims_ne_ip F
+Where IMPU_TEL_URI1 IN {msisdn_tuple}
+AND STARTTIME BETWEEN unix_timestamp('{start_date}') 
+AND unix_timestamp('{end_date}')
+Group BY
+myday,
+IMPU_TEL_URI1,
+p_cscf_Name,
+I_cscf_Name,
+S_cscf_Name,
+AS_NAME"""
 
 smartcare_Voice_QUERIES = {
 	'smartcare_DRA_Voice':smartcare_DRA_Voice,
@@ -256,4 +296,5 @@ smartcare_Voice_QUERIES = {
     'smartcare_network_CS_MTC':smartcare_network_CS_MTC,
     'smartcare_network_voice_VoLTE_CFR_CSR_MO_CALL':smartcare_network_voice_VoLTE_CFR_CSR_MO_CALL,
     'smartcare_network_VoLTE_CFR_CSR_MT_CALL_voice':smartcare_network_VoLTE_CFR_CSR_MT_CALL_voice,
+    'smartcare_nodes_REG_Voice':smartcare_nodes_REG_Voice
 }

@@ -131,6 +131,7 @@ def derive_sites(_entities, ctx):
 
 def fetch_smartcare(ctx):
     """The SmartcareSiteKpiAPIView implementation for the sites and this request's range."""
+    
     return {"site_run": True,
             "site_kpis": fetch_smartcare_site_kpis(ctx["sitelist"], ctx.get("log_path", ""),
                                                    start=ctx["start_dt"], end=ctx["end_dt"])}

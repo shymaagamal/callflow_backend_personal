@@ -65,7 +65,7 @@ DATA_METRICS = OrderedDict([
     ("rat_counts", DATA_BASE + ("RAT",)),
     ("DRA_NAME", ("MSISDN", "Voice_Data_Flag", "DRA_NAME")),
     ("OCS_NAME", ("MSISDN", "Voice_Data_Flag", "OCS_NAME")),
-    ("PCRF", ("MSISDN", "Voice_Data_Flag", "VPCRF_NAME")),
+    ("VPCRF_NAME", ("MSISDN", "Voice_Data_Flag", "VPCRF_NAME")),
     ("region_counts", DATA_BASE + ("REGION",)),
     ("subregion_counts", DATA_BASE + ("SUBREGION",)),
     ("sgsn_counts", DATA_BASE),
@@ -88,5 +88,6 @@ def voice_metrics():
         ("MSC_Name", ("MSC_NAME", "MSISDN")),
         ("DRA_NAME", ("MSISDN", "DRA_NAME")),           # from smartcare_DRA_Voice, as returned
         ("OCS_NAME", ("MSISDN", "OCS_NAME")),           # from smartcare_OCS_Voice
-        ("PCRF", ("MSISDN", "VPCRF_NAME")),             # from smartcare_PCRF_Voice
+        ("PCRF_NAME", ("MSISDN", "PCRF_NAME")),             # from smartcare_PCRF_Voice
+        ("MME_Name", ("MSISDN", "MME_Name")),             # from smartcare_MME_Voice
     ])
