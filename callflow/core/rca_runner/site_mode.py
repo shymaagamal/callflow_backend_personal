@@ -11,7 +11,7 @@ POST /callflow/api/rca/sites/run   (site run)
     {"sitelist": ["SITE_A", "SITE_B"], "start": "...", "end": "..."}
 
 The site run does not query Trino. The requested sites go straight to the
-systems, through the same retrieval / analysis / RCA-file code as the MSISDN run:
+systems' existing retrieval functions (rca_runner/collect.py):
     NPP        nppIntegration(entity_type="site")  (NPP site endpoint)
     Viavi      viaviQueries(sites)
     Remedy     remedyTicketsData(sites)
@@ -22,7 +22,6 @@ systems, through the same retrieval / analysis / RCA-file code as the MSISDN run
 
 import re
 
-from ..orchestration.customer_counts import CTX_KEY
 from ..services.smartcare_site_kpi_service import fetch_smartcare_site_kpis
 
 _MSISDN_KEYS = ("msisdn", "msisdn_list")
@@ -117,23 +116,19 @@ def parse_site_request(data):
 
 
 # ------------------------------------------------------------ site sources --
-def get_sites(ctx):
-    """Replaces the Trino cell lookup in the site run: the NPP entities are the
-    requested sites themselves (NPP is queried with entity_type="site")."""
-    ctx[CTX_KEY] = None          # no subscribers in a site run -> customer counts unknown
-    return list(ctx["sitelist"])
-
-
-def derive_sites(_entities, ctx):
-    """Viavi / Remedy get the requested sites as given."""
-    return list(ctx["sitelist"])
-
-
 def fetch_smartcare(ctx):
-    """The SmartcareSiteKpiAPIView implementation for the sites and this request's range."""
-    return {"site_run": True,
-            "site_kpis": fetch_smartcare_site_kpis(ctx["sitelist"], ctx.get("log_path", ""),
-                                                   start=ctx["start_dt"], end=ctx["end_dt"])}
+    """The SmartcareSiteKpiAPIView implementation for the sites and this request's range.
+
+    fetch_smartcare_site_kpis reports "no cells for these sites" and per-query
+    failures inside its result instead of raising; a result with no rows and only
+    query errors is a failure, not an empty success."""
+    kpis = fetch_smartcare_site_kpis(ctx["sitelist"], ctx.get("log_path", ""),
+                                     start=ctx["start_dt"], end=ctx["end_dt"])
+    rows = sum(len(v) for w in (kpis.get("windows") or {}).values()
+               for v in w.values() if isinstance(v, list))
+    if not rows and kpis.get("errors"):
+        raise RuntimeError(f"Smartcare site KPI queries failed: {kpis['errors']}")
+    return {"site_run": True, "site_kpis": kpis}
 
 
 def filter_csv(sites):

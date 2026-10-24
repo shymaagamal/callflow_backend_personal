@@ -62,11 +62,9 @@ def _output_dir():
 class AnalysisOrchestratorAPIView(JobBackedAPIView):
     job_type = "orchestrated_analysis"
     # Subclasses (rca_run) can keep their request-scoped files and logs apart,
-    # e.g. under OUTPUT_DIR/rca_engine. None = the existing OUTPUT_DIR layout.
+    # e.g. under OUTPUT_DIR/MI. None = the existing OUTPUT_DIR layout.
     output_subdir = None
     log_prefix = "orchestrated"
-    # Systems expected to write an RCA file (the RCA site run has no Trino file).
-    file_systems = FILE_SYSTEMS
 
     def _base(self):
         base = _output_dir()
@@ -88,14 +86,14 @@ class AnalysisOrchestratorAPIView(JobBackedAPIView):
         }
 
     def run_job(self, job_id, request_logger, log_path, ts, window, msisdn_list,
-                complain_type, imsi, query_time_range, **extra):
+                complain_type, imsi, query_time_range):
         request_id = job_id  # request_id IS the job id -> naturally isolated
         base = self._base()
         tlog = TaskEventLogger(request_id, request_logger, base)
         tlog.event("ORCHESTRATOR", "analysis", "STARTED",
                    detail=f"msisdns={len(msisdn_list)}")
 
-        rf.init_request(base, request_id, self.file_systems)
+        rf.init_request(base, request_id, FILE_SYSTEMS)
 
         # Auto-provision the server-side threshold file into the request dir so the
         # RCA tool receives it without a manual browse. Path is settings-derived
@@ -124,8 +122,6 @@ class AnalysisOrchestratorAPIView(JobBackedAPIView):
             "_smartcare_holder": {},
             "_fallback_wait_seconds": FALLBACK_WAIT_SECONDS,
         }
-        # Subclass-specific request inputs (rca_run: mode, sitelist) for its sources.
-        context.update(extra)
 
         # -- live dashboard values (pushed incrementally as systems finish) --
         dashboard = {}
@@ -139,7 +135,7 @@ class AnalysisOrchestratorAPIView(JobBackedAPIView):
                 job_manager.update_job(job_id, dashboard=dict(dashboard))
 
         # Total complaints is known from the input immediately.
-        merge_dash({"totalComplaints": len(msisdn_list) if msisdn_list else None})
+        merge_dash({"totalComplaints": len(msisdn_list)})
 
         # -- detailed structures the popups + abnormal chart consume ---------
         # Streamed into the job as each system finishes so details load
@@ -358,12 +354,8 @@ class AnalysisOrchestratorAPIView(JobBackedAPIView):
         }
 
     # -- Source wrappers: RCA files + dashboard + logging + cell fallback -----
-    def _default_sources(self):
-        """The unwrapped data sources; subclasses may replace individual ones."""
-        return default_sources()
-
     def _build_sources(self, base, request_id, tlog, merge_dash, detail_sinks=None):
-        sources = self._default_sources()
+        sources = default_sources()
         detail_sinks = detail_sinks or {}
 
         def write_file_safe(system, extract, data, ctx):

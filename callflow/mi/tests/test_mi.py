@@ -44,7 +44,10 @@ VOICE_CS_FIX = {
 VOICE_IMS = {
     "DRA_NAME": {"DRA_NAME_1": 1, "DRA_NAME_2": 1, "DRA_NAME_3": 1},
     "OCS_NAME": {"OCS_NAME_1": 1, "OCS_NAME_2": 1, "OCS_NAME_3": 1},
-    "PCRF": {"VPCRF_NAME_1": 1, "VPCRF_NAME_2": 1, "VPCRF_NAME_3": 1},
+    "PCRF": {"PCRF_NAME_1": 1, "PCRF_NAME_2": 1},            # smartcare_DRA_Voice.PCRF_NAME
+    # smartcare_nodes_REG_Voice is no longer a Voice query -> no p_cscf_Name / AS_NAME
+    "CSCF_Name": {},
+    "AS_Name": {},
 }
 
 
@@ -285,15 +288,17 @@ class RootCauseTests(MITestBase):
         got = json.loads(resp.content)
         for key, value in VOICE_IMS.items():
             self.assertEqual(got[key], value, key)          # every row the query returned, no filter
-        codes = {w["code"] for w in self.job_record(resp["X-MI-Job-Id"])["warnings"]}
-        self.assertNotIn("metric_unavailable", codes)
+        unavailable = {w["metric"] for w in self.job_record(resp["X-MI-Job-Id"])["warnings"]
+                       if w["code"] == "metric_unavailable"}
+        # only the two metrics that need smartcare_nodes_REG_Voice (no longer a Voice query)
+        self.assertEqual(unavailable, {"CSCF_Name", "AS_Name"})
 
-    def test_voice_dra_query_failure_only_empties_dra(self):
+    def test_voice_dra_query_failure_only_empties_its_metrics(self):
         resp = self.post(body("Voice"), fs.FakeSmartcare(fs.voice_fixture(),
                                                           fail={"dra_voice": (99, fs.TABLE_NOT_FOUND)}))
         got = json.loads(resp.content)
-        self.assertEqual(got["DRA_NAME"], {})
-        self.assertEqual((got["OCS_NAME"], got["PCRF"]), (VOICE_IMS["OCS_NAME"], VOICE_IMS["PCRF"]))
+        self.assertEqual((got["DRA_NAME"], got["OCS_NAME"], got["PCRF"]), ({}, {}, {}))   # all from that query
+        self.assertEqual(got["Suspected_Cells"], VOICE_CS_FIX["Suspected_Cells"])         # others unaffected
         warnings = self.job_record(resp["X-MI-Job-Id"])["warnings"]
         self.assertIn("smartcare_DRA_Voice", [w.get("query") for w in warnings if w["code"] == "query_unavailable"])
 
@@ -310,11 +315,11 @@ class RootCauseTests(MITestBase):
         fake = fs.FakeSmartcare(fs.data_fixture(False, False))
         resp = self.post(body(), fake)
         self.assertEqual(json.loads(resp.content), GOLDEN["data_none"]["body"])
-        self.assertEqual(sorted(fake.executions), ["gbiups", "reg", "s1mme", "scf"])   # original: 10
+        self.assertEqual(sorted(fake.executions), ["gbiups", "s1mme", "scf", "sgid_data"])   # original: 10
         self.assertEqual(GOLDEN["data_none"]["legacy_executions"], 10)
         fake = fs.FakeSmartcare(fs.voice_fixture(with_scf=True))
         resp = self.post(body("Voice"), fake)
-        self.assertEqual(len(fake.executions), 10)          # the 10 Voice queries, no SCF/S1MME
+        self.assertEqual(len(fake.executions), 7)           # the 7 Voice queries, no SCF/S1MME
         self.assertEqual(fake.count("scf") + fake.count("s1mme"), 0)
         self.assertNotIn("fallback", (self.job_dir(resp["X-MI-Job-Id"]) / "job.log").read_text())
 
@@ -454,14 +459,14 @@ class ParallelTests(MITestBase):
                 elapsed = time.monotonic() - t0
         self.assertEqual(json.loads(resp.content), voice_expected("voice"))
         self.assertEqual(peak[0], 3)
-        self.assertLess(elapsed, 10 * 0.15 * 0.7)          # 10 executions; sequential would be ~1.5 s
+        self.assertLess(elapsed, 7 * 0.15 * 0.75)          # 7 executions; sequential would be ~1.05 s
 
     def test_empty_results_run_only_the_main_queries(self):
         empty = {k: (cols, []) for k, (cols, _) in fs.voice_fixture().items()}
         fake = fs.FakeSmartcare(empty)
         resp = self.post(body("Voice"), fake)
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(len(fake.executions), 10)          # the production log showed 14 (with fallbacks)
+        self.assertEqual(len(fake.executions), 7)           # the production log showed 14 (with fallbacks)
         self.assertEqual(fake.count("scf") + fake.count("s1mme"), 0)
 
 
@@ -663,6 +668,10 @@ class JobTests(MITestBase):
 
     def test_catalog_unchanged(self):
         self.assertEqual(list(catalog.query_set("Data")),
-                         ["smartcare_S1mme_nodes", "smartcare_nodes_REG_Voice", "smartcare_GBIUPS_nodes",
+                         ["smartcare_SGIDiameter_nodes", "smartcare_S1mme_nodes", "smartcare_GBIUPS_nodes",
                           "SCF_CCI_U_T_Data"])
-        self.assertEqual(len(catalog.query_set("Voice")), 10)
+        self.assertEqual(list(catalog.query_set("Voice")),
+                         ["smartcare_DRA_Voice", "smartcare_SGS_Voice", "smartcare_HSS_Voice",
+                          "smartcare_network_CS_MOC", "smartcare_network_CS_MTC",
+                          "smartcare_network_voice_VoLTE_CFR_CSR_MO_CALL",
+                          "smartcare_network_VoLTE_CFR_CSR_MT_CALL_voice"])

@@ -9,17 +9,18 @@ GET  /callflow/api/rca/run/{id}                   -> PENDING/RUNNING {request_id
                                                      DONE: the RCA report (rca_runner/report.py)
                                                      FAILED: {request_id, status, error: {code, message}}
 GET  /callflow/api/rca/run/{id}/findings.csv      -> one row per finding
-GET  /callflow/api/rca/run/{id}/diagnostics       -> logs, file loading, browser and pipeline detail
+GET  /callflow/api/rca/run/{id}/diagnostics       -> collection, file loading and browser detail
 
-One request runs every CallFlow system through the EXISTING orchestration
-(AnalysisOrchestratorAPIView.run_job: same DAG, services, analyzers, RCA file
-writers), then runs the EXISTING RCA HTML tool on that request's files in
-headless Chromium (rca_runner.browser_runner) and returns the tool's own
-results. No RCA logic is re-implemented in Python.
+A request does NOT run the CallFlow orchestrator plan (no system analyzers, no
+summary cards). It calls the systems' existing retrieval functions
+(rca_runner/collect.py), writes their raw results with the existing RCA file
+writers, runs the EXISTING RCA HTML tool on that request's files in headless
+Chromium (rca_runner/browser_runner.py) and returns the tool's own results.
+No RCA logic is re-implemented in Python.
 
 Files, logs and the final result for each request live under
-    OUTPUT_DIR/rca_engine/rca/{request_id}/      (CSV inputs, manifest.json, logs/, rca_result.json,
-                                          rca_tool_log.json, browser_console.log)
+    OUTPUT_DIR/rca_engine/rca/{request_id}/      (CSV inputs, manifest.json, rca_result.json,
+                                          rca_diagnostics.json, rca_tool_log.json, browser_console.log)
 so concurrent requests never share a file.
 
 Concurrency (shared by all Gunicorn workers, see rca_runner.limits):
@@ -39,12 +40,11 @@ from rest_framework.response import Response
 
 from ..jobs import job_manager
 from ..orchestration import rca_files as rf
-from ..orchestration.pipeline import FILE_SYSTEMS
-from ..rca_runner import limits, site_mode
+from ..rca_runner import collect, limits, site_mode
 from ..rca_runner.browser_runner import RCARunError, run_rca_tool
 from ..rca_runner.report import build_report, findings_csv
 from .base import BaseCallFlowAPIView, parse_time_window
-from .orchestrated_analysis import AnalysisOrchestratorAPIView
+from .job_base import JobBackedAPIView
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,6 @@ RESULT_FILE = "rca_result.json"          # the public report
 ERROR_FILE = "rca_error.json"
 DIAGNOSTICS_FILE = "rca_diagnostics.json"  # pipeline + tool detail, never in the report
 CSV_FILE = "rca_findings.csv"
-SITE_KPI_FILE = "smartcare_site_kpis.json"   # site run: the Smartcare site-KPI result (diagnostics)
 
 
 def _setting(name, default):
@@ -71,15 +70,26 @@ def _write_json(path, data):
     tmp.replace(path)
 
 
-class RCARunAPIView(AnalysisOrchestratorAPIView):
+class RCARunAPIView(JobBackedAPIView):
+    """POST /callflow/api/rca/run -- MSISDN run.
+
+    Retrieval only (rca_runner/collect.py): Trino cells, the MSISDN Smartcare
+    query, NPP for the cells, Viavi/Remedy for the cells' sites, Splunk; their raw
+    results become this request's RCA files; the RCA tool analyses them. The
+    CallFlow orchestrator plan (system analyzers, summary cards) is NOT run.
+    """
     job_type = "rca_run"
     output_subdir = "rca_engine"
     log_prefix = "rca_run"
     link_base = "/callflow/api/rca/run"
+    site_run = False
+
+    def _base(self):
+        return Path(settings.OUTPUT_DIR) / self.output_subdir
 
     def get_log_file(self, prefix, start_date, end_date):
-        # Same contract as the base class, but the request log lives under rca_engine/logs.
-        logs_dir = Path(settings.OUTPUT_DIR) / self.output_subdir / "logs"
+        # The request log lives under rca_engine/logs.
+        logs_dir = self._base() / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
         return logs_dir / f"{prefix}.txt", f"{start_date}_{end_date}"
 
@@ -94,12 +104,9 @@ class RCARunAPIView(AnalysisOrchestratorAPIView):
             "query_time_range": self.build_analysis_time_windows(window["start_dt"], window["end_dt"]),
         }
 
-    def _report_systems(self, systems):
-        return systems
-
-    def _request_input(self, msisdn_list, complain_type, extra):
-        return {"mode": "msisdn", "sites": None, "msisdn_count": len(msisdn_list),
-                "complain_type": complain_type}
+    def _request_input(self, ctx):
+        return {"mode": "msisdn", "sites": None, "msisdn_count": len(ctx["msisdn_list"]),
+                "complain_type": ctx["complain_type"]}
 
     def get(self, request, job_id=None):
         if not job_id:
@@ -127,9 +134,19 @@ class RCARunAPIView(AnalysisOrchestratorAPIView):
         request_id = job_id
         base = self._base()
         rdir = rf.request_dir(base, request_id)
-        lock_dir = Path(settings.OUTPUT_DIR) / self.output_subdir / "locks"
+        lock_dir = base / "locks"
         wait_s = float(_setting("RCA_RUN_SLOT_WAIT_S", 1800))
         t0 = time.monotonic()
+        ctx = {
+            "request_id": request_id, "msisdn_list": msisdn_list,
+            "start_dt": window["start_dt"], "end_dt": window["end_dt"],
+            "complain_type": complain_type, "imsi": imsi, "log_path": log_path, "ts": ts,
+            "window": window, "query_time_range": query_time_range,
+            "request_logger": request_logger, "base_output_dir": base,
+            "_trino_sql_sink": lambda sql: request_logger.info(
+                f"[RCA-COLLECT] request_id={request_id} trino SQL:\n{sql}"),
+            **extra,
+        }
 
         def queued(stage):
             last = [0.0]
@@ -141,32 +158,45 @@ class RCARunAPIView(AnalysisOrchestratorAPIView):
                                            step=f"queued: waiting for a free {stage} slot ({waited:.0f}s)")
             return on_wait
 
+        def on_change(states):
+            done = sum(1 for s in states.values() if s != "RUNNING")
+            job_manager.update_job(job_id, status="RUNNING", step="collecting RCA input data",
+                                   progress_percent=int(90 * done / max(len(states), 1)), systems=states)
+
+        collected = {"systems": {}}
+        rca = {}
+        listing = {}
         try:
-            # 1) every system, through the existing orchestration (unchanged)
+            # 1) raw data from the systems -> this request's RCA files (no portal analysis)
             with limits.slot(lock_dir, "rca_run_systems", _setting("RCA_RUN_MAX_SYSTEM_JOBS", 2),
                              wait_s, on_wait=queued("systems")):
-                request_logger.info(f"[RCA-RUN] request_id={request_id} running CallFlow systems")
                 request_logger.info(f"[RCA-RUN] request_id={request_id} job_type={self.job_type} "
-                                    f"msisdns={len(msisdn_list)} sites={extra.get('sitelist')}")
-                analysis = super().run_job(job_id, request_logger, log_path, ts, window, msisdn_list,
-                                           complain_type, imsi, query_time_range, **extra)
-            systems = self._report_systems(analysis.get("systems") or {})
+                                    f"collecting RCA inputs msisdns={len(msisdn_list)} "
+                                    f"sites={extra.get('sitelist')}")
+                collected = collect.collect_inputs(ctx, base, request_id, self._retrievers(),
+                                                   self.site_run, request_logger, on_change)
+                # Server-side threshold sheet, copied into this request's folder for the tool.
+                threshold_path = getattr(settings, "THRESHOLDING_SHEET_PATH", None)
+                tinfo = (rf.provision_threshold(base, request_id, threshold_path)
+                         if threshold_path else {"copied": False})
+                request_logger.info(f"[RCA-RUN] request_id={request_id} threshold "
+                                    f"copied={tinfo.get('copied')} path={tinfo.get('path')}")
 
-            # 2) only start once every file that is still being written is finished
-            rca_inputs = self._wait_for_files(base, request_id, request_logger)
             listing = rf.list_ready_files(base, request_id)
             if not listing.get("kpi"):
                 raise RCARunError("RCA_NO_INPUT_FILES",
                                   "no KPI file is ready for the RCA tool (every KPI system failed or "
-                                  "returned no data)", {"systems": systems, "rca_inputs": rca_inputs})
+                                  "returned no data)", {"systems": collected["systems"]})
 
-            # 3) the existing RCA tool, in a headless browser
+            # 2) the existing RCA tool, in a headless browser, on exactly these files
             job_manager.update_job(job_id, status="RUNNING", step="rca_tool", progress_percent=95,
                                    rca_run={"status": "RUNNING"})
             with limits.slot(lock_dir, "rca_run_browser", _setting("RCA_RUN_MAX_BROWSERS", 1),
                              wait_s, on_wait=queued("browser")):
                 request_logger.info(f"[RCA-RUN] request_id={request_id} starting RCA tool on "
-                                    f"{[f['name'] for f in listing['kpi']]}")
+                                    f"kpi={[f['name'] for f in listing['kpi']]} "
+                                    f"filter={[f['name'] for f in listing['filter']]} "
+                                    f"threshold={[f['name'] for f in listing['threshold']]}")
                 rca = run_rca_tool(
                     request_id=request_id,
                     tool_path=_tool_path(),
@@ -180,27 +210,25 @@ class RCARunAPIView(AnalysisOrchestratorAPIView):
                     log=request_logger,
                 )
         except limits.SlotTimeout as e:
-            self._fail(job_id, rdir, request_logger, RCARunError("RCA_QUEUE_TIMEOUT", str(e)))
+            self._fail(job_id, rdir, request_logger, RCARunError("RCA_QUEUE_TIMEOUT", str(e)), collected)
         except RCARunError as e:
-            self._fail(job_id, rdir, request_logger, e)
+            self._fail(job_id, rdir, request_logger, e, collected)
 
-        file_status = (rca_inputs or {}).get("file_status") or {}
-        failed = sorted(x for x, st in systems.items()
-                        if st == "FAILED" or file_status.get(x) == rf.FILE_FAILED)
-        no_data = sorted(x for x, fs in file_status.items()
-                         if fs == rf.FILE_NOT_APPLICABLE and x not in failed and x in systems)
-        report = build_report(request_id, rca, systems, failed, no_data,
-                              request_input=self._request_input(msisdn_list, complain_type, extra),
-                              link_base=self.link_base)
+        systems = collected["systems"]
+        failed = sorted(s for s, st in systems.items() if st["status"] in collect.MISSING)
+        no_data = sorted(s for s, st in systems.items() if st["status"] == collect.NO_DATA)
+        notes = {s: st.get("note") or st.get("error") for s, st in systems.items()
+                 if s in failed or s in no_data}
+        report = build_report(request_id, rca, {s: st["status"] for s, st in systems.items()},
+                              failed, no_data, request_input=self._request_input(ctx),
+                              link_base=self.link_base, system_notes=notes)
 
-        # Everything else (pipeline, file loading, tool internals) goes to diagnostics only.
+        # Collection / file / tool detail goes to diagnostics only.
         _write_json(rdir / DIAGNOSTICS_FILE, {
             "request_id": request_id,
-            "overall_status": analysis.get("overall_status"),
-            "systems": systems,
-            "summary_cards": analysis.get("summary"),
-            "dashboard": analysis.get("dashboard"),
-            "rca_inputs": {**rca_inputs, "files": listing},
+            "job_type": self.job_type,
+            "collection": collected,
+            "rca_inputs": listing,
             "rca_tool": {k: v for k, v in rca.items() if k not in ("results", "root_cause")},
             "duration_seconds": round(time.monotonic() - t0, 2),
         })
@@ -211,22 +239,16 @@ class RCARunAPIView(AnalysisOrchestratorAPIView):
                             f"findings={len(report['findings'])} rca_duration={rca.get('duration_seconds')}s")
         return report
 
-    def _wait_for_files(self, base, request_id, request_logger):
-        """Wait (bounded) until no system is still writing its RCA file."""
-        deadline = time.monotonic() + float(_setting("RCA_FILES_WAIT_S", 60))
-        while True:
-            st = rf.rca_status(base, request_id)
-            if st["status"] != rf.RCA_GENERATING or time.monotonic() >= deadline:
-                if st["status"] == rf.RCA_GENERATING:
-                    request_logger.warning(f"[RCA-RUN] request_id={request_id} files still generating "
-                                           f"after wait; using READY files only: {st['files']}")
-                return {"status": st["status"], "file_status": st["files"]}
-            time.sleep(1.0)
+    def _retrievers(self):
+        return collect.default_retrievers(self.site_run)
 
-    def _fail(self, job_id, rdir, request_logger, err):
+    def _fail(self, job_id, rdir, request_logger, err, collected=None):
         info = {"code": err.code, "message": err.message, "details": err.details}
         try:
             _write_json(rdir / ERROR_FILE, info)
+            if collected is not None:
+                _write_json(rdir / DIAGNOSTICS_FILE, {"request_id": job_id, "job_type": self.job_type,
+                                                      "collection": collected, "error": info})
         except Exception:
             request_logger.warning("[RCA-RUN] could not write error file", exc_info=True)
         request_logger.error(f"[RCA-RUN] request_id={job_id} failed {err.code}: {err.message}")
@@ -253,15 +275,15 @@ def _failed_body(request_id, rdir, job=None, link_base=RCARunAPIView.link_base):
 class RCASiteRunAPIView(RCARunAPIView):
     """POST /callflow/api/rca/sites/run {"sitelist": [...], "start": "...", "end": "..."}
 
-    The same job, pipeline, RCA tool and report as the MSISDN run, without Trino:
-    the requested sites go straight to NPP (entity_type="site"), Viavi and Remedy;
-    Splunk is unchanged; Smartcare runs the SmartcareSiteKpiAPIView implementation
-    for the sites and the request's range (rca_runner/site_mode.py).
+    Retrieval only, no Trino: the requested sites go straight to NPP
+    (entity_type="site"), Viavi and Remedy; Splunk is unchanged; Smartcare runs the
+    SmartcareSiteKpiAPIView implementation for the sites and the request's range.
+    Then the same RCA tool and report as the MSISDN run.
     """
     job_type = "rca_site_run"
     log_prefix = "rca_site_run"
     link_base = "/callflow/api/rca/sites/run"
-    file_systems = [s for s in FILE_SYSTEMS if s != "trino"]
+    site_run = True
 
     def build_log_context(self, request):
         req = site_mode.parse_site_request(request.data)
@@ -274,30 +296,8 @@ class RCASiteRunAPIView(RCARunAPIView):
             "sitelist": req["sitelist"], "npp_entity_type": "site",
         }
 
-    def _default_sources(self):
-        sources = super()._default_sources()
-        sources.fetch_smartcare = site_mode.fetch_smartcare   # wrapped by _build_sources as usual
-        return sources
-
-    def _build_sources(self, base, request_id, tlog, merge_dash, detail_sinks=None):
-        sources = super()._build_sources(base, request_id, tlog, merge_dash, detail_sinks)
-        # No Trino and no cell lookup: the sites are the NPP entities and the
-        # Viavi / Remedy sites (replaces the Trino task and its file/fallback wrapper).
-        sources.get_cells = site_mode.get_sites
-        sources.derive_sites = site_mode.derive_sites
-        return sources
-
-    @staticmethod
-    def _extract_smartcare(system, data, ctx):
-        _write_json(rf.request_dir(ctx["base_output_dir"], ctx["request_id"]) / SITE_KPI_FILE,
-                    (data or {}).get("site_kpis"))
-        return "smartcare_filter.csv", site_mode.filter_csv(ctx["sitelist"])
-
-    def _report_systems(self, systems):
-        return {k: v for k, v in systems.items() if k != "trino"}
-
-    def _request_input(self, msisdn_list, complain_type, extra):
-        return {"mode": "site", "sites": list(extra.get("sitelist") or []), "msisdn_count": None,
+    def _request_input(self, ctx):
+        return {"mode": "site", "sites": list(ctx["sitelist"]), "msisdn_count": None,
                 "complain_type": None}
 
 

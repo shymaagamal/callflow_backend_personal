@@ -200,11 +200,17 @@ def _root_cause(rc):
 
 
 def build_report(request_id, rca, systems, failed_systems, no_data_systems=(), request_input=None,
-                 link_base="/callflow/api/rca/run"):
+                 link_base="/callflow/api/rca/run", system_notes=None):
     """rca: browser_runner.run_rca_tool() output. systems: {system: status} from the run.
     failed_systems: systems whose data could not be retrieved (-> status PARTIAL).
     no_data_systems: systems that ran but returned no rows (reported, not a failure).
-    request_input: {mode, sites, msisdn_count, complain_type} echoed as "input"."""
+    request_input: {mode, sites, msisdn_count, complain_type} echoed as "input".
+    system_notes: {system: reason} added to that system's warning."""
+    notes = system_notes or {}
+
+    def _why(sysname):
+        n = notes.get(sysname)
+        return f" ({n})" if n else ""
     results = rca.get("results") or {}
     rc = rca.get("root_cause") or {}
     h = rc.get("hypothesis") or {}
@@ -215,10 +221,11 @@ def build_report(request_id, rca, systems, failed_systems, no_data_systems=(), r
     warnings = []
     for sysname in failed_systems:
         warnings.append({"code": "SYSTEM_UNAVAILABLE", "system": sysname,
-                         "message": f"{sysname} data was not available; findings from it are missing."})
+                         "message": f"{sysname} data was not available; findings from it are missing."
+                                    + _why(sysname)})
     for sysname in no_data_systems:
         warnings.append({"code": "NO_DATA", "system": sysname,
-                         "message": f"{sysname} returned no data for this request."})
+                         "message": f"{sysname} returned no data for this request." + _why(sysname)})
     for w in rca.get("warnings") or []:
         code = w.get("code")
         if code == "FILES_NOT_LOADED":

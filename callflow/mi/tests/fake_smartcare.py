@@ -8,9 +8,10 @@ import re
 import threading
 
 ROUTES = [
+    (r"CALC_TIME AS PROC_STARTTIME.*detail_cdr_sgidiameter_", "sgid_data"),   # Data smartcare_SGIDiameter_nodes
     (r"DETAIL_CDR_S1MME_", "s1mme"),
     (r"detail_cdr_gbiups_", "gbiups"),
-    (r"Credit_control.*DETAIL_CDR_SGiDiameter_", "scf"),
+    (r"(?i)Voice_Data_Flag.*DETAIL_CDR_SGiDiameter_", "scf"),           # SCF_CCI_U_T_Data
     (r"tdr_ims_register_sip_comm_", "reg"),
     (r"(?i)as DRA_NAME.*detail_cdr_sgidiameter_", "dra_voice"),
     (r"(?i)as OCS_NAME.*detail_cdr_sgidiameter_", "ocs_voice"),
@@ -55,8 +56,11 @@ def data_fixture(scf_rows=True, s1mme_rows=True, pcrf_null=False):
     ] if scf_rows else []
     reg_cols = ["myday", "IMPU_TEL_URI1", "p_cscf_Name", "I_cscf_Name", "S_cscf_Name", "AS_NAME"]
     reg = [["2026/10/15 10:00", "1012345678", "PCSCF1", "ICSCF1", "SCSCF1", "AS1"]]
+    sgid_cols = ["MSISDN", "DRA_ID", "VPCRF_OCS_ID", "VPCRF_NAME", "OCS_NAME", "DRA_NAME", "PROC_STARTTIME",
+                 "Service_flag", "RAT"]
+    sgid = [["1012345678", 6400001, 400028, "PCRF_SGI", "OCS_SGI", "DRA_SGI", 1700000000, "Data", "EUTRAN"]]
     return {"s1mme": (s1mme_cols, s1mme), "gbiups": (gbiups_cols, gbiups),
-            "scf": (scf_cols, scf), "reg": (reg_cols, reg)}
+            "scf": (scf_cols, scf), "reg": (reg_cols, reg), "sgid_data": (sgid_cols, sgid)}
 
 
 def voice_fixture(with_scf=False):
@@ -70,8 +74,14 @@ def voice_fixture(with_scf=False):
     # and MSC_NAME AS MSC_NODE
     def cs_cols(subscriber):
         return ["myday", subscriber, "MSC_NODE", "CELL_NAME", "SITE_NAME", "CLUSTER", "SUBREGION", "REGION"]
+    # smartcare_DRA_Voice now returns DRA, OCS and PCRF (as PCRF_NAME) in one query
+    dra = (["myday", "IMSI", "MSISDN", "Service_flag", "DRA_NAME", "OCS_NAME", "PCRF_NAME", "RAT"], [
+        ["2026/10/15 10:00", "602020000000001", "1012345678", "VOLTE", "DRA_NAME_1", "OCS_NAME_1", "PCRF_NAME_1", "EUTRAN"],
+        ["2026/10/15 10:00", "602020000000002", "1112345678", "VOLTE", "DRA_NAME_2", "OCS_NAME_2", "PCRF_NAME_2", "EUTRAN"],
+        ["2026/10/15 10:00", "602020000000003", "1212345678", "Data", "DRA_NAME_3", "OCS_NAME_3", None, "EUTRAN"],
+    ])
     fx = {
-        "dra_voice": sgid("DRA_NAME"),
+        "dra_voice": dra,
         "ocs_voice": sgid("OCS_NAME"),
         "pcrf_voice": sgid("VPCRF_NAME"),
         "cs_moc": (cs_cols("callerno"), [

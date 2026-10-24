@@ -157,6 +157,18 @@ Only `Data` and `Voice` are accepted as `Complain_Type`; anything else returns 4
 `{"error": "Complain_Type must be Data or Voice"}` before a job is created. Each job also writes
 `sc_nodes_raw.csv`, the combined query result before aggregation.
 
+### Your Queries package (reviewed 2026-10-23)
+
+- **Voice:** 7 queries. `smartcare_DRA_Voice` now returns DRA, OCS and PCRF together; MI counts its
+  `PCRF_NAME` for `PCRF` (the old separate query called it `VPCRF_NAME`; either name works).
+  `smartcare_nodes_REG_Voice` is no longer a Voice query, so `CSCF_Name` and `AS_Name` (from
+  `p_cscf_Name` / `AS_NAME` per `IMPU_TEL_URI1`) are always `{}` and reported as `metric_unavailable`.
+- **Data:** `smartcare_SGIDiameter_nodes` was added. Its `G`, `K1` and `G1` joins used `ON K.NE_IP = …`
+  (cartesian joins, wrong names), and `VPCRF_NAME` took `K`/`G` (OCS tables). Fixed to
+  `G.NE_IP` / `K1.NE_IP` / `G1.NE_IP` and `COALESCE(H, K1, G1)`, as in `smartcare_DRA_Voice`.
+  Data DRA/OCS/PCRF still count only rows with `Voice_Data_Flag == 'Data'`, which only SCF returns, so
+  this query does not change the Data response yet.
+
 ### Voice DRA / OCS / PCRF (since 2026-10-23)
 
 These come straight from what `smartcare_DRA_Voice`, `smartcare_OCS_Voice` and `smartcare_PCRF_Voice`

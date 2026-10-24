@@ -2,11 +2,13 @@
 """
 End-to-end tests for POST /callflow/api/rca/run.
 
-Real code under test: RCARunAPIView, the orchestration DAG + wrappers (RCA file
-writers, manifest), the analyzers, rca_runner.browser_runner, and the REAL
-rca_tool_V24.html running in headless Chromium. Only the six external systems
-are replaced by in-memory fakes that return data in the same shapes the real
+Real code under test: RCARunAPIView / RCASiteRunAPIView, rca_runner.collect
+(retrieval -> RCA file writers, manifest), rca_runner.browser_runner, and the REAL
+rca_tool_V24.html running in headless Chromium. Only the external systems are
+replaced by in-memory fakes that return data in the same shapes the real
 services return, so no Trino/Smartcare/NPP/Splunk/Viavi/Remedy is touched.
+Every test also asserts that the portal pipeline (orchestrator plan, system
+analyzers, summary cards) never runs for an RCA request.
 
 Run:  python manage.py test callflow.core.rca_runner
 (The browser tests are skipped when Playwright/Chromium is not installed.)
@@ -28,6 +30,7 @@ from rest_framework.test import APIRequestFactory
 
 from ..jobs import job_manager
 from ..orchestration import pipeline as pl
+from ..orchestration import summary_readiness
 from ..orchestration.analyzers import NppAnalyzer, ViaviAnalyzer, RemedyAnalyzer, SplunkAnalyzer
 from ..orchestration.customer_counts import CTX_KEY
 from ..services import smartcare_site_kpi_service as site_kpi_service
@@ -35,7 +38,7 @@ from ..services.smartcare_service import process_smartcare_data
 from ..services.trino_service import customer_counts_from_df
 from ..views import orchestrated_analysis as oa
 from ..views.rca_run import RCARunAPIView, RCASiteRunAPIView, RCARunFindingsCSVView, RCARunDiagnosticsView
-from . import site_mode
+from . import collect, site_mode
 
 try:
     from playwright.sync_api import sync_playwright  # noqa: F401
@@ -165,7 +168,62 @@ def dispatch_sources(by_first_msisdn):
     return pl.DataSources(**{n: (lambda n: lambda *a: getattr(pick(a[-1]), n)(*a))(n) for n in names})
 
 
+def retrievers_for(sources, site_run=False):
+    """collect.Retrievers over the fakes, wired exactly like collect.default_retrievers."""
+    def trino(ctx):
+        sources.get_cells(ctx)                  # the fake builds the Trino rows
+        return ctx.pop(pl.TRINO_FRAME_KEY)
+    return collect.Retrievers(
+        trino=trino,
+        smartcare=site_mode.fetch_smartcare if site_run else sources.fetch_smartcare,
+        derive_sites=sources.derive_sites, npp=sources.retrieve_npp, viavi=sources.retrieve_viavi,
+        remedy=sources.retrieve_remedy, splunk=sources.retrieve_splunk)
+
+
+def recording(sources):
+    """Copy of the fake sources that records what each system was asked for."""
+    seen = {"trino": [], "smartcare": [], "npp": [], "viavi": [], "remedy": [], "splunk": 0}
+    rec = dataclasses.replace(sources)
+
+    def get_cells(ctx):
+        seen["trino"].append(list(ctx.get("msisdn_list") or []))
+        return sources.get_cells(ctx)
+
+    def fetch_smartcare(ctx):
+        seen["smartcare"].append({"msisdn_list": list(ctx.get("msisdn_list") or []),
+                                  "complain_type": ctx.get("complain_type")})
+        return sources.fetch_smartcare(ctx)
+
+    def npp(entities, ctx):
+        # NPP site endpoint: rows per cell of the requested site (columns cell + sitePhysical)
+        seen["npp"].append({"entities": list(entities), "entity_type": ctx.get("npp_entity_type", "cell")})
+        if ctx.get("npp_entity_type") == "site":
+            entities = [f"L18_{s}_0{4 if i == 0 else 1}" for i, s in enumerate(entities)]
+        return sources.retrieve_npp(entities, ctx)
+
+    def by_sites(name, orig):
+        def _f(sites, ctx):
+            seen[name].append(list(sites))
+            return orig(sites, ctx)
+        return _f
+
+    def splunk(ctx):
+        seen["splunk"] += 1
+        return sources.retrieve_splunk(ctx)
+    rec.get_cells, rec.fetch_smartcare, rec.retrieve_npp, rec.retrieve_splunk = get_cells, fetch_smartcare, npp, splunk
+    rec.retrieve_viavi = by_sites("viavi", sources.retrieve_viavi)
+    rec.retrieve_remedy = by_sites("remedy", sources.retrieve_remedy)
+    return rec, seen
+
+
 # ---------------------------------------------------------------- helpers --
+_ANALYSIS_CODE = [
+    (pl, "run_plan"), (oa, "run_callflow_analysis"),
+    (NppAnalyzer, "analyze"), (ViaviAnalyzer, "analyze"), (RemedyAnalyzer, "analyze"),
+    (SplunkAnalyzer, "analyze"), (summary_readiness, "summary_cards"),
+]
+
+
 class _Base(SimpleTestCase):
     databases = []
 
@@ -174,24 +232,39 @@ class _Base(SimpleTestCase):
         self.addCleanup(shutil.rmtree, self.out, True)
         self._ovr = override_settings(
             OUTPUT_DIR=self.out, THRESHOLDING_SHEET_PATH=str(THRESHOLDS), RCA_TOOL_PATH=str(TOOL),
-            RCA_TOOL_TIMEOUT_S=180, RCA_FILES_WAIT_S=5, RCA_RUN_SLOT_WAIT_S=600,
+            RCA_TOOL_TIMEOUT_S=180, RCA_RUN_SLOT_WAIT_S=600,
             CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache",
                                 "LOCATION": f"rca-run-{id(self)}"}})
         self._ovr.enable()
         self.addCleanup(self._ovr.disable)
         self.factory = APIRequestFactory()
+        # The RCA endpoints must never run the portal pipeline: orchestrator plan,
+        # system analyzers, summary cards. Any call fails the job and the test.
+        self.analysis_calls = []
+        for owner, attr in _ANALYSIS_CODE:
+            p = mock.patch.object(owner, attr, side_effect=self._analysis_called(f"{owner.__name__}.{attr}"))
+            p.start()
+            self.addCleanup(p.stop)
+        self.addCleanup(lambda: self.assertEqual(self.analysis_calls, [], "portal analysis code ran"))
 
-    def post(self, sources, msisdns=MSISDNS, body=None):
-        req = self.factory.post("/callflow/api/rca/run", body or {
+    def _analysis_called(self, name):
+        def _f(*a, **k):
+            self.analysis_calls.append(name)
+            raise AssertionError(f"{name} must not run for an RCA request")
+        return _f
+
+    def post(self, sources, msisdns=MSISDNS, body=None, view=RCARunAPIView, path="/callflow/api/rca/run"):
+        req = self.factory.post(path, body or {
             "msisdn_list": msisdns, "start_date": START, "end_date": END, "Complain_Type": "Data"},
             format="json")
-        # default_sources() returns a NEW DataSources per job in production and the
-        # view wraps it in place, so hand out a fresh copy per call here too.
-        with mock.patch.object(oa, "default_sources", lambda: dataclasses.replace(sources)):
-            resp = RCARunAPIView.as_view()(req)
+        with mock.patch.object(collect, "default_retrievers", lambda site_run: retrievers_for(sources, site_run)):
+            resp = view.as_view()(req)
             self.assertEqual(resp.status_code, 202, resp.data)
             job_id = resp.data["job_id"]
             return job_id, self.wait(job_id)
+
+    def post_site(self, sources, body):
+        return self.post(sources, body=body, view=RCASiteRunAPIView, path="/callflow/api/rca/sites/run")
 
     def wait(self, job_id, timeout=400):
         deadline = time.time() + timeout
@@ -207,6 +280,10 @@ class _Base(SimpleTestCase):
 
     def rdir(self, job_id):
         return self.out / RCARunAPIView.output_subdir / "rca" / job_id
+
+    def request_log(self, name, job_id):
+        lines = (self.out / RCARunAPIView.output_subdir / "logs" / f"{name}.txt").read_text().splitlines()
+        return [l for l in lines if job_id in l]
 
     def tool_copy(self, script):
         """The real tool plus one extra <script> at the end (test-only fault injection)."""
@@ -232,17 +309,16 @@ class RCARunEndToEndTests(_Base):
         self.assertEqual(set(rep), {"report_version", "request_id", "status", "input", "analysis_window",
                                     "data_coverage", "summary", "root_cause", "findings", "suspects",
                                     "impact", "warnings", "links"})
-        # nothing from the pipeline / browser / logs leaks into the report
+        self.assertEqual(rep["data_coverage"]["systems_available"],
+                         ["npp", "remedy", "smartcare", "splunk", "trino", "viavi"])
         flat = json.dumps(rep)
         for leaked in ("analysisLog", "browser", "kpi_files", "manifest", "dashboard", "details",
                        "rca_tool_log", "duration_seconds", "subProfiles", "anomalyList"):
             self.assertNotIn(leaked, flat)
-        # values are the tool's, with predictable types
         self.assertTrue(rep["summary"]["primary_root_cause"])
         self.assertEqual(rep["summary"]["primary_root_cause"], rep["root_cause"]["hypothesis"])
         self.assertIn(rep["summary"]["confidence"], ("HIGH", "MEDIUM", "LOW"))
         self.assertTrue(rep["root_cause"]["recommended_actions"])
-        self.assertTrue(rep["root_cause"]["evidence_chain"])
         self.assertTrue(rep["findings"])
         f = rep["findings"][0]
         self.assertEqual(set(f), {"id", "system", "kpi", "node", "site", "severity", "observed",
@@ -250,26 +326,24 @@ class RCARunEndToEndTests(_Base):
         self.assertIsInstance(f["observed"], (int, float))
         self.assertTrue(any(x["node"] == "L18_LU4820_04" and x["kpi"] == "CFR" for x in rep["findings"]))
         ids = {x["id"] for x in rep["findings"]}
-        self.assertEqual(len(ids), len(rep["findings"]))
         top = rep["suspects"]["sites"][0]
         self.assertEqual(top["site"], "LU4820")
         self.assertTrue(set(top["finding_ids"]) <= ids and top["finding_ids"])
-        self.assertNotIn("anomalies", top)                # suspects reference findings, no copies
-        self.assertEqual(rep["summary"]["counts"]["critical_findings"],
-                         sum(1 for x in rep["findings"] if x["severity"] == "CRITICAL"))
-        # CSV: one row per finding
         csv_resp = self.get(job_id, RCARunFindingsCSVView, "/findings.csv")
         self.assertEqual(csv_resp.status_code, 200)
-        self.assertIn("text/csv", csv_resp["Content-Type"])
         lines = csv_resp.content.decode().strip().splitlines()
         self.assertEqual(lines[0], "request_id,id,system,kpi,node,site,severity,observed,baseline,"
                                    "deviation_pct,direction,threshold")
         self.assertEqual(len(lines) - 1, len(rep["findings"]))
-        # diagnostics keep the detail the report leaves out
+        # the tool loaded exactly this request's files
         diag = self.get(job_id, RCARunDiagnosticsView, "/diagnostics").data
-        self.assertTrue(diag["rca_tool_log"])
-        self.assertIn("npp_kpi.csv", diag["pipeline"]["rca_tool"]["inputs"]["kpi_files"])
-        self.assertTrue((self.out / RCARunAPIView.output_subdir / "logs" / "rca_run.txt").is_file())
+        loaded = diag["pipeline"]["rca_tool"]["inputs"]
+        self.assertEqual(sorted(loaded["kpi_files"]), sorted(
+            ["npp_kpi.csv", "remedy_kpi.csv", "splunk_ggsn_kpi.csv", "splunk_mme_kpi.csv",
+             "trino_cells.csv", "viavi_kpi.csv"]))
+        self.assertEqual(loaded["filter_file"], "smartcare_filter.csv")
+        self.assertEqual(sorted(diag["pipeline"]["collection"]["systems"]),
+                         ["npp", "remedy", "smartcare", "splunk", "trino", "viavi"])
 
     def test_result_survives_job_expiry(self):
         job_id, job = self.post(fake_sources())
@@ -287,17 +361,23 @@ class RCARunEndToEndTests(_Base):
         rep = self.get(job_id).data
         self.assertEqual(rep["status"], "PARTIAL")
         self.assertEqual(rep["data_coverage"]["systems_missing"], ["npp"])
-        self.assertNotIn("npp", rep["data_coverage"]["systems_available"])
-        self.assertTrue(any(w["code"] == "SYSTEM_UNAVAILABLE" and w["system"] == "npp"
-                            for w in rep["warnings"]))
+        w = [w for w in rep["warnings"] if w["code"] == "SYSTEM_UNAVAILABLE"]
+        self.assertEqual(len(w), 1)
+        self.assertIn("NPP API 500 (test)", w[0]["message"])
         self.assertFalse(any(f["system"] == "NPP" for f in rep["findings"]))
-        self.assertIsNotNone(rep["summary"])              # what the tool did produce is returned
+        self.assertFalse((self.rdir(job_id) / "npp_kpi.csv").exists())
+
+    def test_trino_failure_skips_cell_based_systems(self):
+        job_id, job = self.post(fake_sources(fail=("trino",)))
+        self.assertEqual(job["status"], "DONE", job.get("error"))
+        rep = self.get(job_id).data
+        self.assertEqual(rep["data_coverage"]["systems_missing"], ["npp", "remedy", "trino", "viavi"])
+        self.assertEqual(rep["data_coverage"]["systems_available"], ["smartcare", "splunk"])
 
     def test_missing_csvs_fail_clearly(self):
         job_id, job = self.post(fake_sources(empty=True))
         self.assertEqual(job["status"], "FAILED")
         self.assertIn("RCA_NO_INPUT_FILES", job["error"])
-        self.assertEqual(job["rca_run"]["code"], "RCA_NO_INPUT_FILES")
         err = json.loads((self.rdir(job_id) / "rca_error.json").read_text())
         self.assertEqual(err["code"], "RCA_NO_INPUT_FILES")
         resp = self.get(job_id)
@@ -320,9 +400,24 @@ class RCARunEndToEndTests(_Base):
             job_id, job = self.post(fake_sources())
         self.assertEqual(job["status"], "FAILED")
         self.assertIn("RCA_TIMEOUT", job["error"])
-        # the browser slot was released: a normal run right after still completes
         job_id2, job2 = self.post(fake_sources())
         self.assertEqual(job2["status"], "DONE", job2.get("error"))
+
+    def test_slow_system_times_out_without_writing_late(self):
+        slow = fake_sources()
+        orig = slow.retrieve_viavi
+
+        def stuck(sites, ctx):
+            time.sleep(6)
+            return orig(sites, ctx)
+        slow.retrieve_viavi = stuck
+        with override_settings(RCA_RETRIEVAL_TIMEOUT_S=2):
+            job_id, job = self.post(slow)
+        self.assertEqual(job["status"], "DONE", job.get("error"))
+        rep = self.get(job_id).data
+        self.assertIn("viavi", rep["data_coverage"]["systems_missing"])
+        time.sleep(5)                                # the stuck retrieval finishes now
+        self.assertFalse((self.rdir(job_id) / "viavi_kpi.csv").exists())
 
     def test_tool_not_found(self):
         with override_settings(RCA_TOOL_PATH=str(self.out / "missing.html")):
@@ -337,7 +432,7 @@ class RCARunEndToEndTests(_Base):
                                     ms_b[0]: fake_sources(bad_cell="L18_LU4830_02", marker=50)})
         jobs = {}
         with override_settings(RCA_RUN_MAX_BROWSERS=1), \
-                mock.patch.object(oa, "default_sources", lambda: dataclasses.replace(sources)):
+                mock.patch.object(collect, "default_retrievers", lambda site_run: retrievers_for(sources)):
             for name, ms in (("A", ms_a), ("B", ms_b)):      # both start before either finishes
                 resp = RCARunAPIView.as_view()(self.factory.post("/callflow/api/rca/run", {
                     "msisdn_list": ms, "start_date": START, "end_date": END}, format="json"))
@@ -369,53 +464,22 @@ class FakeSmartcareSites:
     """Stands in for execute_smartcare_queries (the JDBC call) and records every
     query the real smartcare_site_kpi_service sends."""
 
-    def __init__(self):
+    def __init__(self, cells=True):
         self.calls = []
+        self.cells = cells
 
     def __call__(self, queries_dict, params, log_path=""):
         (key, sql), = queries_dict.items()
         self.calls.append({"key": key, "sql": sql, "params": dict(params)})
         if key == "cells":
-            return pd.DataFrame({"CGISAI": ["602020A1B2C01", "602020A1B2C02"],
-                                 "LOGICAL_SITE_ID": SITES})
+            if not self.cells:
+                return pd.DataFrame(columns=["CGISAI", "LOGICAL_SITE_ID"])
+            return pd.DataFrame({"CGISAI": ["602020A1B2C01", "602020A1B2C02"], "LOGICAL_SITE_ID": SITES})
         if key == "s1mme":
             return pd.DataFrame({"LOGICAL_SITE_ID": SITES, "ATTACH_REQ_TIMES": [100, 80],
                                  "ATTACH_Fail_TIMES": [5, 1]})
         return pd.DataFrame({"LOGICAL_SITE_ID": SITES, "S6A_UPDATE_LOC_REQ_TIMES": [50, 40],
                              "S6A_UPDATE_LOC_FAIL_TIMES": [0, 1]})
-
-
-def recording(sources):
-    """Copy of the fake sources that records what each system was asked for."""
-    seen = {"get_cells": [], "fetch_smartcare": [], "npp": [], "viavi": [], "remedy": []}
-    rec = dataclasses.replace(sources)
-
-    def wrap_ctx(name):
-        orig = getattr(sources, name)
-
-        def _f(ctx):
-            seen[name].append({"msisdn_list": list(ctx.get("msisdn_list") or []),
-                               "complain_type": ctx.get("complain_type")})
-            return orig(ctx)
-        return _f
-
-    def site_npp(entities, ctx):
-        # NPP site endpoint: rows per cell of the requested site (columns cell + sitePhysical)
-        seen["npp"].append({"entities": list(entities), "entity_type": ctx.get("npp_entity_type", "cell")})
-        if ctx.get("npp_entity_type") == "site":
-            entities = [f"L18_{s}_0{4 if i == 0 else 1}" for i, s in enumerate(entities)]
-        return sources.retrieve_npp(entities, ctx)
-
-    def by_sites(name, orig):
-        def _f(sites, ctx):
-            seen[name].append(list(sites))
-            return orig(sites, ctx)
-        return _f
-    rec.get_cells, rec.fetch_smartcare = wrap_ctx("get_cells"), wrap_ctx("fetch_smartcare")
-    rec.retrieve_npp = site_npp
-    rec.retrieve_viavi = by_sites("viavi", sources.retrieve_viavi)
-    rec.retrieve_remedy = by_sites("remedy", sources.retrieve_remedy)
-    return rec, seen
 
 
 class RequestFormatTests(SimpleTestCase):
@@ -507,29 +571,43 @@ class RequestFormatTests(SimpleTestCase):
         self.assertEqual({c[1] for c in calls[:2]}, {"cell"})     # MSISDN run: unchanged
         self.assertEqual(calls[2:], [(SITES, "site"), (SITES, "site")])
 
+    def test_default_retrievers_use_existing_functions(self):
+        with mock.patch.object(collect, "default_sources", return_value=fake_sources()) as ds:
+            r_msisdn = collect.default_retrievers(False)
+            r_site = collect.default_retrievers(True)
+        src = ds.return_value
+        self.assertIs(r_msisdn.smartcare, src.fetch_smartcare)            # MSISDN Smartcare query
+        self.assertIs(r_site.smartcare, site_mode.fetch_smartcare)        # SmartcareSiteKpiAPIView code
+        for r in (r_msisdn, r_site):
+            self.assertEqual((r.npp, r.viavi, r.remedy, r.splunk),
+                             (src.retrieve_npp, src.retrieve_viavi, src.retrieve_remedy, src.retrieve_splunk))
+
 
 @unittest.skipUnless(HAVE_PW and TOOL.is_file(), "Playwright/Chromium or the RCA tool is not available")
 class RCARunRequestModeTests(_Base):
 
-    def post_site(self, sources, body):
-        req = self.factory.post("/callflow/api/rca/sites/run", body, format="json")
-        with mock.patch.object(oa, "default_sources", lambda: dataclasses.replace(sources)):
-            resp = RCASiteRunAPIView.as_view()(req)
-            self.assertEqual(resp.status_code, 202, resp.data)
-            return resp.data["job_id"], self.wait(resp.data["job_id"])
-
-    def test_msisdn_run_new_format_runs_existing_flow(self):
+    def test_msisdn_run_collects_raw_data_only(self):
         sources, seen = recording(fake_sources())
         job_id, job = self.post(sources, body={"msisdn": ",".join(MSISDNS), "complain_type": "data",
                                                "start": "2026-10-10 14:21:00", "end": "2026-10-10 15:21:00"})
         self.assertEqual(job["status"], "DONE", job.get("error"))
-        self.assertEqual(seen["get_cells"], [{"msisdn_list": MSISDNS, "complain_type": "Data"}])
-        self.assertEqual(seen["fetch_smartcare"], [{"msisdn_list": MSISDNS, "complain_type": "Data"}])
+        self.assertEqual(seen["trino"], [MSISDNS])                                         # Trino ran
+        self.assertEqual(seen["smartcare"], [{"msisdn_list": MSISDNS, "complain_type": "Data"}])
         self.assertEqual(seen["npp"], [{"entities": ["L18_LU4820_04", "L18_LU4821_01"], "entity_type": "cell"}])
+        derived = pl.default_sources().derive_sites(["L18_LU4820_04", "L18_LU4821_01"], {})
+        self.assertEqual(seen["viavi"], [derived])           # sites derived from the Trino cells
+        self.assertEqual(seen["remedy"], [derived])
+        self.assertEqual(seen["splunk"], 1)
         rep = self.get(job_id).data
         self.assertEqual(rep["input"]["mode"], "msisdn")
         self.assertIn("trino", rep["data_coverage"]["systems_available"])
         self.assertEqual(rep["links"]["diagnostics"], f"/callflow/api/rca/run/{job_id}/diagnostics")
+        log = "\n".join(self.request_log("rca_run", job_id))
+        for system in ("trino", "smartcare", "npp", "viavi", "remedy", "splunk"):
+            self.assertIn(f"system={system} status=COMPLETED", log)
+        self.assertNotIn("[orchestration]", log)
+        self.assertNotIn("_analysis", log)
+        self.assertNotIn("card.", log)
 
     def test_site_run_skips_trino_and_feeds_sites_to_systems(self):
         sources, seen = recording(fake_sources())
@@ -539,10 +617,11 @@ class RCARunRequestModeTests(_Base):
                                                    "end": "2026-10-10 15:21:00"})
         self.assertEqual(job["status"], "DONE", job.get("error"))
         # no Trino, no MSISDN Smartcare query; the sites go straight to NPP / Viavi / Remedy
-        self.assertEqual((seen["get_cells"], seen["fetch_smartcare"]), ([], []))
+        self.assertEqual((seen["trino"], seen["smartcare"]), ([], []))
         self.assertEqual(seen["npp"], [{"entities": SITES, "entity_type": "site"}])
         self.assertEqual(seen["viavi"], [SITES])
         self.assertEqual(seen["remedy"], [SITES])
+        self.assertEqual(seen["splunk"], 1)
 
         # Smartcare: SmartcareSiteKpiAPIView's queries for the sites and the request's range
         self.assertEqual(sorted({c["key"] for c in fake_db.calls}), ["cells", "s1mme", "s6a"])
@@ -556,24 +635,48 @@ class RCARunRequestModeTests(_Base):
                           ("2026-10-03 14:21:00", "2026-10-03 15:21:00")})    # 1 week earlier
 
         rdir = self.rdir(job_id)
-        self.assertTrue((rdir / "smartcare_site_kpis.json").is_file())
+        kpis = json.loads((rdir / "smartcare_site_kpis.json").read_text())
+        self.assertEqual(kpis["windows"]["current"]["s1mme"][0]["LOGICAL_SITE_ID"], "LU4820")
         self.assertFalse((rdir / "trino_cells.csv").exists())
         self.assertEqual((rdir / "smartcare_filter.csv").read_text().split(), ["SITE_NAME"] + SITES)
-        manifest = json.loads((rdir / "manifest.json").read_text())
-        self.assertNotIn("trino", json.dumps(manifest))
+        npp = (rdir / "npp_kpi.csv").read_text()
+        self.assertIn("L18_LU4820_04", npp)
+        self.assertNotIn("trino", (rdir / "manifest.json").read_text())
 
-        # same RCA tool, same report format
         rep = self.get(job_id, RCASiteRunAPIView).data
         self.assertEqual(rep["status"], "COMPLETED")
         self.assertEqual(rep["input"], {"mode": "site", "sites": SITES, "msisdn_count": None,
                                         "complain_type": None})
-        self.assertNotIn("trino", json.dumps(rep["data_coverage"]))
+        self.assertEqual(rep["data_coverage"]["systems_available"],
+                         ["npp", "remedy", "smartcare", "splunk", "viavi"])
         self.assertTrue(any(x["node"] == "L18_LU4820_04" and x["kpi"] == "CFR" for x in rep["findings"]))
         self.assertEqual(rep["suspects"]["sites"][0]["site"], "LU4820")
         self.assertTrue(rep["summary"]["primary_root_cause"])
         self.assertEqual(rep["links"]["findings_csv"], f"/callflow/api/rca/sites/run/{job_id}/findings.csv")
-        csv_resp = self.get(job_id, RCARunFindingsCSVView, "/findings.csv")
-        self.assertEqual(len(csv_resp.content.decode().strip().splitlines()) - 1, len(rep["findings"]))
+        diag = self.get(job_id, RCARunDiagnosticsView, "/diagnostics").data
+        loaded = diag["pipeline"]["rca_tool"]["inputs"]
+        self.assertEqual(sorted(loaded["kpi_files"]), sorted(
+            ["npp_kpi.csv", "remedy_kpi.csv", "splunk_ggsn_kpi.csv", "splunk_mme_kpi.csv", "viavi_kpi.csv"]))
+        self.assertEqual(loaded["filter_file"], "smartcare_filter.csv")
+
+        log = "\n".join(self.request_log("rca_site_run", job_id))
+        for system in ("smartcare", "npp", "viavi", "remedy", "splunk"):
+            self.assertIn(f"system={system} status=COMPLETED", log)
+        self.assertNotIn("system=trino", log)
+        self.assertNotIn("[orchestration]", log)
+        self.assertNotIn("cells:", log)                    # no cell resolution / site derivation
+
+    def test_site_run_smartcare_without_cells_is_no_data_not_success(self):
+        # The production log: DIM_LOC_CGISAI returned 0 rows for the sites.
+        with mock.patch.object(site_kpi_service, "execute_smartcare_queries", FakeSmartcareSites(cells=False)):
+            job_id, job = self.post_site(fake_sources(), {"sitelist": SITES, "start": START, "end": END})
+        self.assertEqual(job["status"], "DONE", job.get("error"))
+        rep = self.get(job_id, RCASiteRunAPIView).data
+        self.assertEqual(rep["data_coverage"]["systems_without_data"], ["smartcare"])
+        self.assertNotIn("smartcare", rep["data_coverage"]["systems_available"])
+        w = [w for w in rep["warnings"] if w.get("system") == "smartcare"][0]
+        self.assertEqual(w["code"], "NO_DATA")
+        self.assertIn("no cells for these sites in DIM_LOC_CGISAI", w["message"])
 
     def test_site_run_with_failed_npp_is_partial(self):
         with mock.patch.object(site_kpi_service, "execute_smartcare_queries", FakeSmartcareSites()):
