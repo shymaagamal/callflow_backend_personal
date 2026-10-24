@@ -75,7 +75,7 @@ class _Metrics:
 
 # ---------------------------------------------------------------- Data
 DATA_EMPTY = (("suspected_sites", dict), ("suspected_cells_raw", dict), ("suspected_sgws", list),
-              ("rat_counts", dict), ("DRA_NAME", dict), ("OCS_NAME", dict), ("PCRF", dict),
+              ("rat_counts", dict), ("DRA_NAME", dict), ("OCS_NAME", dict), ("PCRF_NAME", dict),
               ("region_counts", dict), ("subregion_counts", dict), ("sgsn_counts", dict),
               ("tac_counts", dict), ("mme_counts", dict))
 
@@ -128,13 +128,13 @@ def aggregate_data(nodes, ctx):
                     "subregion_counts", "sgsn_counts", "tac_counts", "mme_counts"):
             m.compute(key, _base_unavailable)
 
-    if 'Voice_Data_Flag' in ims.columns:
-        flagged = ims[ims['Voice_Data_Flag'] == 'Data']
-    else:
-        flagged = ims
-    m.compute("DRA_NAME", lambda: distinct_count(flagged, 'DRA_NAME', 'MSISDN'), ims)
-    m.compute("OCS_NAME", lambda: distinct_count(flagged, 'OCS_NAME', 'MSISDN'), ims)
-    m.compute("PCRF", lambda: distinct_count(flagged, 'VPCRF_NAME', 'MSISDN'), ims)
+    # if 'Voice_Data_Flag' in ims.columns:
+    #     flagged = ims[ims['Voice_Data_Flag'] == 'Data']
+    # else:
+    #     flagged = ims
+    m.compute("DRA_NAME", lambda: distinct_count(ims, 'DRA_NAME', 'MSISDN'), ims)
+    m.compute("OCS_NAME", lambda: distinct_count(ims, 'OCS_NAME', 'MSISDN'), ims)
+    m.compute("VPCRF_NAME", lambda: distinct_count(ims, 'VPCRF_NAME', 'MSISDN'), ims)
 
     ctx.event("aggregation_result", complain_type="Data", rows=len(data),
               base_rows=0 if base is None else len(base),
@@ -145,7 +145,7 @@ def aggregate_data(nodes, ctx):
 
 # ---------------------------------------------------------------- Voice
 VOICE_KEYS = ("Suspected_Sites", "Suspected_Cells", "Cluster_Counts", "Region_Counts", "Sub_Region_Counts",
-              "CSCF_Name", "AS_Name", "MSC_Name", "DRA_NAME", "OCS_NAME", "PCRF")
+              "CSCF_Name", "AS_Name", "MSC_Name", "DRA_NAME", "OCS_NAME", "PCRF_NAME" , "MME_Name")
 
 
 def aggregate_voice(nodes, ctx, export=None):
@@ -195,9 +195,11 @@ def aggregate_voice(nodes, ctx, export=None):
     # distinct_count ignores rows where the name is empty). No row filter - the
     # old Voice_Data_Flag == 'Voice' filter matched no Voice row, so these three
     # metrics were always empty.
+    ctx.debug("ims columns", columns=",".join(ims.columns), rows=len(ims))
     m.compute("DRA_NAME", lambda: distinct_count(ims, 'DRA_NAME', 'MSISDN'), ims)
     m.compute("OCS_NAME", lambda: distinct_count(ims, 'OCS_NAME', 'MSISDN'), ims)
-    m.compute("PCRF", lambda: distinct_count(ims, 'VPCRF_NAME', 'MSISDN'), ims)
+    m.compute("PCRF_NAME", lambda: distinct_count(ims, 'PCRF_NAME', 'MSISDN'), ims)
+    m.compute("MME_Name", lambda: distinct_count(ims, 'MME_Name', 'MSISDN'), ims)
 
     ctx.event("aggregation_result", complain_type=ctx.complain_type, rows=len(data),
               base_rows=0 if base is None else len(base),

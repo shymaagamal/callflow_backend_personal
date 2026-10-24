@@ -14,7 +14,7 @@ def data_body(m, hub):
         'rat_counts': m['rat_counts'],
         'DRA_NAME': m['DRA_NAME'],
         'OCS_NAME': m['OCS_NAME'],
-        'PCRF': m['PCRF'],
+        'VPCRF_NAME': m['VPCRF_NAME'],
         'region_counts': m['region_counts'],
         'subregion_counts': m['subregion_counts'],
         'sgsn_counts': m['sgsn_counts'],
@@ -36,7 +36,8 @@ def voice_body(m, hub):
         'MSC_Name': m['MSC_Name'],
         'DRA_NAME': m['DRA_NAME'],
         'OCS_NAME': m['OCS_NAME'],
-        'PCRF': m['PCRF'],
+        'PCRF_Name': m['PCRF_NAME'],
+        'MME_Name': m['MME_Name'],
     }
 
 

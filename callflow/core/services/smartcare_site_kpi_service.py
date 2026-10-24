@@ -41,7 +41,7 @@ def build_nci_time_windows(now=None, start=None, end=None):
         now = _round_down(now or datetime.datetime.now(), NCI_CACHE_GRANULARITY_MINUTES)
         current_start = now - datetime.timedelta(hours=12)
         current_end = now
-    print(f"[SITE KPI] current window: {current_start} -> {current_end}")
+    logger.info("[SITE KPI] current window: %s -> %s", current_start, current_end)
     return {
         "current": {"start": current_start, "end": current_end},
         "prev_1day": {
@@ -101,6 +101,7 @@ def fetch_smartcare_site_kpis(site_names, log_path="", tablename=None, start=Non
         raise ValueError("site_names is required")
 
     site_tuple = format_sql_in(sites, quote=True)
+    logger.info("[SITE KPI] smartcare Query for sites %s -> %s", site_tuple, smartcare_site_cells)
     cells = execute_smartcare_queries(
         queries_dict={"cells": smartcare_site_cells},
         params={"site_tuple": site_tuple},

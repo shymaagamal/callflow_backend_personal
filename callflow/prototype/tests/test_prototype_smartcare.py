@@ -21,7 +21,8 @@ import pandas as pd
 from django.test import SimpleTestCase, override_settings
 from rest_framework.test import APIRequestFactory
 
-from callflow.prototype import apis, concurrency, runtime, views
+from callflow.prototype import concurrency
+from callflow.prototype import apis, runtime, views
 from callflow.prototype.tests import fake_smartcare as fs
 
 GOLDEN = json.loads((Path(__file__).parent / "golden_responses.json").read_text())

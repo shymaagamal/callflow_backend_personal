@@ -28,7 +28,8 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import concurrency, conf, runtime
+from . import conf, runtime
+from . import concurrency
 from .service import parse_dates, run_prototype_analysis  # noqa: F401  (parse_dates kept importable)
 
 logger = logging.getLogger("callflow.prototype.views")
