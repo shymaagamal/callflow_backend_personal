@@ -23,7 +23,8 @@ RCA tool, which does all the analysis.
         NPP         nppIntegration(sites, entity_type="site")                  -> npp_kpi.csv
         Viavi       viaviQueries(sites)                                        -> viavi_kpi.csv
         Remedy      remedyTicketsData(sites)                                   -> remedy_kpi.csv
-        scope       the requested sites                                        -> smartcare_filter.csv
+        scope       the cells NPP returned for the sites                       -> smartcare_filter.csv
+                    (the requested sites as SITE_NAME when NPP returned no cells)
         (no Trino, no cell or site derivation)
 
 Files are written by the collecting thread only after a retrieval has returned
@@ -111,6 +112,52 @@ def _site_kpi_rows(data):
     return sum(len(v) for w in windows.values() for v in w.values() if isinstance(v, list))
 
 
+_TIME_COLS = ("DATETIME_ID", "timestamp", "PERIOD_TIMESTAMP", "myday", "actual_fault_time")
+_INSTANCE_COLS = ("Cell", "cell", "FLWID", "cell_name", "site")
+
+
+def _df_summary(df):
+    """What a file actually holds: rows, time span, distinct cells/routes. Diagnostics only."""
+    if df is None or getattr(df, "empty", True):
+        return {"rows": 0}
+    out = {"rows": len(df), "columns": len(df.columns)}
+    for col in _TIME_COLS:
+        if col in df.columns:
+            ts = df[col].dropna().astype(str)
+            if len(ts):
+                out["time_column"], out["first"], out["last"] = col, min(ts), max(ts)
+            break
+    for col in _INSTANCE_COLS:
+        if col in df.columns:
+            vals = sorted(df[col].dropna().astype(str).unique())
+            out["instance_column"], out["instances"] = col, len(vals)
+            out["instance_sample"] = vals[:10]
+            break
+    return out
+
+
+def _data_summary(name, data):
+    if name == "splunk":
+        return {node: _df_summary(df) for node, df in (data or {}).items()}
+    if name == "remedy":
+        tickets = (data or {}).get("remedy_tickets") or {}
+        return {"rows": _remedy_rows(data), "sites": sorted(tickets)}
+    if name == "smartcare" and isinstance(data, dict):
+        if data.get("site_run"):
+            kpis = data.get("site_kpis") or {}
+            return {"rows": _site_kpi_rows(data), "cells": kpis.get("cells"), "error": kpis.get("error"),
+                    "errors": kpis.get("errors") or None}
+        return _df_summary(data.get("processed_data"))
+    return _df_summary(data)
+
+
+def _npp_cells(df):
+    if df is None or getattr(df, "empty", True):
+        return []
+    col = "Cell" if "Cell" in df.columns else ("cell" if "cell" in df.columns else None)
+    return sorted(df[col].dropna().astype(str).str.strip().unique()) if col else []
+
+
 def _timeout(name, default):
     return float(getattr(settings, name, default))
 
@@ -170,6 +217,10 @@ class _Collector:
                 if not n:
                     rf.mark_not_applicable(self.base, self.rid, name)
             self._set(name, COMPLETED if n else NO_DATA, rows=n, files=files, duration_s=duration)
+            try:
+                self.systems[name]["data"] = _data_summary(name, data)
+            except Exception as e:  # diagnostics must never break collection
+                self.systems[name]["data"] = {"summary_error": str(e)}
         self._results[name] = data
         return data
 
@@ -211,10 +262,6 @@ def collect_inputs(ctx, base, request_id, retrievers: Retrievers, site_run: bool
     try:
         if site_run:
             sites = list(ctx["sitelist"])
-            # The request's sites are the RCA scope (filter file); Smartcare's own
-            # result is saved separately, its status reflects what it returned.
-            rf.write_system_file(base, request_id, "smartcare", "smartcare_filter.csv",
-                                 site_mode.filter_csv(sites))
             c.start("smartcare", retrievers.smartcare, ctx, timeout=t_sc)
             c.start("splunk", retrievers.splunk, ctx, timeout=t_ret)
             c.start("npp", retrievers.npp, sites, ctx, timeout=t_ret)
@@ -227,6 +274,18 @@ def collect_inputs(ctx, base, request_id, retrievers: Retrievers, site_run: bool
                 if note and c.systems["smartcare"]["status"] == NO_DATA:
                     c.systems["smartcare"]["note"] = note
             out["sites"] = sites
+            # RCA scope (filter file). The tool matches NPP rows to the scope by exact
+            # cell name (or the site it extracts from the cell name, e.g. L18_LK2398_01
+            # -> LK2398, which is not the requested "K2398"). So the scope is the cells
+            # NPP returned for the requested sites -- the same kind of scope the MSISDN
+            # run's Smartcare filter gives. Smartcare's own status is unaffected.
+            npp_cells = _npp_cells(c.finish("npp", _df_rows, _Writers._extract_df_csv("npp")))
+            rf.write_system_file(base, request_id, "smartcare", "smartcare_filter.csv",
+                                 site_mode.filter_csv(sites, npp_cells))
+            out["scope"] = {"cells": len(npp_cells), "cell_sample": npp_cells[:10],
+                            "source": "npp" if npp_cells else "requested sites (NPP returned no cells)"}
+            log.info("[RCA-COLLECT] request_id=%s scope: %d NPP cell(s) %s", request_id, len(npp_cells),
+                     npp_cells[:10])
         else:
             c.start("smartcare", retrievers.smartcare, ctx, timeout=t_sc)
             c.start("splunk", retrievers.splunk, ctx, timeout=t_ret)

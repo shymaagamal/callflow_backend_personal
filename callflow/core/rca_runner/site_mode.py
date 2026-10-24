@@ -131,7 +131,13 @@ def fetch_smartcare(ctx):
     return {"site_run": True, "site_kpis": kpis}
 
 
-def filter_csv(sites):
-    """RCA filter file for the site run: the requested sites (SITE_NAME), so the
-    tool scopes its analysis to them."""
+def filter_csv(sites, cells=None):
+    """RCA filter file for the site run.
+
+    cells: the cells NPP returned for the requested sites. The RCA tool keeps an NPP
+    row only when its cell is in the scope (or the site it extracts from the cell
+    name is), so the scope must use NPP's own cell names. Without cells, the
+    requested sites are written as SITE_NAME."""
+    if cells:
+        return "cell_name\n" + "".join(f"{c}\n" for c in cells)
     return "SITE_NAME\n" + "".join(f"{s}\n" for s in sites)

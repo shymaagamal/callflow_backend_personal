@@ -175,6 +175,7 @@ def _vendor_file_for(url):
 
 
 def run_rca_tool(*, request_id, tool_path, files_listing, resolve_file, start_date, end_date,
+                 timezone_id=None,
                  out_dir, timeout_seconds=300, launch_args=None, max_array=2000, log=None):
     """Run the RCA tool on one request's files; return the structured output.
 
@@ -257,8 +258,12 @@ def run_rca_tool(*, request_id, tool_path, files_listing, resolve_file, start_da
                 raise RCARunError("BROWSER_START_FAILED", str(e))
             context = None
             try:
+                # timezone_id: the tool parses times without an offset (start/end,
+                # NPP DATETIME_ID) as browser-local time, like in the portal users'
+                # browsers; the server's own zone (often UTC) would shift them.
                 context = browser.new_context(viewport={"width": 1400, "height": 900},
-                                              accept_downloads=False)
+                                              accept_downloads=False,
+                                              **({"timezone_id": timezone_id} if timezone_id else {}))
                 context.route("**/*", handle)
                 page = context.new_page()
                 page.on("console", lambda m: console.append(f"[{m.type}] {m.text}"))

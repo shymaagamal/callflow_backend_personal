@@ -204,6 +204,8 @@ class RCARunAPIView(JobBackedAPIView):
                     resolve_file=lambda name: rf.resolve_file(base, request_id, name),
                     start_date=window["start_dt"].strftime("%Y-%m-%dT%H:%M"),
                     end_date=window["end_dt"].strftime("%Y-%m-%dT%H:%M"),
+                    # Request times are Cairo wall-clock times (see trino_service._LOCAL_TZ).
+                    timezone_id=_setting("RCA_BROWSER_TIMEZONE", "Africa/Cairo"),
                     out_dir=rdir,
                     timeout_seconds=float(_setting("RCA_TOOL_TIMEOUT_S", 300)),
                     launch_args=_setting("RCA_BROWSER_ARGS", ["--no-sandbox", "--disable-dev-shm-usage"]),

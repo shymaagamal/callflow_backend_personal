@@ -68,8 +68,10 @@ not query Trino; the sites go straight to the systems:
   Smartcare/SCF evaluation needs core-node columns such as `MME_NAME`, `HSS_Name`), so it does
   not use them. If `DIM_LOC_CGISAI` has no cells for the sites, Smartcare is reported as
   `NO_DATA` ("no cells for these sites in DIM_LOC_CGISAI"), not as available.
-- RCA filter file `smartcare_filter.csv`: the requested sites (`SITE_NAME`), so the tool scopes to them
-  (without it the tool builds no site suspects and links no tickets).
+- RCA filter file `smartcare_filter.csv`: the cells NPP returned for the requested sites (`cell_name`).
+  The tool keeps an NPP row only if its cell is in the scope, or the site it extracts from the cell
+  name is (`L18_LK2398_01` -> `LK2398`, not the requested `K2398`), so the scope has to use NPP's own
+  cell names. Only when NPP returned no cells are the requested sites written as `SITE_NAME`.
 - No subscribers: customer counts are unknown and the tool reports 0 subscribers.
 
 The report (`report.py`) only re-shapes the tool's own objects (`performRCA(...)` and
@@ -103,6 +105,7 @@ They outlive the 30-minute job record, so `GET` keeps working.
 | `RCA_RUN_MAX_SYSTEM_JOBS` | 2                                                                    | rca/run jobs querying the systems at once (all workers)                  |
 | `RCA_RUN_MAX_BROWSERS`    | 1                                                                    | Headless browsers at once (all workers)                                  |
 | `RCA_RUN_SLOT_WAIT_S`     | 1800                                                                 | Longest a job waits in the queue                                         |
+| `RCA_BROWSER_TIMEZONE`      | `Africa/Cairo`                                                       | Time zone of the headless browser (times without an offset are read in it) |
 | `RCA_BROWSER_ARGS`        | `["--no-sandbox", "--disable-dev-shm-usage"]`                      | Chromium flags (`--no-sandbox` is required when Gunicorn runs as root) |
 
 ## Deployment (server: Python 3.7, Gunicorn as root)

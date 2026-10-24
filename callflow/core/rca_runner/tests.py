@@ -638,7 +638,8 @@ class RCARunRequestModeTests(_Base):
         kpis = json.loads((rdir / "smartcare_site_kpis.json").read_text())
         self.assertEqual(kpis["windows"]["current"]["s1mme"][0]["LOGICAL_SITE_ID"], "LU4820")
         self.assertFalse((rdir / "trino_cells.csv").exists())
-        self.assertEqual((rdir / "smartcare_filter.csv").read_text().split(), ["SITE_NAME"] + SITES)
+        self.assertEqual((rdir / "smartcare_filter.csv").read_text().split(),
+                         ["cell_name", "L18_LU4820_04", "L18_LU4821_01"])   # NPP's own cell names
         npp = (rdir / "npp_kpi.csv").read_text()
         self.assertIn("L18_LU4820_04", npp)
         self.assertNotIn("trino", (rdir / "manifest.json").read_text())
@@ -677,6 +678,49 @@ class RCARunRequestModeTests(_Base):
         w = [w for w in rep["warnings"] if w.get("system") == "smartcare"][0]
         self.assertEqual(w["code"], "NO_DATA")
         self.assertIn("no cells for these sites in DIM_LOC_CGISAI", w["message"])
+
+    def _real_naming_site_run(self, bad_cell):
+        """Production naming: site K2398's LTE cells are named L.._LK2398_.., and the
+        tool extracts the site LK2398 from them, not the requested K2398."""
+        sources = fake_sources(bad_cell=bad_cell)
+        cells = ["L18_LK2398_01", "L18_LK6068_02"]
+        orig = sources.retrieve_npp
+
+        def npp_site_endpoint(entities, ctx):
+            self.assertEqual((list(entities), ctx["npp_entity_type"]), (["K2398", "K6068"], "site"))
+            return orig(cells, ctx)
+        sources.retrieve_npp = npp_site_endpoint
+        with mock.patch.object(site_kpi_service, "execute_smartcare_queries", FakeSmartcareSites(cells=False)):
+            job_id, job = self.post_site(sources, {"sitelist": ["K2398", "K6068"], "start": START, "end": END})
+        self.assertEqual(job["status"], "DONE", job.get("error"))
+        return job_id, self.get(job_id, RCASiteRunAPIView).data
+
+    def test_site_run_npp_findings_match_real_cell_naming(self):
+        job_id, rep = self._real_naming_site_run("L18_LK2398_01")
+        self.assertEqual((self.rdir(job_id) / "smartcare_filter.csv").read_text().split(),
+                         ["cell_name", "L18_LK2398_01", "L18_LK6068_02"])
+        npp = [f for f in rep["findings"] if f["system"] == "NPP"]
+        self.assertTrue(npp, "NPP rows were dropped by the RCA tool's scope check")
+        self.assertEqual({f["node"] for f in npp}, {"L18_LK2398_01"})
+        top = rep["suspects"]["sites"][0]
+        self.assertEqual(top["site"], "LK2398")
+        self.assertTrue(top["critical_issues"] and top["finding_ids"])
+        diag = self.get(job_id, RCARunDiagnosticsView, "/diagnostics").data["pipeline"]["collection"]
+        self.assertEqual(diag["scope"]["cells"], 2)
+        self.assertEqual(diag["systems"]["npp"]["data"]["instances"], 2)
+
+        # different input data -> a different RCA result (the tool analyses the files)
+        job_id2, rep2 = self._real_naming_site_run("L18_LK6068_02")
+        self.assertEqual({f["node"] for f in rep2["findings"] if f["system"] == "NPP"}, {"L18_LK6068_02"})
+        self.assertEqual(rep2["suspects"]["sites"][0]["site"], "LK6068")
+        self.assertNotEqual(rep["summary"]["primary_root_cause"], rep2["summary"]["primary_root_cause"])
+
+    def test_browser_runs_in_cairo_time(self):
+        tool = self.tool_copy("console.log('TZ=' + Intl.DateTimeFormat().resolvedOptions().timeZone);")
+        with override_settings(RCA_TOOL_PATH=tool):
+            job_id, job = self.post(fake_sources())
+        self.assertEqual(job["status"], "DONE", job.get("error"))
+        self.assertIn("TZ=Africa/Cairo", (self.rdir(job_id) / "browser_console.log").read_text())
 
     def test_site_run_with_failed_npp_is_partial(self):
         with mock.patch.object(site_kpi_service, "execute_smartcare_queries", FakeSmartcareSites()):
