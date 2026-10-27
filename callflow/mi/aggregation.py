@@ -96,8 +96,8 @@ def aggregate_data(nodes, ctx):
     base = None
     if all(c in data.columns for c in catalog.DATA_BASE):
         try:
-            base = data.dropna(subset=['cell_name', 'SGW_SGSN_NAME'])
-            base = base[(base['cell_name'].str.strip() != '') & (base['SGW_SGSN_NAME'].str.strip() != '')]
+            base = data.dropna(subset=['cell_name', 'SGW_SGSN_NAME', 'TAC_DECIMAL'])
+            base = base[(base['cell_name'].str.strip() != '') & (base['SGW_SGSN_NAME'].str.strip() != '') & (base['TAC_DECIMAL'].str.strip() != '')]
         except Exception as e:
             ctx.add_warning("base_filter_failed", error=f"{type(e).__name__}: {e}")
             base = None

@@ -1,0 +1,32 @@
+SELECT
+   D1."BLADESYSTEMID" AS "BLADESYSTEMID",
+   D1."DATETIME_ID" AS "DATETIMEID",
+   D1."DNPREFIX" AS "DNPREFIX",
+   D1."HOUR_ID" AS "HOURID",
+   D1."Identifier" AS "IDENTIFIER",
+   D1."MIN_ID" AS "MINID",
+   D1."MOID" AS "MOID",
+   D1."NE_ID" AS "NEID",
+   D1."NEDN" AS "NEDN",
+   D1."OBJ_ID" AS "OBJID",
+   D1."sbgSipChallengedIncInvSessions" AS "SBGSIPCHALLENGEDINCINVSESSIO",
+   D1."sbgSipIngressInitRegThrottlingRej" AS "SBGSIPINGRESSINITREGTHROTTLI",
+   D1."sbgSipInitiatedSessionRelease" AS "SBGSIPINITIATEDSESSIONRELEAS",
+   D1."sbgSipInitRegThrottlingRejectedCnt" AS "SBGSIPINITREGTHROTTLINGREJEC",
+   D1."sbgSipNetIncSessionEstabNetworkSuccess" AS "SBGSIPNETINCSESSIONESTABNETW",
+   D1."sbgSipNetIncSessionSetupTime" AS "SBGSIPNETINCSESSIONSETUPTIME",
+   D1."sbgSipNetIncSessionSetupUserSuccess" AS "SBGSIPNETINCSESSIONSETUPUSER",
+   D1."sbgSipNetOutSessionEstabNetworkSuccess" AS "SBGSIPNETOUTSESSIONESTABNETW",
+   D1."sbgSipNetOutSessionSetupTime" AS "SBGSIPNETOUTSESSIONSETUPTIME",
+   D1."sbgSipNetOutSessionSetupUserSuccess" AS "SBGSIPNETOUTSESSIONSETUPUSER",
+   D1."sbgSipRejectedIncAlertingSessions488" AS "SBGSIPREJECTEDINCALERTINGSES",
+   D1."sbgSipRejectedIncPreAlertingSessions488" AS "SBGSIPREJECTEDINCPREALERTING",
+   D1."sbgSipSessionIncNormalRelease" AS "SBGSIPSESSIONINCNORMALRELEAS",
+   D1."sbgSipSessionOutNormalRelease" AS "SBGSIPSESSIONOUTNORMALRELEAS",
+   D1."sbgSipSuccessIncSessions" AS "SBGSIPSUCCESSINCSESSIONS",
+   D1."sbgSipTotalIncSessSetups" AS "SBGSIPTOTALINCSESSSETUPS",
+   D1."sbgSipTotalOutSessSetups" AS "SBGSIPTOTALOUTSESSSETUPS"
+FROM
+   "DC_E_IMSSBG_SIP_RAW" D1
+Where 
+ D1."DATETIME_ID">= dateadd(hour, -1, getdate())

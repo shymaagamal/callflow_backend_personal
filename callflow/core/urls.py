@@ -9,6 +9,8 @@ Every system gets a matching GET <job_id> route for polling.
 
 from django.urls import path
 
+from callflow.core.views.smartcare_API import SmartcareAPIView
+
 
 from .views.test_npp_kpi import NppKpiAPIView
 
@@ -31,6 +33,7 @@ from .views.stcc_analysis import STCCAnalysisAPIView
 from .views.rca_run import RCARunAPIView, RCASiteRunAPIView, RCARunFindingsCSVView, RCARunDiagnosticsView
 from  .views.test_viavi_kpi import ViaviKpiAPIView
 from .views.test_remedy_ticket import RemedyKpiAPIView
+from .views.Voice_KPI_Eniq import SybaseQueryView
 
 # from .views.dqi import DQIAPIView
 # from .views.trino import trino_test
@@ -39,6 +42,8 @@ from .views.test_remedy_ticket import RemedyKpiAPIView
 
 urlpatterns =[
     # are unchanged. request_id == job_id.
+    path("smartcare" , SmartcareAPIView.as_view(), name="smartcare"),
+    path("voice-kpi-eniq", SybaseQueryView.as_view(), name="voice-kpi-eniq"), 
     path("analysis", AnalysisOrchestratorAPIView.as_view(), name="orchestrated-analysis"),
     # RCA readiness / serving must be registered BEFORE the generic job-status
     # route so the multi-segment paths are matched first.

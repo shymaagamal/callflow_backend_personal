@@ -17,3 +17,5 @@ jdbc_url = ("jdbc:yacht://172.30.109.95:38443/SPARK-SPARKSQL"
             "&queryTimeOut=2000"
             "&loginTimeout=900")
 
+
+SYBASE_ENIQ_JAR_PATH = "/usr/local/drivers/jconnect/jconn4.jar" # update this 

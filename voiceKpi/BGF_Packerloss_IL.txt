@@ -1,0 +1,13 @@
+SELECT
+   D1."BgfNetwork" AS "BGFNETWORK",
+   D1."DATETIME_ID" AS "DATETIMEID",
+   D1."HOUR_ID" AS "HOURID",
+   D1."MIN_ID" AS "MINID",
+   D1."NODE_NAME" AS "NODENAME",
+   D1."rtpLostPackets" AS "RTPLOSTPACKETS",
+   D1."rtpReceivedPackets" AS "RTPRECEIVEDPACKETS"
+FROM
+   "DC_E_MRS_BGF_BGFREALM_RAW" D1
+
+WHERE
+    D1."DATETIME_ID">= dateadd(hour, -1, getdate())

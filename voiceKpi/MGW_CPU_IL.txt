@@ -1,0 +1,16 @@
+SELECT
+   D1."DATETIME_ID" AS "DATETIMEID",
+   D1."Equipment" AS "EQUIPMENT",
+   D1."HOUR_ID" AS "HOURID",
+   D1."MGW" AS "MGW",
+   D1."MIN_ID" AS "MINID",
+   D1."MOID" AS "MOID",
+   D1."NEUN" AS "NEUN",
+   D1."PlugInUnit" AS "PLUGINUNIT",
+   D1."pmProcessorCoreLoad" AS "PMPROCESSORCORELOAD",
+   D1."pmProcessorLoad" AS "PMPROCESSORLOAD",
+   D1."pmSwitchIngressLoad" AS "PMSWITCHINGRESSLOAD"
+FROM
+   "DC_E_MGW_PLUGINUNIT_RAW" D1
+WHERE
+D1."DATETIME_ID" >= dateadd(hour, -1, getdate())

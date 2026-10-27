@@ -47,7 +47,14 @@ def convert_java_types(df: pd.DataFrame) -> pd.DataFrame:
                 return str(x)
             except:
                 return str(x)
+        # === 4. Explicit java.lang.String handling === 
+        if "java.lang.string" in t or "java.lang.string" in str(type(x)):
+            try: 
+                return str(x) 
+            except: 
+                return str(x) 
 
+  
         # === 4. Generic fallback for ANY remaining Java object ===
         if any(k in t for k in ["java.", "hive", "hadoop", "org.apache"]):
             try:

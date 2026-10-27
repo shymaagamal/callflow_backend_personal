@@ -1,0 +1,22 @@
+SELECT
+   D1."DATETIME_ID" AS "DATETIMEID",
+   D1."DNPREFIX" AS "DNPREFIX",
+   D1."HOUR_ID" AS "HOURID",
+   D1."MIN_ID" AS "MINID",
+   D1."MOID" AS "MOID",
+   D1."NE_ID" AS "NEID",
+   D1."NEDN" AS "NEDN",
+   D1."OBJ_ID" AS "OBJID",
+   D1."sbgCurrentTotalLocalRegUsers" AS "SBGCURRENTTOTALLOCALREGUSERS",
+   D1."sbgNumberOfActiveEmergencySessions" AS "SBGNUMBEROFACTIVEEMERGENCYSE",
+   D1."sbgNumberOfActivePrioritySessions" AS "SBGNUMBEROFACTIVEPRIORITYSES",
+   D1."sbgSgcRegResCurrentTotalReg" AS "SBGSGCREGRESCURRENTTOTALREG",
+   D1."sbgSgcRegResMaxRegUsers" AS "SBGSGCREGRESMAXREGUSERS",
+   D1."sbgSgcRegResNumberOfActiveSessions" AS "SBGSGCREGRESNUMBEROFACTIVESE",
+   D1."sbgSgcRegResNumberOfActiveSubscribeSessions" AS "SBGSGCREGRESNUMBEROFACTIVESU"
+FROM
+   "DC_E_IMSSBG_SGC_RAW" D1
+
+
+WHERE
+   ( D1."DATETIME_ID">= dateadd(hour, -1, getdate())

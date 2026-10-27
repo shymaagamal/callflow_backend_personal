@@ -127,6 +127,7 @@ def fetch_smartcare_site_kpis(site_names, log_path="", tablename=None, start=Non
         "cgi_tuple": format_sql_in(cgi_values, quote=True),
     }
     windows = build_nci_time_windows(start=start, end=end)
+    print("[SITE KPI] windows: %s", windows)
     out = {}
     errors = {}
 

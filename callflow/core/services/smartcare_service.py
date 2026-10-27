@@ -8,7 +8,9 @@ from datetime import timedelta
 
 from callflow.core.utils.file_cache import make_smartcare_cache_key
 from ..utils.connections import smartcareConnection
-from ..constants.queries import smartcare_nodes_QUERIES_data, smartcare_nodes_Voice , smartcare_rate_QUERIES_data
+from ..constants.smartcare_data_Queries import smartcare_nodes_QUERIES_data 
+from ..constants.smartcare_voice_Queries import smartcare_nodes_Voice
+from ..constants.smartcare_rate_queries import smartcare_rate_QUERIES_data
 from ..utils.data_utils import process_sitename ,convert_java_types, safe_unique
 from .smartcare_query_runner import (
     execute_smartcare_queries,
@@ -55,7 +57,11 @@ def smartcareNodesQueries(
     logs_file : str,
     complain_type=None,
 ):
-  
+    print(f"smartcareNodesQueries called with {len(msisdn_list)} MSISDNs, startdate={startdate}, enddate={enddate}, complain_type={complain_type}")
+    if isinstance(startdate, str):
+        startdate = datetime.datetime.fromisoformat(startdate)
+    if isinstance(enddate, str):
+        enddate = datetime.datetime.fromisoformat(enddate)
     if complain_type == 'Voice':
         queries_dict = smartcare_nodes_Voice
         query_category = "voice"
@@ -72,9 +78,7 @@ def smartcareNodesQueries(
         'msisdn_tuple': msisdn_str,
     }
     logger.info(f"Running {query_category.upper()} queries for {len(msisdn_list)} MSISDNs")
-    # ==========================================
-    # تقسيم النطاق الزمني لأجزاء أصغر (نفس أسلوب smartcareRateQueries)
-    # ==========================================
+  
     CHUNK_HOURS  = 2
     chunks = []
     current = startdate
@@ -309,8 +313,8 @@ def fetch_smartcare_nodes_data(
     msisdn_list,
     start_dt: datetime.datetime ,
     end_dt: datetime.datetime ,
+    complain_type: str ,
     imsi: str = '',
-    complain_type: str = 'Data',
     log_path: str = '',
     view: str = "default",
     ts: str = '',
@@ -329,7 +333,7 @@ def fetch_smartcare_nodes_data(
     logger.info(f"[CACHE MISS] Fetching Smartcare nodes - key: {cache_key}")
 
     try:
-        
+        print(f"fetch_smartcare_nodes_data called with {len(msisdn_list)} MSISDNs, start_dt={start_dt}, end_dt={end_dt}, complain_type={complain_type}")
         nodes_data, query_catagory = smartcareNodesQueries(
             msisdn_list,
             startdate=start_dt,
@@ -340,30 +344,12 @@ def fetch_smartcare_nodes_data(
 
         if nodes_data is None or nodes_data.empty:
             raise ValueError("No Smartcare data returned")
-        
-        # rate_data = smartcareRateQueries(
-        #     nodes_data,
-        #     startdate=start_dt,
-        #     enddate=end_dt,
-        #     logs_file=log_path,
-        #     complain_type=complain_type,
-        # )
-        # print('Data Which Returned from Rate Data')
-        # print(rate_data.columns.tolist())
-        
-        # logger.info(
-        #     f"[SMARTCARE - RateData] "
-        #     f"columns={rate_data.columns.tolist()}"
-        # )
+    
         logger.info(
             f"[SMARTCARE] nodes_data shape={nodes_data.shape}"
         )
 
-        # logger.info(
-        #     f"[SMARTCARE] rate_data shape={rate_data.shape}"
-        #     if isinstance(rate_data, pd.DataFrame)
-        #     else "[SMARTCARE] rate_data is not DataFrame"
-        # )
+
         result = process_smartcare_data(nodes_data, complain_type, ts, log_path)
         # result["rate_data"] = rate_data
 

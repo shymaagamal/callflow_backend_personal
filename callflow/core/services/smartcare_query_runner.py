@@ -190,7 +190,10 @@ def run_single_query(query_name: str, query_template: str, params: dict, log_pat
                     conn.close()
                 except Exception:
                     pass
-
+            msg = str(e)
+            if "Table not found" in msg or "UnresolvedRelation" in msg:
+                request_logger.error(f"[QUERY SKIPPED] {query_name} -> Table not found ({elapsed:.2f}s, likly retention:  {msg[:250]})")
+                return pd.DataFrame()
             if attempt < max_retries:
                 request_logger.warning(
                     f"[{query_name}] attempt {attempt}/{max_retries} failed after {elapsed:.2f}s ({e}) -- "

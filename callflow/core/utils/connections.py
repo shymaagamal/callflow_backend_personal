@@ -7,6 +7,7 @@ from rest_framework.response import Response
 from rest_framework import status
 import logging
 import jpype
+from ..constants import configs
 
 logger = logging.getLogger(__name__)
 
@@ -77,15 +78,14 @@ def viaviConnection(logs_file):
     raise RuntimeError(error_msg)
 
 
-def Eniq_Connection():
+def EniqConnection():
 
-  Eniq_USER = "E2PErf"
-  Eniq_Pass = "Voda@5050"
-  JDBC_URL_Eniq = "jdbc:yacht://10.21.85.94:2642/dwhdb"
-  jdbc_driver_jar_eniq = "/usr/local/drivers/yacht-jdbc-2.18.36.jar"
+
+  JDBC_URL_Eniq = ( f"jdbc:sybase:Tds:{settings.SYBASE_ENIQ_HOST}:{settings.SYBASE_ENIQ_PORT}" f"?ServiceName={settings.SYBASE_ENIQ_DATABASE}" ) 
+  jdbc_driver_jar_eniq = configs.SYBASE_ENIQ_JAR_PATH
   connection_properties = {
-      "user": Eniq_USER,
-      "password": Eniq_Pass,
+      "user": settings.SYBASE_ENIQ_USER,
+      "password": settings.SYBASE_ENIQ_PASSWORD,
       "ssl": "false",
       "useSSL": "false",
       "encrypt": "false",
@@ -104,10 +104,11 @@ def Eniq_Connection():
           "-Dsun.net.client.defaultReadTimeout=600000"
       )
     conn = jaydebeapi.connect(
-      jdbc_driver_class,
+      "com.sybase.jdbc4.jdbc.SybDriver",
       JDBC_URL_Eniq,
       connection_properties,
       jdbc_driver_jar_eniq,
+  
       # connection_properties 
   )
     return conn
