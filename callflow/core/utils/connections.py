@@ -115,5 +115,5 @@ def EniqConnection():
   except Exception as e:
         msg = f"Eniq connection failed: {str(e)}"
         logger.error(msg, exc_info=True)
-        
+        raise RuntimeError(msg) from e
 
