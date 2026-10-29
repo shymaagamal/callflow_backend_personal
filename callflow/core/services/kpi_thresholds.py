@@ -313,6 +313,24 @@ class KPIThresholds:
     
 
     
+    # S1-MME per-site KPIs from Trino (NCI). Rules taken from the MME rows of
+    # data/thresholds.xlsx: Attach_Failure_4G_NW (FR > 15% OR deviation > 10%),
+    # TAU SR and Authentication SR (SR < 90% OR deviation > -10%).
+    S1MME_SITE_THRESHOLDS = {
+        'S1MME_ATTACH_FAILURE_RATE': [
+            {'type': 'threshold', 'value': 15, 'operator': '>'},
+            {'type': 'deviation', 'value': 10, 'operator': '>'},
+        ],
+        'S1MME_TAU_SR': [
+            {'type': 'threshold', 'value': 90, 'operator': '<'},
+            {'type': 'deviation', 'value': -10, 'operator': '>'},
+        ],
+        'S1MME_AUTH_SR': [
+            {'type': 'threshold', 'value': 90, 'operator': '<'},
+            {'type': 'deviation', 'value': -10, 'operator': '>'},
+        ],
+    }
+
     @classmethod
     def get_thresholds_for_system(cls, system_name: str) -> Dict[str, List[Dict]]:
         """Get all thresholds for a specific node"""
@@ -325,6 +343,7 @@ class KPIThresholds:
             'DNS':cls.DNS_THRESHOLD,
             'NPP': cls.NPP_THRESHOLDS,
             'VIAVI':cls.VIAVI_THRESHOLD,
+            'S1MME_SITE': cls.S1MME_SITE_THRESHOLDS,
        
         }
         return threshold_map.get(name_upper, {})

@@ -16,8 +16,8 @@ systems' existing retrieval functions (rca_runner/collect.py):
     Viavi      viaviQueries(sites)
     Remedy     remedyTicketsData(sites)
     Splunk     unchanged (not site based)
-    Smartcare  fetch_smartcare_site_kpis (the SmartcareSiteKpiAPIView implementation)
-               for the sites and the request's time range
+    Smartcare  fetch_smartcare_site_kpis (the SmartcareSiteKpiAPIView implementation,
+               S1-MME site KPIs now read from Trino) for the sites and the request's time range
 """
 
 import re
@@ -28,7 +28,7 @@ _MSISDN_KEYS = ("msisdn", "msisdn_list")
 _MSISDN_ONLY_KEYS = _MSISDN_KEYS + ("complain_type", "Complain_Type", "imsi")
 _COMPLAIN_TYPES = {"data": "Data", "voice": "Voice"}
 _MSISDN_RE = re.compile(r"^\d{6,15}$")
-# Site ids go into the Smartcare SQL IN (...) list and the NPP/Viavi/Remedy
+# Site ids go into the Trino SQL IN (...) list and the NPP/Viavi/Remedy
 # queries, so only plain id characters are accepted.
 _SITE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]{0,63}$")
 

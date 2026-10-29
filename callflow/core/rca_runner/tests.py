@@ -16,6 +16,7 @@ Run:  python manage.py test callflow.core.rca_runner
 
 import dataclasses
 import json
+import re
 import shutil
 import tempfile
 import time
@@ -460,26 +461,31 @@ class RCARunEndToEndTests(_Base):
 SITES = ["LU4820", "LU4821"]
 
 
-class FakeSmartcareSites:
-    """Stands in for execute_smartcare_queries (the JDBC call) and records every
-    query the real smartcare_site_kpi_service sends."""
+class FakeTrinoSites:
+    """Stands in for run_trino_query in smartcare_site_kpi_service (the Trino
+    call) and records every S1-MME query the real service sends. Returns
+    lower-cased column names, as Trino does."""
 
-    def __init__(self, cells=True):
+    COLS = ["time", "site_logical_name", "attach_req_times", "attach_fail_times", "tau_req_times",
+            "tau_fail_times", "s1mme_authentication_req_times", "s1mme_authentication_fail_times",
+            "fail_cause_name"]
+
+    def __init__(self, rows=True):
         self.calls = []
-        self.cells = cells
+        self.rows = rows
 
-    def __call__(self, queries_dict, params, log_path=""):
-        (key, sql), = queries_dict.items()
-        self.calls.append({"key": key, "sql": sql, "params": dict(params)})
-        if key == "cells":
-            if not self.cells:
-                return pd.DataFrame(columns=["CGISAI", "LOGICAL_SITE_ID"])
-            return pd.DataFrame({"CGISAI": ["602020A1B2C01", "602020A1B2C02"], "LOGICAL_SITE_ID": SITES})
-        if key == "s1mme":
-            return pd.DataFrame({"LOGICAL_SITE_ID": SITES, "ATTACH_REQ_TIMES": [100, 80],
-                                 "ATTACH_Fail_TIMES": [5, 1]})
-        return pd.DataFrame({"LOGICAL_SITE_ID": SITES, "S6A_UPDATE_LOC_REQ_TIMES": [50, 40],
-                             "S6A_UPDATE_LOC_FAIL_TIMES": [0, 1]})
+    def __call__(self, sql):
+        source = (site_kpi_service.RECENT_SOURCE if "clickhouse.e2e." in sql
+                  else site_kpi_service.HISTORY_SOURCE)
+        start = int(re.search(r"PROC_STARTTIME >= (\d+)", sql).group(1))
+        end = int(re.search(r"PROC_STARTTIME < (\d+)", sql).group(1))
+        self.calls.append({"source": source, "sql": sql, "start_epoch": start, "end_epoch": end})
+        if not self.rows:
+            return pd.DataFrame(columns=self.COLS)
+        auth = [7, 3] if source == site_kpi_service.RECENT_SOURCE else [None, None]
+        return pd.DataFrame([[start, site, req, fail, 20, 2, a, 1 if a else None, "cause"]
+                             for site, req, fail, a in zip(SITES, [100, 80], [5, 1], auth)],
+                            columns=self.COLS)
 
 
 class RequestFormatTests(SimpleTestCase):
@@ -611,8 +617,8 @@ class RCARunRequestModeTests(_Base):
 
     def test_site_run_skips_trino_and_feeds_sites_to_systems(self):
         sources, seen = recording(fake_sources())
-        fake_db = FakeSmartcareSites()
-        with mock.patch.object(site_kpi_service, "execute_smartcare_queries", fake_db):
+        fake_db = FakeTrinoSites()
+        with mock.patch.object(site_kpi_service, "run_trino_query", fake_db):
             job_id, job = self.post_site(sources, {"sitelist": SITES, "start": "2026-10-10 14:21:00",
                                                    "end": "2026-10-10 15:21:00"})
         self.assertEqual(job["status"], "DONE", job.get("error"))
@@ -623,16 +629,17 @@ class RCARunRequestModeTests(_Base):
         self.assertEqual(seen["remedy"], [SITES])
         self.assertEqual(seen["splunk"], 1)
 
-        # Smartcare: SmartcareSiteKpiAPIView's queries for the sites and the request's range
-        self.assertEqual(sorted({c["key"] for c in fake_db.calls}), ["cells", "s1mme", "s6a"])
+        # Site KPIs: SmartcareSiteKpiAPIView's Trino S1-MME queries for the sites and the
+        # request's range. The range is older than 6 hours, so only the Hive query runs.
+        self.assertEqual({c["source"] for c in fake_db.calls}, {site_kpi_service.HISTORY_SOURCE})
         for c in fake_db.calls:
-            self.assertEqual(c["params"]["site_tuple"], "('LU4820','LU4821')")
-        kpi_calls = [c for c in fake_db.calls if c["key"] != "cells"]
-        self.assertEqual({c["sql"] for c in kpi_calls}, set(site_kpi_service.smartcare_site_kpi_QUERIES.values()))
-        self.assertEqual({(c["params"]["start_date"], c["params"]["end_date"]) for c in kpi_calls},
-                         {("2026-10-10 14:21:00", "2026-10-10 15:21:00"),     # request range
-                          ("2026-10-09 14:21:00", "2026-10-09 15:21:00"),     # 1 day earlier
-                          ("2026-10-03 14:21:00", "2026-10-03 15:21:00")})    # 1 week earlier
+            self.assertIn("IN ('LU4820','LU4821')", c["sql"])
+        import datetime as dt
+        epochs = lambda a, b: site_kpi_service._epochs(dt.datetime.fromisoformat(a), dt.datetime.fromisoformat(b))[:2]
+        self.assertEqual({(c["start_epoch"], c["end_epoch"]) for c in fake_db.calls},
+                         {epochs("2026-10-10 14:21:00", "2026-10-10 15:21:00"),     # request range
+                          epochs("2026-10-09 14:21:00", "2026-10-09 15:21:00"),     # 1 day earlier
+                          epochs("2026-10-03 14:21:00", "2026-10-03 15:21:00")})    # 1 week earlier
 
         rdir = self.rdir(job_id)
         kpis = json.loads((rdir / "smartcare_site_kpis.json").read_text())
@@ -668,8 +675,8 @@ class RCARunRequestModeTests(_Base):
         self.assertNotIn("cells:", log)                    # no cell resolution / site derivation
 
     def test_site_run_smartcare_without_cells_is_no_data_not_success(self):
-        # The production log: DIM_LOC_CGISAI returned 0 rows for the sites.
-        with mock.patch.object(site_kpi_service, "execute_smartcare_queries", FakeSmartcareSites(cells=False)):
+        # Trino returned no S1-MME rows for the sites.
+        with mock.patch.object(site_kpi_service, "run_trino_query", FakeTrinoSites(rows=False)):
             job_id, job = self.post_site(fake_sources(), {"sitelist": SITES, "start": START, "end": END})
         self.assertEqual(job["status"], "DONE", job.get("error"))
         rep = self.get(job_id, RCASiteRunAPIView).data
@@ -677,7 +684,7 @@ class RCARunRequestModeTests(_Base):
         self.assertNotIn("smartcare", rep["data_coverage"]["systems_available"])
         w = [w for w in rep["warnings"] if w.get("system") == "smartcare"][0]
         self.assertEqual(w["code"], "NO_DATA")
-        self.assertIn("no cells for these sites in DIM_LOC_CGISAI", w["message"])
+        self.assertIn("no S1-MME rows for these sites in Trino", w["message"])
 
     def _real_naming_site_run(self, bad_cell):
         """Production naming: site K2398's LTE cells are named L.._LK2398_.., and the
@@ -690,7 +697,7 @@ class RCARunRequestModeTests(_Base):
             self.assertEqual((list(entities), ctx["npp_entity_type"]), (["K2398", "K6068"], "site"))
             return orig(cells, ctx)
         sources.retrieve_npp = npp_site_endpoint
-        with mock.patch.object(site_kpi_service, "execute_smartcare_queries", FakeSmartcareSites(cells=False)):
+        with mock.patch.object(site_kpi_service, "run_trino_query", FakeTrinoSites(rows=False)):
             job_id, job = self.post_site(sources, {"sitelist": ["K2398", "K6068"], "start": START, "end": END})
         self.assertEqual(job["status"], "DONE", job.get("error"))
         return job_id, self.get(job_id, RCASiteRunAPIView).data
@@ -723,7 +730,7 @@ class RCARunRequestModeTests(_Base):
         self.assertIn("TZ=Africa/Cairo", (self.rdir(job_id) / "browser_console.log").read_text())
 
     def test_site_run_with_failed_npp_is_partial(self):
-        with mock.patch.object(site_kpi_service, "execute_smartcare_queries", FakeSmartcareSites()):
+        with mock.patch.object(site_kpi_service, "run_trino_query", FakeTrinoSites()):
             job_id, job = self.post_site(fake_sources(fail=("npp",)), {"sitelist": SITES, "start": START,
                                                                        "end": END})
         self.assertEqual(job["status"], "DONE", job.get("error"))

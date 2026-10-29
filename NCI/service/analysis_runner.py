@@ -1,6 +1,7 @@
 # NCI/service/analysis_runner.py
 """
-Orchestrates NCI's 3-period x 3-source analysis, then rolls everything up
+Orchestrates NCI's 3-period x 4-source analysis (NPP, Viavi, Remedy and the
+Trino S1-MME site KPIs -- see trino_site_analysis.py), then rolls everything up
 into ONE line per requested site.
 
 KEY FIX in this version: canonicalization. Viavi (FLWID LIKE '%site%') and
@@ -38,6 +39,7 @@ from callflow.core.services.kpi_analyzer import KPIAnalyzer
 from ..connectors.viavi_pool import get_viavi_pool
 from ..connectors.remedy_pool import get_remedy_pool
 from ..utils.helpers import build_nci_time_windows
+from .trino_site_analysis import fetch_trino_site_kpis, run_trino_comparisons, trino_errors
 
 logger = logging.getLogger(__name__)
 
@@ -339,11 +341,30 @@ def _ingest_viavi_issues(viavi_raw_by_comparison: dict, site_issues: dict) -> No
                     }
 
 
+def _ingest_trino_issues(trino_raw_by_comparison: dict, site_issues: dict) -> None:
+    for display_key, raw in (trino_raw_by_comparison or {}).items():
+        for site, info in raw["affected_sites_details"].items():
+            bucket = site_issues.setdefault(site, {})
+            for kpi_name, kpi_info in info.get("kpis", {}).items():
+                severity = kpi_info.get("severity", "minor")
+                key = (kpi_name, site)
+                existing = bucket.get(key)
+                if existing is None or _severity_rank(severity) > _severity_rank(existing["severity"]):
+                    bucket[key] = {
+                        "severity": severity,
+                        "message": kpi_info.get("message") or kpi_info.get("insight_message"),
+                        "source": "trino",
+                        "site": site,
+                    }
+
+
 def build_site_summary(npp_raw_by_comparison: dict, viavi_raw_by_comparison: dict,
-                        remedy_by_period: dict, all_sites: list) -> dict:
+                        remedy_by_period: dict, all_sites: list,
+                        trino_raw_by_comparison: dict = None) -> dict:
     site_issues: dict = {}
     _ingest_npp_issues(npp_raw_by_comparison, site_issues)
     _ingest_viavi_issues(viavi_raw_by_comparison, site_issues)
+    _ingest_trino_issues(trino_raw_by_comparison, site_issues)
     logger.info(f"[NCI] build_site_summary: {len(site_issues)} sites with issues, {sum(len(v) for v in site_issues.values())} total issues")
     site_ticket_ids: dict = {}
     for period_key, (remedy_output, _total) in remedy_by_period.items():
@@ -392,10 +413,15 @@ def run_nci_analysis(sites, request_logger, log_path, ts, job_id=None):
             fut = executor.submit(fetch_remedy, sites, window, log_path, ts)
             tasks[fut] = (period_name, "remedy", None)
 
+        # Trino S1-MME site KPIs: one task covers all three windows.
+        fut = executor.submit(fetch_trino_site_kpis, sites, windows, log_path)
+        tasks[fut] = ("current", "trino", None)
+
         npp_by_period_lists = {p: [] for p in windows}
         viavi_by_period = {}
         remedy_by_period = {}
-        errors = {"npp": [], "viavi": [], "remedy": []}
+        trino_result = {}
+        errors = {"npp": [], "viavi": [], "remedy": [], "trino": []}
 
         done = 0
         total = len(tasks)
@@ -409,10 +435,15 @@ def run_nci_analysis(sites, request_logger, log_path, ts, job_id=None):
                     viavi_by_period[period_name] = data
                 elif source == "remedy":
                     remedy_by_period[period_name] = data
+                elif source == "trino":
+                    trino_result = data
+                    errors["trino"].extend(trino_errors(data, _DISPLAY_KEY))
+                    if data.get("error"):
+                        request_logger.warning(f"[NCI] trino: {data['error']}")
             except Exception as e:
                 label = f"{source}" + (f"/{site}" if site else "")
                 request_logger.error(f"[NCI] {label}/{period_name} failed: {e}")
-                entry = {"period": _DISPLAY_KEY[period_name], "error": str(e)}
+                entry = {"period": "all" if source == "trino" else _DISPLAY_KEY[period_name], "error": str(e)}
                 if site:
                     entry["site"] = site
                 errors[source].append(entry)
@@ -444,9 +475,10 @@ def run_nci_analysis(sites, request_logger, log_path, ts, job_id=None):
 
     npp_raw = _run_npp_comparisons(npp_by_period, windows, ts)
     viavi_raw = _run_viavi_comparisons(viavi_by_period, sites, windows, ts)
+    trino_raw = run_trino_comparisons(_analyzer, trino_result, sites, _COMPARISONS)
 
     return {
-        "sites_summary": build_site_summary(npp_raw, viavi_raw, remedy_by_period, sites),
+        "sites_summary": build_site_summary(npp_raw, viavi_raw, remedy_by_period, sites, trino_raw),
         # "npp": summarize_npp(npp_raw, npp_by_period, sites),
         # "viavi": summarize_viavi(viavi_raw, viavi_by_period, sites),
         # "remedy": summarize_remedy(remedy_by_period),

@@ -5,17 +5,15 @@ default endpoint is a PLAIN SYNCHRONOUS request/response -- no job_id,
 no polling contract assumed. Speed comes from caching + the concurrent
 fetch in analysis_runner.run_nci_analysis, not from making the caller poll.
 
-Two opt-in ways to avoid holding the connection open (useful when a reverse
+One opt-in way to avoid holding the connection open (useful when a reverse
 proxy in front of Gunicorn cuts long requests with a 502):
 
   * async=1   (query string ?async=1, or "async": true in the body)
               -> 202 {job_id, poll_url}; the caller polls GET <poll_url>
                  until status is DONE or FAILED.
-  * callback_url
-              -> 202 {job_id, poll_url}; the result is also POSTed to
-                 callback_url when done.
 
-Both can be combined. Without either, behaviour is unchanged.
+The webhook (callback_url: POST the result to a caller URL) has been removed.
+A callback_url in the request body is ignored (and logged).
 """
 
 import logging
@@ -74,6 +72,14 @@ def _is_async(request):
     return _truthy(data.get("async", ""))
 
 
+def _log_ignored_callback(request, request_logger, tag):
+    """The webhook was removed: a callback_url sent by an old caller is ignored."""
+    data = request.data if isinstance(request.data, dict) else {}
+    if data.get("callback_url"):
+        request_logger.warning(f"{tag} callback_url is no longer supported and was ignored; "
+                               f"use ?async=1 and poll the job instead")
+
+
 def _poll_url(request, job_id):
     """Poll path for this job, built from the path the caller actually used."""
     return f"{request.path.rstrip('/')}/{job_id}/"
@@ -84,17 +90,15 @@ class NCIAnalysisAPIView(BaseCallFlowAPIView):
     """
     POST callflow/NCI/analysis/            (add ?async=1 for job mode)
     body: {"site_names": [{"SITE": "...", "FLAG": "..."}, ...],
-           "async": true,             # optional, same as ?async=1
-           "callback_url": "..."}     # optional
+           "async": true}             # optional, same as ?async=1
 
     Default: blocks until the 3-period x 3-source analysis completes and
     returns the full result in one response.
 
-    With async=1 and/or callback_url: returns 202 {job_id, status, poll_url}
-    immediately and runs the same analysis in a background thread.
+    With async=1: returns 202 {job_id, status, poll_url} immediately and
+    runs the same analysis in a background thread.
     GET callflow/NCI/analysis/<job_id>/ returns the job; when status is
     DONE, job["result"] holds exactly what the synchronous call returns.
-    If callback_url was sent, the result is also POSTed there.
     """
 
     def post(self, request):
@@ -115,18 +119,17 @@ class NCIAnalysisAPIView(BaseCallFlowAPIView):
         sites = [item["SITE"] for item in site_names]
         site_flags = {item["SITE"]: item["FLAG"] for item in site_names}
 
-        callback_url = request.data.get("callback_url")
         async_mode = _is_async(request)
         who = get_request_identity(request)
         log_path, ts = self.get_log_file("nci", "now", "now")
 
         request_logger = build_request_logger(log_path, ts, who)
         request_logger.info(
-            f"[NCI] requested by {who}, sites={len(site_names)}, "
-            f"async={async_mode}, callback_url={bool(callback_url)}"
+            f"[NCI] requested by {who}, sites={len(site_names)}, async={async_mode}"
         )
+        _log_ignored_callback(request, request_logger, "[NCI]")
 
-        if not callback_url and not async_mode:
+        if not async_mode:
             # ── Synchronous path (default) ──────────────────────────────
             try:
                 result = run_nci_analysis(sites, request_logger, log_path, ts)
@@ -144,11 +147,11 @@ class NCIAnalysisAPIView(BaseCallFlowAPIView):
                 request_logger.exception("[NCI] analysis failed")
                 return Response({"error": "Internal server error"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        # ── Job path: async=1 and/or callback_url ───────────────────────
+        # ── Job path: async=1 ───────────────────────────────────────────
         job_id = job_manager.create_job(who=who, job_type="nci")
         worker = threading.Thread(
-            target=self._run_and_callback,
-            args=(job_id, sites, site_flags, request_logger, log_path, ts, callback_url),
+            target=self._run_job,
+            args=(job_id, sites, site_flags, request_logger, log_path, ts),
             daemon=True,
         )
         worker.start()
@@ -159,7 +162,7 @@ class NCIAnalysisAPIView(BaseCallFlowAPIView):
         )
 
     def get(self, request, job_id=None):
-        """Poll endpoint for the async=1 / callback_url paths."""
+        """Poll endpoint for the async=1 path."""
         if not job_id:
             return Response({"error": "job_id is required"}, status=status.HTTP_400_BAD_REQUEST)
         job = job_manager.get_job(job_id)
@@ -167,7 +170,7 @@ class NCIAnalysisAPIView(BaseCallFlowAPIView):
             return Response({"error": "job not found or expired"}, status=status.HTTP_404_NOT_FOUND)
         return Response(job)
 
-    def _run_and_callback(self, job_id, sites, site_flags, request_logger, log_path, ts, callback_url):
+    def _run_job(self, job_id, sites, site_flags, request_logger, log_path, ts):
         try:
             result = run_nci_analysis(sites, request_logger, log_path, ts, job_id=job_id)
             if isinstance(result, dict) and isinstance(result.get("sites_summary"), dict):
@@ -181,17 +184,6 @@ class NCIAnalysisAPIView(BaseCallFlowAPIView):
         except Exception as e:
             request_logger.exception(f"[NCI JOB FAILED] {job_id}: {e}")
             job_manager.update_job(job_id, status="FAILED", step="failed", error=str(e))
-            safe_result = {"job_id": job_id, "status": "FAILED", "error": str(e)}
-
-        if not callback_url:
-            return  # async=1 only: the caller polls, nothing to POST
-
-        import requests  # local import: only needed on the callback path
-        try:
-            requests.post(callback_url, json=safe_result, timeout=10)
-            request_logger.info(f"[NCI] callback POSTed to {callback_url}")
-        except Exception as e:
-            request_logger.error(f"[NCI] callback POST to {callback_url} failed: {e}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RCA for a list of sites -- same analysis as the RCA tool in the frontend
@@ -227,8 +219,7 @@ class NCIRcaSitesAPIView(BaseCallFlowAPIView):
       "start_date": "2026-10-11 10:00",   # optional, default end_date - 3h
       "end_date":   "2026-10-11 13:00",   # optional, default now (rounded down to the hour)
       "baseline_method": "auto",          # auto | 2h_before | yesterday  (RCA tool default: auto)
-      "async": true,                      # optional, same as ?async=1
-      "callback_url": "..."               # optional, same contract as /analysis/
+      "async": true                       # optional, same as ?async=1
     }
     Response: same sites_summary fields as /analysis/ (critical_cases, minor_cases,
     trouble_tickets, FLAG) plus status, is_degraded, rca_score, rank,
@@ -264,17 +255,17 @@ class NCIRcaSitesAPIView(BaseCallFlowAPIView):
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        callback_url = request.data.get("callback_url")
         async_mode = _is_async(request)
         who = get_request_identity(request)
         log_path, ts = self.get_log_file("nci_rca", "now", "now")
         request_logger = build_request_logger(log_path, ts, who)
         request_logger.info(
             f"[NCI-RCA] by {who}, sites={len(sites)}, window={start}..{end}, "
-            f"baseline={baseline_method}, async={async_mode}, callback_url={bool(callback_url)}"
+            f"baseline={baseline_method}, async={async_mode}"
         )
+        _log_ignored_callback(request, request_logger, "[NCI-RCA]")
 
-        if not callback_url and not async_mode:
+        if not async_mode:
             try:
                 result = run_rca_site_analysis(sites, start, end, request_logger, log_path, ts, baseline_method)
                 _attach_flags(result, site_flags)
@@ -285,8 +276,8 @@ class NCIRcaSitesAPIView(BaseCallFlowAPIView):
 
         job_id = job_manager.create_job(who=who, job_type="nci_rca")
         threading.Thread(
-            target=self._run_and_callback,
-            args=(job_id, sites, site_flags, start, end, baseline_method, request_logger, log_path, ts, callback_url),
+            target=self._run_job,
+            args=(job_id, sites, site_flags, start, end, baseline_method, request_logger, log_path, ts),
             daemon=True,
         ).start()
         request_logger.info(f"[NCI-RCA JOB STARTED] {job_id}")
@@ -303,8 +294,8 @@ class NCIRcaSitesAPIView(BaseCallFlowAPIView):
             return Response({"error": "job not found or expired"}, status=status.HTTP_404_NOT_FOUND)
         return Response(job)
 
-    def _run_and_callback(self, job_id, sites, site_flags, start, end, baseline_method,
-                          request_logger, log_path, ts, callback_url):
+    def _run_job(self, job_id, sites, site_flags, start, end, baseline_method,
+                 request_logger, log_path, ts):
         try:
             result = run_rca_site_analysis(sites, start, end, request_logger, log_path, ts, baseline_method, job_id=job_id)
             _attach_flags(result, site_flags)
@@ -314,13 +305,3 @@ class NCIRcaSitesAPIView(BaseCallFlowAPIView):
         except Exception as e:
             request_logger.exception(f"[NCI-RCA JOB FAILED] {job_id}: {e}")
             job_manager.update_job(job_id, status="FAILED", step="failed", error=str(e))
-            safe_result = {"job_id": job_id, "status": "FAILED", "error": str(e)}
-
-        if not callback_url:
-            return  # async=1 only: the caller polls, nothing to POST
-
-        import requests
-        try:
-            requests.post(callback_url, json=safe_result, timeout=10)
-        except Exception as e:
-            request_logger.error(f"[NCI-RCA] callback POST to {callback_url} failed: {e}")
