@@ -36,7 +36,11 @@ SMARTCARE_DB_PASSWORD  = os.getenv("smartcareDB_PASSWORD")
 
 STCC_SMARTCARE_DB_USER  = os.getenv("STCC_SMARTCARE_DB_USER")
 STCC_SMARTCARE_DB_PASSWORD  = os.getenv("STCC_SMARTCARE_DB_PASSWORD")
-
+SYBASE_ENIQ_HOST = os.getenv("SYBASE_ENIQ_HOST")
+SYBASE_ENIQ_PORT = os.getenv("SYBASE_ENIQ_PORT")
+SYBASE_ENIQ_DATABASE = os.getenv("SYBASE_ENIQ_DATABASE")
+SYBASE_ENIQ_USER = os.getenv("SYBASE_ENIQ_USER")
+SYBASE_ENIQ_PASSWORD = os.getenv("SYBASE_ENIQ_PASSWORD")
 
 
 SPLUNK_USER = os.getenv("splunk_USER")
@@ -87,7 +91,8 @@ CORS_ALLOWED_ORIGINS = [
      'https://10.30.30.177',
      'https://10.30.30.178',
      'https://10.230.206.76',
-     'http://egoct-wirkp07:8009'
+     'http://egoct-wirkp07:8009',
+     'http://10.230.105.140:8009'
  ]
  
 
@@ -276,7 +281,7 @@ CACHES = {
 LOG_DIR = '/home/AutomationProjects/CallFlowTool/backend/callflow_portal/requestlogs/' 
 os.makedirs(LOG_DIR, exist_ok=True) 
 
-
+os.makedirs(os.path.join(OUTPUT_DIR, 'logs'), exist_ok=True)  # Ensure the logs directory exists
 LOGGING = { 
             'version': 1, 
             'disable_existing_loggers': False, 
@@ -288,17 +293,30 @@ LOGGING = {
                 }, 
             'handlers': { 
                 'request_file': { 
-                    'level': 'WARNING', 
+                    'level': 'INFO', 
                     'class': 'logging.handlers.RotatingFileHandler', 
                     'filename': os.path.join(LOG_DIR, 'request_tracker.log'), 
                     'maxBytes': 10 * 1024 * 1024, # 10 MB 
                     'backupCount': 5, 
-                    'formatter': 'verbose', }, }, 
+                    'formatter': 'verbose', },
+                'callflow_logs': { 
+                        'level': 'INFO', 
+                        'class': 'logging.handlers.RotatingFileHandler', 
+                        'filename': os.path.join(OUTPUT_DIR, 'logs','callflow.log'), 
+                        'maxBytes': 10 * 1024 * 1024, # 10 MB 
+                        'backupCount': 5, 
+                        'formatter': 'verbose', }}, 
             'loggers': { 
                 'request_tracker': { 
                     'handlers': ['request_file'], 
-                    'level': 'WARNING', 
+                    'level': 'INFO', 
                     'propagate': True, 
                     }, 
+                'callflow_logger': {
+                    'handlers': ['callflow_logs'],
+                    'level': 'INFO',
+                    'propagate': True,
                 }, 
-        }
+   
+        } 
+}

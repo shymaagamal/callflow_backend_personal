@@ -45,9 +45,9 @@ from ..constants.voice_kpis_Eniq_Queries import VOICE_KPI_ENIQ_QUERIES
 from ..utils.connections import EniqConnection
 from ..utils.data_utils import convert_java_types
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('callflow_logger')
 
-DEFAULT_HOURS = 1
+DEFAULT_HOURS = 7
 MAX_HOURS = 168
 DEFAULT_WORKERS = 4
 MAX_WORKERS = 20
@@ -141,6 +141,7 @@ def _worker(worker_id, jobs, results, out_dir, connect_errors, connected):
                 return
             started = time.monotonic()
             try:
+                logger.info("[ENIQ] worker %s: running %s", worker_id, kpi_name)
                 results[kpi_name] = _run_query(conn, kpi_name, sql, out_dir)
                 logger.info("[ENIQ] worker %s: %s OK (%s rows)", worker_id,
                             kpi_name, results[kpi_name]["count"])
@@ -170,6 +171,7 @@ class SybaseQueryView(APIView):
 
     def get(self, request):
         try:
+            print("request.query_params", request.query_params)
             hours = _int_param(request.query_params.get("hours"),
                                DEFAULT_HOURS, 1, MAX_HOURS, "hours")
             workers = _int_param(request.query_params.get("workers"),
