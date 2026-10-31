@@ -34,7 +34,7 @@ from ..orchestration import pipeline as pl
 from ..orchestration import summary_readiness
 from ..orchestration.analyzers import NppAnalyzer, ViaviAnalyzer, RemedyAnalyzer, SplunkAnalyzer
 from ..orchestration.customer_counts import CTX_KEY
-from ..services import smartcare_site_kpi_service as site_kpi_service
+from ..services import trino_site_kpi_service as site_kpi_service
 from ..services.smartcare_service import process_smartcare_data
 from ..services.trino_service import customer_counts_from_df
 from ..views import orchestrated_analysis as oa

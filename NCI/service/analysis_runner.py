@@ -30,6 +30,7 @@ from callflow.core.services.kpi_analyzer import KPIAnalyzer
 
 from ..connectors.viavi_pool import get_viavi_pool
 from ..connectors.remedy_pool import get_remedy_pool
+from .rca_pipeline import run_nci_rca
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +125,7 @@ def _normalize_remedy_output(remedy_output: dict, sites: list) -> dict:
 
 # -- Per-source fetchers ----------------------------------------------------
 
-def fetch_npp_one_site(site, window, log_path, ts, resolution="hourly"):
+def fetch_npp_one_site(site, window, log_path, ts, resolution="15min"):
     cache_key = make_npp_cache_key([site], window["start"], window["end"], resolution, entity_type="site")
     cached = cache_get(cache_key)
     if cached is not None:
@@ -262,5 +263,4 @@ def build_site_summary(npp_raw_by_comparison: dict, viavi_raw_by_comparison: dic
 def run_nci_analysis(sites, request_logger, log_path, ts, job_id=None):
     """POST /NCI/analysis/: retrieval -> RCA files -> the existing RCA tool ->
     its per-site results in the NCI response shape. See rca_pipeline.py."""
-    from .rca_pipeline import run_nci_rca
     return run_nci_rca(sites, request_logger, log_path, ts, job_id=job_id)

@@ -18,7 +18,7 @@ RCA tool, which does all the analysis.
         Remedy      remedyTicketsData(sites derived from the cells)            -> remedy_kpi.csv
 
     Site run (POST /rca/sites/run)
-        Smartcare   fetch_smartcare_site_kpis (SmartcareSiteKpiAPIView's code) -> smartcare_site_kpis.json
+        Smartcare   fetch_trino_site_kpis (SmartcareSiteKpiAPIView's code) -> smartcare_site_kpis.json
         Splunk      unchanged                                                  -> splunk_<node>_kpi.csv
         NPP         nppIntegration(sites, entity_type="site")                  -> npp_kpi.csv
         Viavi       viaviQueries(sites)                                        -> viavi_kpi.csv

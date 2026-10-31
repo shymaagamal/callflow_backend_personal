@@ -70,7 +70,7 @@ from callflow.core.orchestration import rca_files as rf
 from callflow.core.rca_runner import collect, limits
 from callflow.core.rca_runner.browser_runner import RCARunError, run_rca_tool
 from callflow.core.rca_runner.report import build_report
-from callflow.core.services.smartcare_site_kpi_service import fetch_smartcare_site_kpis
+from callflow.core.services.trino_site_kpi_service import  fetch_trino_site_kpis
 from callflow.core.views.orchestrated_analysis import AnalysisOrchestratorAPIView as _Writers
 
 from ..utils.helpers import NCI_CACHE_GRANULARITY_MINUTES, _add_formatted, _round_down
@@ -196,7 +196,7 @@ def _retrieve_remedy(sites, complaint, log_path, ts):
 
 def _retrieve_trino(sites, windows, log_path, rlog):
     primary = windows["primary"]
-    return fetch_smartcare_site_kpis(sites, log_path, start=primary["start"], end=primary["end"],
+    return fetch_trino_site_kpis(sites, log_path, start=primary["start"], end=primary["end"],
                                      now=primary["end"], request_logger=rlog,
                                      window_names=("current", "prev_1day"))
 

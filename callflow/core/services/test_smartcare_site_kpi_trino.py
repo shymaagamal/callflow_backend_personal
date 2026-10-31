@@ -69,7 +69,7 @@ class FakeTrino:
 
 def run(fake, **kw):
     with mock.patch.object(svc, "run_trino_query", fake):
-        return svc.fetch_smartcare_site_kpis(SITES, now=NOW, **kw)
+        return svc.fetch_trino_site_kpis(SITES, now=NOW, **kw)
 
 
 class WindowSplitTests(SimpleTestCase):
@@ -110,7 +110,7 @@ class SiteListTests(SimpleTestCase):
         for bad in ["LU4820') OR 1=1 --", "A'B", "A B", ""]:
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 with mock.patch.object(svc, "run_trino_query", fake):
-                    svc.fetch_smartcare_site_kpis([bad] if bad else [" "], now=NOW)
+                    svc.fetch_trino_site_kpis([bad] if bad else [" "], now=NOW)
         self.assertEqual(fake.calls, [])
 
 
