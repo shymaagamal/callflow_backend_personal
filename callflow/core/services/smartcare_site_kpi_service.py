@@ -245,13 +245,15 @@ def run_part(window_name, source, site_list, start, end, request_logger=None):
 
 
 def fetch_smartcare_site_kpis(site_names, log_path="", tablename=None, start=None, end=None,
-                              now=None, request_logger=None):
+                              now=None, request_logger=None, window_names=None):
     """S1-MME KPIs per site for the three NCI windows, from Trino.
 
     start/end (optional): the current window; default the last 12 hours.
     now (optional, tests): the clock used for the default window and the
     ClickHouse/Hive cutoff. ``log_path`` and ``tablename`` are kept for the
     existing callers and are not used.
+    window_names (optional): only these windows (e.g. ("current", "prev_1day"));
+    default all three.
 
     A window with a failed query has no ``s1mme`` records (no partial totals);
     the failure is in ``errors`` and ``queries``.
@@ -265,6 +267,8 @@ def fetch_smartcare_site_kpis(site_names, log_path="", tablename=None, start=Non
     now = _round_down(now or datetime.datetime.now(), NCI_CACHE_GRANULARITY_MINUTES)
     cutoff = now - datetime.timedelta(hours=RECENT_HOURS)
     windows = build_nci_time_windows(now=now, start=start, end=end)
+    if window_names:
+        windows = {k: v for k, v in windows.items() if k in window_names}
     log.info("[SITE KPI] Trino S1-MME for %d site(s) %s; ClickHouse from %s, Hive before",
              len(sites), sites, cutoff)
 

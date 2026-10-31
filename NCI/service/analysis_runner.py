@@ -1,31 +1,23 @@
 # NCI/service/analysis_runner.py
 """
-Orchestrates NCI's 3-period x 4-source analysis (NPP, Viavi, Remedy and the
-Trino S1-MME site KPIs -- see trino_site_analysis.py), then rolls everything up
-into ONE line per requested site.
+NCI data access shared by the NCI endpoints.
 
-KEY FIX in this version: canonicalization. Viavi (FLWID LIKE '%site%') and
-Remedy (site LIKE '%site%') both match on SUBSTRING, so the raw identifier
-they return is often NOT your exact input string -- e.g. requested site
-"0160" comes back from Viavi as "CU0160", "GU0160",
-"QT-RMD-P2-InnerIP-HUK0160-BEDataQueue", etc, and from Remedy as "G1797"
-for requested site "1797". Left unfixed, each of those becomes its own
-bogus "site" in the output.
+POST /NCI/analysis/  run_nci_analysis -> rca_pipeline.run_nci_rca: the sites go
+                     through the existing RCA tool (rca_tool_V24.html); the old
+                     3-period KPIAnalyzer comparisons are no longer used there.
+POST /NCI/rca/       rca_site_runner, which still uses the fetchers,
+                     canonicalization and build_site_summary below.
 
-Fix: right after each source is fetched, every raw identifier is mapped
-back to whichever of the ORIGINALLY REQUESTED sites it contains, and
-results for the same requested site are merged. This happens ONCE, at
-the fetch boundary -- every downstream function (summarize_npp,
-summarize_viavi, summarize_remedy, build_site_summary) then just works
-with clean, canonical site keys without needing its own fix.
+Canonicalization: Viavi (FLWID LIKE '%site%') and Remedy (site LIKE '%site%')
+match on SUBSTRING, so the raw identifier they return is often not the exact
+input string (e.g. "0160" comes back as "CU0160"). _canonicalize maps a raw
+identifier back to the requested site it contains.
 """
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Semaphore
 
 import pandas as pd
-from callflow.core.jobs import job_manager
 
 from callflow.core.utils.file_cache import (
     cache_get, cache_set,
@@ -38,8 +30,6 @@ from callflow.core.services.kpi_analyzer import KPIAnalyzer
 
 from ..connectors.viavi_pool import get_viavi_pool
 from ..connectors.remedy_pool import get_remedy_pool
-from ..utils.helpers import build_nci_time_windows
-from .trino_site_analysis import fetch_trino_site_kpis, run_trino_comparisons, trino_errors
 
 logger = logging.getLogger(__name__)
 
@@ -196,115 +186,6 @@ def fetch_remedy(sites, window, log_path, ts):
     return result
 
 
-# -- Run each comparison ONCE, share the raw (severity-carrying) result ----
-
-def _run_npp_comparisons(npp_by_period: dict, windows: dict, ts: str) -> dict:
-    raw = {}
-    for display_key, period_key, baseline_key in _COMPARISONS:
-        current_df = npp_by_period.get(period_key, pd.DataFrame())
-        baseline_df = npp_by_period.get(baseline_key, pd.DataFrame())
-        combined = pd.concat([current_df, baseline_df], ignore_index=True) if not current_df.empty else pd.DataFrame()
-        if combined.empty:
-            raw[display_key] = {"affected_cells_list": [], "affected_cells_details": {}}
-        else:
-            raw[display_key] = _analyzer.analyze_npp(
-                combined, "hourly",
-                windows[period_key]["start"], windows[period_key]["end"],
-                windows[baseline_key]["start"], windows[baseline_key]["end"],
-                ts,
-                entity_type="site",
-            )
-    return raw
-
-
-def _run_viavi_comparisons(viavi_by_period: dict, all_sites: list, windows: dict, ts: str) -> dict:
-    raw = {}
-    for display_key, period_key, baseline_key in _COMPARISONS:
-        current_df = viavi_by_period.get(period_key, pd.DataFrame())
-        baseline_df = viavi_by_period.get(baseline_key, pd.DataFrame())
-        combined = pd.concat([current_df, baseline_df], ignore_index=True) if not current_df.empty else pd.DataFrame()
-        if combined.empty:
-            raw[display_key] = {"affected_sites_list": [], "affected_sites_details": {}}
-        else:
-            raw[display_key] = _analyzer.analyze_viavi(
-                combined, all_sites,
-                windows[period_key]["start"], windows[period_key]["end"],
-                windows[baseline_key]["start"], windows[baseline_key]["end"],
-                ts,
-            )
-    return raw
-
-
-# -- Slim per-system/per-comparison views (message-only, no severity) -----
-
-def _messages_only(affected_details: dict) -> dict:
-    out = {}
-    for entity_id, info in affected_details.items():
-        kpis = info.get("kpis", {})
-        messages = [(k.get("message") or k.get("insight_message")) for k in kpis.values()]
-        out[entity_id] = [m for m in messages if m]
-    return out
-
-
-def summarize_npp(npp_raw_by_comparison: dict, npp_by_period: dict, all_sites: list) -> dict:
-    out = {}
-    for display_key, period_key, baseline_key in _COMPARISONS:
-        current_df = npp_by_period.get(period_key, pd.DataFrame())
-        sites_with_data = set(current_df[NPP_ENTITY_COL].unique()) if (not current_df.empty and NPP_ENTITY_COL in current_df.columns) else set()
-        no_data_sites = sorted(set(all_sites) - sites_with_data)
-
-        raw = npp_raw_by_comparison[display_key]
-        abnormal_details = _messages_only(raw["affected_cells_details"])
-        abnormal_sites = sorted(abnormal_details.keys())
-        healthy_sites = sorted(sites_with_data - set(abnormal_sites))
-
-        out[display_key] = {
-            "abnormal_sites_count": len(abnormal_sites),
-            "abnormal_sites": abnormal_sites,
-            "abnormal_sites_details": abnormal_details,
-            "healthy_sites_count": len(healthy_sites),
-            "healthy_sites": healthy_sites,
-            "no_data_sites_count": len(no_data_sites),
-            "no_data_sites": no_data_sites,
-        }
-    return out
-
-
-def summarize_viavi(viavi_raw_by_comparison: dict, viavi_by_period: dict, all_sites: list) -> dict:
-    out = {}
-    for display_key, period_key, baseline_key in _COMPARISONS:
-        current_df = viavi_by_period.get(period_key, pd.DataFrame())
-        sites_with_data = set(current_df["FLWID"].unique()) if not current_df.empty else set()
-        no_data_sites = sorted(set(all_sites) - sites_with_data)
-
-        raw = viavi_raw_by_comparison[display_key]
-        abnormal_details = _messages_only(raw["affected_sites_details"])
-        abnormal_sites = sorted(abnormal_details.keys())
-        healthy_sites = sorted(sites_with_data - set(abnormal_sites))
-
-        out[display_key] = {
-            "abnormal_sites_count": len(abnormal_sites),
-            "abnormal_sites": abnormal_sites,
-            "abnormal_sites_details": abnormal_details,
-            "healthy_sites_count": len(healthy_sites),
-            "healthy_sites": healthy_sites,
-            "no_data_sites_count": len(no_data_sites),
-            "no_data_sites": no_data_sites,
-        }
-    return out
-
-
-def summarize_remedy(remedy_by_period: dict) -> dict:
-    out = {}
-    for period_key, display_key in _DISPLAY_KEY.items():
-        remedy_output, total_tickets = remedy_by_period.get(period_key, ({}, 0))
-        out[display_key] = {
-            "total_tickets": total_tickets,
-            "sites_with_tickets": list(remedy_output.keys()) if remedy_output else [],
-        }
-    return out
-
-
 # -- The deliverable: one line per requested site ----------------------------
 
 def _ingest_npp_issues(npp_raw_by_comparison: dict, site_issues: dict) -> None:
@@ -341,30 +222,13 @@ def _ingest_viavi_issues(viavi_raw_by_comparison: dict, site_issues: dict) -> No
                     }
 
 
-def _ingest_trino_issues(trino_raw_by_comparison: dict, site_issues: dict) -> None:
-    for display_key, raw in (trino_raw_by_comparison or {}).items():
-        for site, info in raw["affected_sites_details"].items():
-            bucket = site_issues.setdefault(site, {})
-            for kpi_name, kpi_info in info.get("kpis", {}).items():
-                severity = kpi_info.get("severity", "minor")
-                key = (kpi_name, site)
-                existing = bucket.get(key)
-                if existing is None or _severity_rank(severity) > _severity_rank(existing["severity"]):
-                    bucket[key] = {
-                        "severity": severity,
-                        "message": kpi_info.get("message") or kpi_info.get("insight_message"),
-                        "source": "trino",
-                        "site": site,
-                    }
-
-
 def build_site_summary(npp_raw_by_comparison: dict, viavi_raw_by_comparison: dict,
-                        remedy_by_period: dict, all_sites: list,
-                        trino_raw_by_comparison: dict = None) -> dict:
+                        remedy_by_period: dict, all_sites: list) -> dict:
+    """Used by the NCI RCA endpoint (rca_site_runner); POST /NCI/analysis/ no
+    longer uses it -- its counts come from the RCA tool (rca_pipeline)."""
     site_issues: dict = {}
     _ingest_npp_issues(npp_raw_by_comparison, site_issues)
     _ingest_viavi_issues(viavi_raw_by_comparison, site_issues)
-    _ingest_trino_issues(trino_raw_by_comparison, site_issues)
     logger.info(f"[NCI] build_site_summary: {len(site_issues)} sites with issues, {sum(len(v) for v in site_issues.values())} total issues")
     site_ticket_ids: dict = {}
     for period_key, (remedy_output, _total) in remedy_by_period.items():
@@ -396,91 +260,7 @@ def build_site_summary(npp_raw_by_comparison: dict, viavi_raw_by_comparison: dic
 # -- Orchestration -----------------------------------------------------------
 
 def run_nci_analysis(sites, request_logger, log_path, ts, job_id=None):
-    windows = build_nci_time_windows()
-
-    max_workers = min(len(sites) * 3 + 6, 30)
-
-    tasks = {}
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        for period_name, window in windows.items():
-            for site in sites:
-                fut = executor.submit(fetch_npp_one_site, site, window, log_path, ts)
-                tasks[fut] = (period_name, "npp", site)
-
-            fut = executor.submit(fetch_viavi, sites, window, log_path, ts)
-            tasks[fut] = (period_name, "viavi", None)
-
-            fut = executor.submit(fetch_remedy, sites, window, log_path, ts)
-            tasks[fut] = (period_name, "remedy", None)
-
-        # Trino S1-MME site KPIs: one task covers all three windows.
-        fut = executor.submit(fetch_trino_site_kpis, sites, windows, log_path)
-        tasks[fut] = ("current", "trino", None)
-
-        npp_by_period_lists = {p: [] for p in windows}
-        viavi_by_period = {}
-        remedy_by_period = {}
-        trino_result = {}
-        errors = {"npp": [], "viavi": [], "remedy": [], "trino": []}
-
-        done = 0
-        total = len(tasks)
-        for future in as_completed(tasks):
-            period_name, source, site = tasks[future]
-            try:
-                data = future.result()
-                if source == "npp":
-                    npp_by_period_lists[period_name].append(data)
-                elif source == "viavi":
-                    viavi_by_period[period_name] = data
-                elif source == "remedy":
-                    remedy_by_period[period_name] = data
-                elif source == "trino":
-                    trino_result = data
-                    errors["trino"].extend(trino_errors(data, _DISPLAY_KEY))
-                    if data.get("error"):
-                        request_logger.warning(f"[NCI] trino: {data['error']}")
-            except Exception as e:
-                label = f"{source}" + (f"/{site}" if site else "")
-                request_logger.error(f"[NCI] {label}/{period_name} failed: {e}")
-                entry = {"period": "all" if source == "trino" else _DISPLAY_KEY[period_name], "error": str(e)}
-                if site:
-                    entry["site"] = site
-                errors[source].append(entry)
-
-            done += 1
-            if job_id is not None:
-                job_manager.update_job(
-                    job_id, status="RUNNING",
-                    step=f"{source}/{period_name}",
-                    progress_percent=int(done / total * 100),
-                )
-
-    # Concat NPP's per-site parts, then canonicalize ALL THREE sources
-    # against the requested site list -- see module docstring.
-    npp_by_period = {}
-    for period_name, parts in npp_by_period_lists.items():
-        df = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
-        npp_by_period[period_name] = _normalize_npp_df(df, sites)
-
-    viavi_by_period = {
-        period_name: _normalize_viavi_df(df, sites)
-        for period_name, df in viavi_by_period.items()
-    }
-
-    remedy_by_period = {
-        period_name: (_normalize_remedy_output(remedy_output, sites), total_tickets)
-        for period_name, (remedy_output, total_tickets) in remedy_by_period.items()
-    }
-
-    npp_raw = _run_npp_comparisons(npp_by_period, windows, ts)
-    viavi_raw = _run_viavi_comparisons(viavi_by_period, sites, windows, ts)
-    trino_raw = run_trino_comparisons(_analyzer, trino_result, sites, _COMPARISONS)
-
-    return {
-        "sites_summary": build_site_summary(npp_raw, viavi_raw, remedy_by_period, sites, trino_raw),
-        # "npp": summarize_npp(npp_raw, npp_by_period, sites),
-        # "viavi": summarize_viavi(viavi_raw, viavi_by_period, sites),
-        # "remedy": summarize_remedy(remedy_by_period),
-        "errors": errors,
-    }
+    """POST /NCI/analysis/: retrieval -> RCA files -> the existing RCA tool ->
+    its per-site results in the NCI response shape. See rca_pipeline.py."""
+    from .rca_pipeline import run_nci_rca
+    return run_nci_rca(sites, request_logger, log_path, ts, job_id=job_id)

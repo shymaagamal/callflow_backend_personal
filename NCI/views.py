@@ -2,8 +2,9 @@
 """
 NCI is a public-facing API with an unknown/uncontrolled frontend, so the
 default endpoint is a PLAIN SYNCHRONOUS request/response -- no job_id,
-no polling contract assumed. Speed comes from caching + the concurrent
-fetch in analysis_runner.run_nci_analysis, not from making the caller poll.
+no polling contract assumed. POST /NCI/analysis/ retrieves Trino / NPP /
+Viavi / Remedy, runs the existing RCA tool on that data and returns the
+tool's per-site results in the NCI response (service/rca_pipeline.py).
 
 One opt-in way to avoid holding the connection open (useful when a reverse
 proxy in front of Gunicorn cuts long requests with a 502):
@@ -138,6 +139,7 @@ class NCIAnalysisAPIView(BaseCallFlowAPIView):
                     for site, summary in result["sites_summary"].items():
                         if site in site_flags:
                             summary["FLAG"] = site_flags[site]
+                request_logger.info(f"[NCI] final response generated for {len(sites)} site(s)")
 
                 return Response(
                     _json_safe(result),
@@ -180,6 +182,7 @@ class NCIAnalysisAPIView(BaseCallFlowAPIView):
 
             safe_result = _json_safe(result)
             job_manager.update_job(job_id, status="DONE", step="completed", progress_percent=100, result=safe_result)
+            request_logger.info(f"[NCI] final response generated for {len(sites)} site(s)")
             request_logger.info(f"[NCI JOB DONE] {job_id}")
         except Exception as e:
             request_logger.exception(f"[NCI JOB FAILED] {job_id}: {e}")

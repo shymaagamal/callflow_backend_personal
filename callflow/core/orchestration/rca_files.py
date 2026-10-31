@@ -60,7 +60,7 @@ RCA_FAILED = "FAILED"
 
 # How the RCA HTML tool buckets files it consumes.
 KPI_SYSTEMS = ("npp", "splunk", "viavi", "remedy")
-FILTER_SYSTEMS = ("smartcare",)
+FILTER_SYSTEMS = ("smartcare", "scope")   # scope: NCI site scope file (NCI/service/rca_pipeline.py)
 THRESHOLD_SYSTEMS = ("threshold",)
 THRESHOLD_SYSTEM = "threshold"
 
