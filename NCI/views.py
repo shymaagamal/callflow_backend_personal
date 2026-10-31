@@ -103,6 +103,7 @@ class NCIAnalysisAPIView(BaseCallFlowAPIView):
     """
 
     def post(self, request):
+        print("NCI Analysis called")
         site_names = request.data.get("site_names")
         if not site_names or not isinstance(site_names, list):
             return Response(

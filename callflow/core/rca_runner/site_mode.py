@@ -16,13 +16,13 @@ systems' existing retrieval functions (rca_runner/collect.py):
     Viavi      viaviQueries(sites)
     Remedy     remedyTicketsData(sites)
     Splunk     unchanged (not site based)
-    Smartcare  fetch_smartcare_site_kpis (the SmartcareSiteKpiAPIView implementation,
+    Smartcare  fetch_trino_site_kpis (the SmartcareSiteKpiAPIView implementation,
                S1-MME site KPIs now read from Trino) for the sites and the request's time range
 """
 
 import re
 
-from ..services.smartcare_site_kpi_service import fetch_smartcare_site_kpis
+from ..services.trino_site_kpi_service import fetch_trino_site_kpis
 
 _MSISDN_KEYS = ("msisdn", "msisdn_list")
 _MSISDN_ONLY_KEYS = _MSISDN_KEYS + ("complain_type", "Complain_Type", "imsi")
@@ -116,13 +116,13 @@ def parse_site_request(data):
 
 
 # ------------------------------------------------------------ site sources --
-def fetch_smartcare(ctx):
+def fetch_trino(ctx):
     """The SmartcareSiteKpiAPIView implementation for the sites and this request's range.
 
-    fetch_smartcare_site_kpis reports "no cells for these sites" and per-query
+    fetch_trino_site_kpis reports "no cells for these sites" and per-query
     failures inside its result instead of raising; a result with no rows and only
     query errors is a failure, not an empty success."""
-    kpis = fetch_smartcare_site_kpis(ctx["sitelist"], ctx.get("log_path", ""),
+    kpis = fetch_trino_site_kpis(ctx["sitelist"], ctx.get("log_path", ""),
                                      start=ctx["start_dt"], end=ctx["end_dt"])
     rows = sum(len(v) for w in (kpis.get("windows") or {}).values()
                for v in w.values() if isinstance(v, list))

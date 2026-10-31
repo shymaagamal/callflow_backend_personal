@@ -2,7 +2,7 @@
 """
 Trino S1-MME site KPIs as a 4th NCI source, next to NPP / Viavi / Remedy.
 
-Retrieval reuses fetch_smartcare_site_kpis (the SmartcareSiteKpiAPIView code,
+Retrieval reuses fetch_trino_site_kpis (the SmartcareSiteKpiAPIView code,
 now on Trino) for NCI's own three windows. Analysis reuses KPIAnalyzer's
 threshold check (_check_thresholds -> the RCA rule port) with the
 S1MME_SITE thresholds, for the same three comparisons as NPP / Viavi. The
@@ -26,7 +26,7 @@ import hashlib
 import logging
 
 from callflow.core.utils.file_cache import cache_get, cache_set
-from callflow.core.services.smartcare_site_kpi_service import fetch_smartcare_site_kpis
+from callflow.core.services.trino_site_kpi_service import fetch_trino_site_kpis
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ def fetch_trino_site_kpis(sites, windows, log_path=""):
     if cached is not None:
         return cached
     current = windows["current"]
-    result = fetch_smartcare_site_kpis(sites, log_path, start=current["start"], end=current["end"],
+    result = fetch_trino_site_kpis(sites, log_path, start=current["start"], end=current["end"],
                                        now=current["end"])
     if not result.get("errors") and not result.get("error"):
         cache_set(key, result, ttl_seconds=TRINO_CACHE_TTL)

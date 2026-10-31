@@ -136,7 +136,7 @@ import pandas as _pd
 from django.conf import settings as _settings
 from django.test import override_settings as _override_settings
 
-from callflow.core.services import smartcare_site_kpi_service as _svc
+from callflow.core.services import trino_site_kpi_service as _svc
 from .service import analysis_runner as _runner
 from .service import rca_pipeline as _pipe
 

@@ -1,13 +1,13 @@
-dqi_script = """SELECT `Date`, DED_BEARER_REQ_TIMES
+dqi_script = """SELECT Date, DED_BEARER_REQ_TIMES
 FROM (
-SELECT `Date`, SUM(DED_BEARER_REQ_TIMES)  AS DED_BEARER_REQ_TIMES
-FROM incident_db.Node_DETAIL_CDR_S1MME
-WHERE Date >= NOW() - INTERVAL 6 HOUR
-GROUP BY `Date`
-ORDER BY `Date` DESC
+SELECT Date, SUM(DED_BEARER_REQ_TIMES)  AS DED_BEARER_REQ_TIMES
+FROM clickhouse.incident_db.Node_DETAIL_CDR_S1MME
+WHERE Date >= date_add('hour' , -6 , current_timestamp)
+GROUP BY Date
+ORDER BY Date DESC
 OFFSET 2
 )
-ORDER BY `Date` ASC"""
+ORDER BY Date ASC"""
 
 
 dqi_script_1= """WITH cfg AS (

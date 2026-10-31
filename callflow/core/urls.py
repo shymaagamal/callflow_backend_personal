@@ -10,11 +10,12 @@ Every system gets a matching GET <job_id> route for polling.
 from django.urls import path
 
 from callflow.core.views.smartcare_API import SmartcareAPIView
+from callflow.core.views.trino_site_kpi import TrinoSiteKpiAPIView
 
 
 from .views.test_npp_kpi import NppKpiAPIView
 
-from .views.smartcare_site_kpi import SmartcareSiteKpiAPIView
+from .views.trino_site_kpi import TrinoSiteKpiAPIView
 # from .views.smartcare_failure import SmartcareSCFAPIView
 # from .views.smartcare import SmartcareIntegrationAPIView
 # from .views.splunk import SplunkIntegrationAPIView
@@ -71,7 +72,7 @@ urlpatterns =[
     path("stcc/analysis", STCCAnalysisAPIView.as_view(), name="stcc-analysis"),
     path("stcc/analysis/<str:job_id>", STCCAnalysisAPIView.as_view(), name="stcc-analysis-job-status"),
      path(
-     "smartcare/site-kpis",SmartcareSiteKpiAPIView.as_view(),name="smartcare-site-kpis",
+     "trino/site-kpis",TrinoSiteKpiAPIView.as_view(),name="trino-site-kpis",
      ),
      path("npp/kpis", NppKpiAPIView.as_view(), name="npp-kpis"),
 

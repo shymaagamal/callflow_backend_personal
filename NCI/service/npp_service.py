@@ -7,11 +7,11 @@ from callflow_portal.callflow.core.services.npp_service import NPP_CACHE_TTL, np
 
 
 def fetch_npp_one_cell(cell, window, log_path, ts):
-    cache_key = make_npp_cache_key([cell], window["start"], window["end"], "hourly")
+    cache_key = make_npp_cache_key([cell], window["start"], window["end"], "15min")
     cached = cache_get(cache_key)
     if cached is not None:
         return cached
-    df = nppIntegration([cell], window["start"], window["end"], log_path, ts, "hourly")
+    df = nppIntegration([cell], window["start"], window["end"], log_path, ts, "15min")
     if not df.empty:
         cache_set(cache_key, df, ttl_seconds=NPP_CACHE_TTL)
     return df
