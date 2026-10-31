@@ -1,7 +1,7 @@
 
 # ---------------------------------------------------------------------------
 # Trino S1-MME site KPIs (replace the Smartcare JDBC queries above for the
-# NCI site KPIs; see services/smartcare_site_kpi_service.py).
+# NCI site KPIs; see services/trino_site_kpi_service.py).
 #
 # Placeholders, filled by the service only:
 #   {site_list}    ('SITE_A','SITE_B')   -- validated + quote-escaped site ids
@@ -16,8 +16,12 @@
 # ---------------------------------------------------------------------------
 
 # Most recent 6 hours: ClickHouse 15-minute table.
+# Time is returned as epoch seconds (BIGINT), not from_unixtime(...): a
+# "timestamp with time zone" comes back from some Trino client versions with a
+# zone object that has no UTC offset, which cannot be converted
+# ("'NoneType' object has no attribute 'total_seconds'").
 trino_s1mme_recent_15min = """SELECT
-    from_unixtime(STARTTIME) AS Time,
+    CAST(a.STARTTIME AS BIGINT) AS Time,
     a.Site_Logical_Name AS Site_Logical_Name,
     SUM(S1MME_ATTACH_REQ_TIMES) AS ATTACH_REQ_TIMES,
     SUM(S1MME_ATTACH_FAIL_TIMES) AS ATTACH_FAIL_TIMES,
@@ -38,7 +42,7 @@ WHERE a.Site_Logical_Name IN {site_list}
   AND a.STARTTIME >= {start_epoch}
   AND a.STARTTIME < {end_epoch}
 GROUP BY
-    from_unixtime(STARTTIME),
+    CAST(a.STARTTIME AS BIGINT),
     a.Site_Logical_Name,
     b.FAIL_CAUSE_NAME"""
 

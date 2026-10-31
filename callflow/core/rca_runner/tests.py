@@ -176,7 +176,7 @@ def retrievers_for(sources, site_run=False):
         return ctx.pop(pl.TRINO_FRAME_KEY)
     return collect.Retrievers(
         trino=trino,
-        smartcare=site_mode.fetch_smartcare if site_run else sources.fetch_smartcare,
+        smartcare=site_mode.fetch_trino if site_run else sources.fetch_smartcare,
         derive_sites=sources.derive_sites, npp=sources.retrieve_npp, viavi=sources.retrieve_viavi,
         remedy=sources.retrieve_remedy, splunk=sources.retrieve_splunk)
 
@@ -477,8 +477,8 @@ class FakeTrinoSites:
     def __call__(self, sql):
         source = (site_kpi_service.RECENT_SOURCE if "clickhouse.e2e." in sql
                   else site_kpi_service.HISTORY_SOURCE)
-        start = int(re.search(r"PROC_STARTTIME >= (\d+)", sql).group(1))
-        end = int(re.search(r"PROC_STARTTIME < (\d+)", sql).group(1))
+        start = int(re.search(r">= (\d+)", sql).group(1))
+        end = int(re.search(r"\s<\s(\d+)", sql).group(1))
         self.calls.append({"source": source, "sql": sql, "start_epoch": start, "end_epoch": end})
         if not self.rows:
             return pd.DataFrame(columns=self.COLS)
@@ -583,7 +583,7 @@ class RequestFormatTests(SimpleTestCase):
             r_site = collect.default_retrievers(True)
         src = ds.return_value
         self.assertIs(r_msisdn.smartcare, src.fetch_smartcare)            # MSISDN Smartcare query
-        self.assertIs(r_site.smartcare, site_mode.fetch_smartcare)        # SmartcareSiteKpiAPIView code
+        self.assertIs(r_site.smartcare, site_mode.fetch_trino)        # SmartcareSiteKpiAPIView code
         for r in (r_msisdn, r_site):
             self.assertEqual((r.npp, r.viavi, r.remedy, r.splunk),
                              (src.retrieve_npp, src.retrieve_viavi, src.retrieve_remedy, src.retrieve_splunk))

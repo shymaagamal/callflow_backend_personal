@@ -212,8 +212,8 @@ class _Systems:
 
     def trino(self, sql):
         recent = "clickhouse.e2e." in sql
-        start = int(_re.search(r"PROC_STARTTIME >= (\d+)", sql).group(1))
-        end = int(_re.search(r"PROC_STARTTIME < (\d+)", sql).group(1))
+        start = int(_re.search(r">= (\d+)", sql).group(1))
+        end = int(_re.search(r"\s<\s(\d+)", sql).group(1))
         with self.lock:
             self.calls["trino"].append(("recent" if recent else "history", start, end))
         if "trino" in self.fail:
@@ -228,7 +228,8 @@ class _Systems:
                 bad = site == "K2398" and recent
                 fail = 300 if bad else 20
                 auth = (200, 4) if recent else (None, None)
-                rows.append([when if recent else local.strftime("%Y-%m-%d %H:%M:%S"), site,
+                # ClickHouse: epoch seconds (CAST(STARTTIME AS BIGINT)); Hive: time_t text
+                rows.append([t if recent else local.strftime("%Y/%m/%d %H:%M"), site,
                              1000, fail, 500, 5, auth[0], auth[1], "cause"])
         return _pd.DataFrame(rows, columns=_TCOLS)
 
@@ -455,3 +456,36 @@ class NCIRcaEndpointStillWorksTests(SimpleTestCase):
                                         _dt.datetime(2026, 10, 31, 12), logging.getLogger("rca"), "", "ts")
         self.assertEqual(set(out["sites_summary"]), {"LU4820", "LU4821"})
         self.assertIn("rca_score", out["sites_summary"]["LU4820"])
+
+
+class _NoOffsetTZ(_dt.tzinfo):
+    """A zone object that reports no UTC offset, as the server's Trino client
+    attached to 'timestamp with time zone' values (production error:
+    "'NoneType' object has no attribute 'total_seconds'")."""
+    def utcoffset(self, d):
+        return None
+
+    def dst(self, d):
+        return None
+
+    def tzname(self, d):
+        return "?"
+
+
+class TrinoTimeRegressionTests(SimpleTestCase):
+    databases = []
+
+    def test_clickhouse_query_returns_epoch_not_zoned_timestamp(self):
+        sql = _svc.trino_s1mme_QUERIES[_svc.RECENT_SOURCE]
+        self.assertIn("CAST(a.STARTTIME AS BIGINT) AS Time", sql)
+        self.assertNotIn("from_unixtime", sql)
+
+    def test_time_values_from_both_queries(self):
+        epoch = int(_pd.Timestamp("2026-10-31 10:15", tz="Africa/Cairo").timestamp())
+        bad = _dt.datetime(2026, 10, 31, 10, 15, tzinfo=_NoOffsetTZ())
+        with self.assertRaises(AttributeError):          # what pandas did on the server
+            _pd.to_datetime(_pd.Series([bad]), utc=True)
+        self.assertEqual(_svc._to_local_time(_pd.Series([epoch])).iloc[0], _pd.Timestamp("2026-10-31 10:15"))
+        t = _svc._to_local_time(_pd.Series([bad, "2026/10/31 04:15", None, "junk"], dtype=object))
+        self.assertEqual(list(t.iloc[:2]), [_pd.Timestamp("2026-10-31 10:15"), _pd.Timestamp("2026-10-31 04:15")])
+        self.assertTrue(t.iloc[2:].isna().all())

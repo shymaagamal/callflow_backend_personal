@@ -80,7 +80,7 @@ def default_retrievers(site_run: bool) -> Retrievers:
     return Retrievers(
         trino=lambda ctx: fetch_cell_dataframe(ctx["msisdn_list"], ctx["start_dt"], ctx["end_dt"],
                                                sql_sink=ctx.get("_trino_sql_sink")),
-        smartcare=site_mode.fetch_smartcare if site_run else src.fetch_smartcare,
+        smartcare=site_mode.fetch_trino if site_run else src.fetch_smartcare,
         derive_sites=src.derive_sites,
         npp=src.retrieve_npp,
         viavi=src.retrieve_viavi,

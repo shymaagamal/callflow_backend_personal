@@ -137,13 +137,30 @@ def _to_local_time(series):
         return pd.Series(pd.NaT, index=series.index, dtype="datetime64[ns]")
     if pd.api.types.is_numeric_dtype(series):
         out = pd.to_datetime(series, unit="s", utc=True, errors="coerce")
-    else:
-        first = next((v for v in series if v is not None and not pd.isna(v)), None)
-        aware = getattr(first, "tzinfo", None) is not None
-        out = pd.to_datetime(series, utc=aware, errors="coerce")
-    if getattr(out.dt, "tz", None) is not None:
-        out = out.dt.tz_convert(_LOCAL_TZ).dt.tz_localize(None)
-    return out.astype("datetime64[ns]")
+        return out.dt.tz_convert(_LOCAL_TZ).dt.tz_localize(None).astype("datetime64[ns]")
+    return series.map(_one_local_time).astype("datetime64[ns]")
+
+
+def _one_local_time(v):
+    """One query time -> naive Cairo time (NaT when unusable). A datetime whose
+    tzinfo reports no UTC offset is treated as naive local time; text such as
+    Hive's time_t ("2026/10/31 10:15") is local time."""
+    if v is None or (not isinstance(v, (datetime.datetime, str)) and pd.isna(v)):
+        return pd.NaT
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return pd.Timestamp(v, unit="s", tz="UTC").tz_convert(_LOCAL_TZ).tz_localize(None)
+    if isinstance(v, datetime.datetime):
+        offset = v.utcoffset() if v.tzinfo is not None else None
+        if offset is None:
+            return pd.Timestamp(v.replace(tzinfo=None))
+        return pd.Timestamp((v - offset).replace(tzinfo=None), tz="UTC").tz_convert(_LOCAL_TZ).tz_localize(None)
+    try:
+        t = pd.Timestamp(v)
+    except (ValueError, TypeError):
+        return pd.NaT
+    if t.tzinfo is not None and t.utcoffset() is not None:
+        return t.tz_convert(_LOCAL_TZ).tz_localize(None)
+    return t.tz_localize(None) if t.tzinfo is not None else t
 
 
 def normalize_frame(df, source):
