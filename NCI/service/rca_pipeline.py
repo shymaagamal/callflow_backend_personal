@@ -353,7 +353,9 @@ def _coverage_errors(sites, collected_systems, data, notes):
         from .analysis_runner import _canonicalize
         missing("viavi", {_canonicalize(f, sites) for f in viavi["FLWID"].dropna().unique()})
     tr = trino_frame(data.get("trino"))
-    if not tr.empty:
+    # With a failed Trino query the per-site gaps are partly that failure; the
+    # failure entry above already says so, so no per-site "no data" guesses.
+    if not tr.empty and not ((data.get("trino") or {}).get("errors")):
         missing("trino", {numeric_site_id(s) for s in tr["NE_NAME"]} | set(tr["NE_NAME"]))
     return errors
 

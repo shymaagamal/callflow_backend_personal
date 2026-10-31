@@ -228,7 +228,8 @@ class _Systems:
                 bad = site == "K2398" and recent
                 fail = 300 if bad else 20
                 auth = (200, 4) if recent else (None, None)
-                rows.append([when if recent else local.strftime("%Y-%m-%d %H:%M:%S"), site,
+                # ClickHouse: epoch seconds (CAST(STARTTIME AS BIGINT)); Hive: time_t text
+                rows.append([t if recent else local.strftime("%Y-%m-%d %H:%M:%S"), site,
                              1000, fail, 500, 5, auth[0], auth[1], "cause"])
         return _pd.DataFrame(rows, columns=_TCOLS)
 

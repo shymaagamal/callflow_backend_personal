@@ -69,8 +69,11 @@ smartcare_site_kpi_QUERIES = {
 # ---------------------------------------------------------------------------
 
 # Most recent 6 hours: ClickHouse 15-minute table.
+# Time is returned as epoch seconds (BIGINT), not from_unixtime(...): a
+# "timestamp with time zone" comes back from some Trino client versions with a
+# zone object that has no UTC offset, which cannot be converted.
 trino_s1mme_recent_15min = """SELECT
-    from_unixtime(STARTTIME) AS Time,
+    CAST(a.STARTTIME AS BIGINT) AS Time,
     a.Site_Logical_Name AS Site_Logical_Name,
     SUM(S1MME_ATTACH_REQ_TIMES) AS ATTACH_REQ_TIMES,
     SUM(S1MME_ATTACH_FAIL_TIMES) AS ATTACH_FAIL_TIMES,
@@ -91,7 +94,7 @@ WHERE a.Site_Logical_Name IN {site_list}
   AND a.PROC_STARTTIME >= {start_epoch}
   AND a.PROC_STARTTIME < {end_epoch}
 GROUP BY
-    from_unixtime(STARTTIME),
+    CAST(a.STARTTIME AS BIGINT),
     a.Site_Logical_Name,
     b.FAIL_CAUSE_NAME"""
 

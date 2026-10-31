@@ -268,3 +268,64 @@ class SiteKpiViewTests(SimpleTestCase):
                 f.post("/callflow/api/smartcare/site-kpis", {"site_names": ["X') OR 1=1 --"]}, format="json"))
         self.assertEqual(resp.status_code, 400)
         self.assertEqual(fake.calls, [])
+
+
+class _NoOffsetTZ(dt.tzinfo):
+    """A zone object that reports no UTC offset, as some Trino client versions
+    attach to 'timestamp with time zone' values (production error:
+    "'NoneType' object has no attribute 'total_seconds'")."""
+    def utcoffset(self, d):
+        return None
+
+    def dst(self, d):
+        return None
+
+    def tzname(self, d):
+        return "?"
+
+
+class TimeColumnRegressionTests(SimpleTestCase):
+    databases = []
+
+    def test_clickhouse_query_returns_epoch_not_zoned_timestamp(self):
+        sql = svc.trino_s1mme_QUERIES[svc.RECENT_SOURCE]
+        self.assertIn("CAST(a.STARTTIME AS BIGINT) AS Time", sql)
+        self.assertNotIn("from_unixtime", sql)
+
+    def test_epoch_seconds_become_cairo_local_time(self):
+        t = svc._to_local_time(pd.Series([_epoch(dt.datetime(2026, 10, 29, 6, 0))]))
+        self.assertEqual(t.iloc[0], pd.Timestamp("2026-10-29 06:00:00"))
+        self.assertEqual(str(t.dtype), "datetime64[ns]")
+
+    def test_zone_without_offset_does_not_crash(self):
+        bad = dt.datetime(2026, 10, 29, 6, 0, tzinfo=_NoOffsetTZ())
+        with self.assertRaises(AttributeError):          # what pandas did on the server
+            pd.to_datetime(pd.Series([bad]), utc=True)
+        t = svc._to_local_time(pd.Series([bad, None], dtype=object))
+        self.assertEqual(t.iloc[0], pd.Timestamp("2026-10-29 06:00:00"))   # taken as local time
+        self.assertTrue(pd.isna(t.iloc[1]))
+
+    def test_mixed_values(self):
+        utc = dt.datetime(2026, 10, 29, 3, 0, tzinfo=dt.timezone.utc)   # Cairo was UTC+3 that day
+        t = svc._to_local_time(pd.Series([utc, "2026-10-29 07:00:00", "not a time"], dtype=object))
+        self.assertEqual(list(t.iloc[:2]), [pd.Timestamp("2026-10-29 06:00:00"),
+                                            pd.Timestamp("2026-10-29 07:00:00")])
+        self.assertTrue(pd.isna(t.iloc[2]))
+
+    def test_full_fetch_with_server_like_trino_values(self):
+        """ClickHouse rows as epoch numbers (the new query), Hive rows with an
+        offset-less zone -- the whole fetch works and nothing is dropped."""
+        class ServerLike(FakeTrino):
+            def __call__(self, sql):
+                df = super().__call__(sql)
+                if "clickhouse.e2e." in sql:
+                    df["time"] = [int(v.timestamp()) for v in df["time"]]
+                else:
+                    df["time"] = [dt.datetime.fromisoformat(v).replace(tzinfo=_NoOffsetTZ())
+                                  for v in df["time"]]
+                return df
+        out = run(ServerLike())
+        self.assertEqual(out["errors"], {})
+        times = {r["SOURCE"]: r["Time"] for r in out["s1mme_rows"]["current"]}
+        self.assertEqual(times, {svc.HISTORY_SOURCE: "2026-10-29 00:00:00",
+                                 svc.RECENT_SOURCE: "2026-10-29 06:00:00"})
