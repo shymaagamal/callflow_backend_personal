@@ -81,10 +81,14 @@ def _results_dir() -> Path:
     return d
 
 
-def store_portal_job(portal: Dict[str, Any], who: str = "") -> str:
-    """Saves a JSON-safe ``build_portal_job`` output as a finished job.
-    Returns its id (the ``nci_id`` in the portal_url)."""
-    nci_id = uuid.uuid4().hex[:16]
+def store_portal_job(portal: Dict[str, Any], who: str = "", nci_id: Optional[str] = None) -> str:
+    """Saves a JSON-safe ``build_portal_job`` / ``build_rca_portal_job`` output
+    as a finished job. Returns its id (the ``nci_id`` in the portal_url);
+    ``nci_id`` given = keep that id (the NCI request id, so the link, the
+    stored result and the RCA files share one id)."""
+    nci_id = nci_id or uuid.uuid4().hex[:16]
+    if not _ID_RE.match(str(nci_id)):
+        raise ValueError(f"invalid nci_id {nci_id!r}")
     now = time.time()
     job = {
         "job_id": nci_id, "job_type": "nci_result", "who": who,
@@ -94,6 +98,8 @@ def store_portal_job(portal: Dict[str, Any], who: str = "") -> str:
         "summary": portal["summary"], "details": portal["details"],
         "result": {"request_id": nci_id, **portal},
     }
+    if "rca" in portal:            # RCA-based result: None = no RCA files (tab Not Available)
+        job["rca"] = portal["rca"]
     path = _results_dir() / f"{nci_id}.json"
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(job), encoding="utf-8")
@@ -256,4 +262,104 @@ def build_portal_job(result: Dict[str, Any], sites: List[str]) -> Dict[str, Any]
             "abnormal": abnormal,
             "states": states,
         },
+    }
+
+
+# -- The portal job of an RCA-based NCI result -------------------------------
+# POST /NCI/analysis/ now runs the RCA tool (rca_pipeline.py). The Summary page
+# opened from the portal_url shows that request: its cards and popups are the
+# RCA tool's own findings and tickets for the requested sites (nothing is
+# re-analysed here), and its Root Causes tab opens the RCA tool itself on the
+# same request files (``rca``), so the full analysis is shown there.
+
+def _portal_system_status(status: Optional[str]) -> str:
+    """Collector status -> the Summary page's per-system status."""
+    if status in ("COMPLETED", "NO_DATA"):
+        return "COMPLETED"
+    if status in ("RUNNING", "PENDING"):
+        return "PROCESSING"
+    return "FAILED"
+
+
+def build_rca_portal_job(sites: List[str], result: Dict[str, Any], report: Optional[Dict[str, Any]],
+                         mapped: Dict[str, Dict[str, Any]], systems: Dict[str, Optional[str]],
+                         rca: Optional[Dict[str, Any]], window: Dict[str, str]) -> Dict[str, Any]:
+    """NCI result + the RCA tool's report -> the fields the Summary page reads.
+
+    mapped: rca_pipeline.map_rca_to_sites output (requested site -> its counts,
+    the tool's site names ``_rca_sites`` and its linked tickets ``_tickets``).
+    """
+    from callflow.core.orchestration import dashboard_shaping as ds
+
+    tool_to_req = {}
+    for site, row in (mapped or {}).items():
+        for rs in row.get("_rca_sites") or []:
+            tool_to_req.setdefault(rs, site)
+
+    npp_like, tx_like, all_details = {}, {}, {}
+    for f in (report or {}).get("findings") or []:
+        site = tool_to_req.get(f.get("site"))
+        if site is None:
+            continue
+        node = f.get("node")
+        label = f"{f.get('kpi')} · {node}" if node and node != site else str(f.get("kpi"))
+        entry = {
+            "current_value": f.get("observed"), "previous_value": f.get("baseline"),
+            "deviation_pct": f.get("deviation_pct"), "severity": f.get("severity"),
+            "threshold": f.get("threshold"), "system": f.get("system"), "node": node,
+        }
+        for target in ((tx_like if f.get("system") == "TX" else npp_like), all_details):
+            target.setdefault(site, {"site_name": site, "impacted_customers": None, "kpis": {}})["kpis"][label] = entry
+
+    summary_rows = (result or {}).get("sites_summary") or {}
+    affected = [s for s in sites if (summary_rows.get(s, {}).get("critical_cases", 0) or 0)
+                + (summary_rows.get(s, {}).get("minor_cases", 0) or 0) > 0]
+
+    remedy_by_site = {}
+    for site, row in (mapped or {}).items():
+        tickets = row.get("_tickets") or []
+        if tickets:
+            remedy_by_site[site] = {"total": len(tickets), "status": {}, "tickets": tickets}
+            for t in tickets:
+                st = t.get("status")
+                if st:
+                    remedy_by_site[site]["status"][st] = remedy_by_site[site]["status"].get(st, 0) + 1
+    remedy = ds.shape_remedy({"top_remedy": remedy_by_site}, affected_sites=list(sites))
+
+    viavi_rows = [{"site_name": site, "system": "VIAVI", "impacted_customers": None,
+                   "degraded_kpis": [{"name": k, **v, "message": "", "kpi_data": [], "cell_name": site}
+                                     for k, v in d["kpis"].items()]}
+                  for site, d in tx_like.items()]
+
+    portal_systems = {s: _portal_system_status(st) for s, st in (systems or {}).items()}
+    kpi_ok = any(portal_systems.get(s) == "COMPLETED" for s in ("trino", "npp", "viavi"))
+    dashboard = {"cellsAffected": len(affected), "totalCells": len(sites),
+                 "remedyAffected": remedy.get("remedy_count", 0)}
+    ok = [s for s in portal_systems.values() if s == "COMPLETED"]
+    overall = "COMPLETED" if len(ok) == len(portal_systems) else ("PARTIAL_SUCCESS" if ok else "FAILED")
+
+    return {
+        "mode": "nci",
+        "sites": list(sites),
+        "overall_status": overall,
+        "systems": portal_systems,
+        "dashboard": dashboard,
+        "summary": {
+            "affected_cells": _card(kpi_ok, len(affected)),
+            "tickets": _card(portal_systems.get("remedy") == "COMPLETED", dashboard["remedyAffected"]),
+        },
+        "details": {
+            "npp_data": {
+                "cells_affected_count": len(affected), "total_cells": len(sites),
+                "cells_affected_list": affected, "affected_cells_details": all_details,
+                "affected_metrics": {},
+            },
+            "smartcare_data_metrics": {"remedy": remedy},
+            "abnormal": {"npp": ds.shape_npp_abnormal(npp_like, {}, None), "viavi": viavi_rows, "splunk": []},
+            "states": {},
+        },
+        "rca": rca,
+        "window": window,
+        "sites_summary": summary_rows,
+        "errors": (result or {}).get("errors"),
     }

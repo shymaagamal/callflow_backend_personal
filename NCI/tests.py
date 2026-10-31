@@ -152,6 +152,22 @@ _TOOL = _Path(_settings.BASE_DIR) / "CallFlow-Frontend" / "src" / "assets" / "ex
 _NOW = _dt.datetime(2026, 10, 31, 12, 7)          # window 2026-10-31 00:00 -> 12:00
 _START, _END = _dt.datetime(2026, 10, 31, 0, 0), _dt.datetime(2026, 10, 31, 12, 0)
 _SITES = ["LU4820", "LU4821", "K2398"]
+_PORTAL = "https://10.30.30.177/callflow-portal/"
+
+
+def _sheet_with_trino_rows(folder):
+    """data/thresholds.xlsx + two MME rows named exactly like the Trino query
+    columns, which is how the team enables RCA rules for the raw counters."""
+    sheets = _pd.read_excel(_Path(_settings.BASE_DIR) / "data" / "thresholds.xlsx", sheet_name=None)
+    sheets["Packet"] = _pd.concat([sheets["Packet"], _pd.DataFrame([
+        {"KPI": "ATTACH_FAIL_TIMES", "Node": "MME", "Alarming Threshold": "Deviation Rate > 20%"},
+        {"KPI": "TAU_FAIL_TIMES", "Node": "MME", "Alarming Threshold": "Deviation Rate > 20%"}])],
+        ignore_index=True)
+    path = _Path(folder) / "thresholds_with_trino.xlsx"
+    with _pd.ExcelWriter(path) as w:
+        for name, frame in sheets.items():
+            frame.to_excel(w, sheet_name=name, index=False)
+    return path
 _CELLS = {"LU4820": ["L18_LU4820_04"], "LU4821": ["L18_LU4821_01"], "K2398": []}   # NPP has no K2398 cell
 _TCOLS = ["time", "site_logical_name", "attach_req_times", "attach_fail_times", "tau_req_times",
           "tau_fail_times", "s1mme_authentication_req_times", "s1mme_authentication_fail_times",
@@ -241,7 +257,8 @@ class NCIAnalysisThroughRCAToolTests(SimpleTestCase):
     def setUp(self):
         self.tmp = _Path(_tempfile.mkdtemp())
         self.addCleanup(_shutil.rmtree, self.tmp, ignore_errors=True)
-        o = _override_settings(OUTPUT_DIR=self.tmp, RCA_TOOL_PATH=_TOOL)
+        o = _override_settings(OUTPUT_DIR=self.tmp, RCA_TOOL_PATH=_TOOL, CALLFLOW_PORTAL_URL=_PORTAL,
+                               THRESHOLDING_SHEET_PATH=_sheet_with_trino_rows(self.tmp))
         o.enable()
         self.addCleanup(o.disable)
 
@@ -260,7 +277,7 @@ class NCIAnalysisThroughRCAToolTests(SimpleTestCase):
 
     def rdir(self):
         rid = _re.search(r"request_id=([0-9a-f]+) sites=", self.logs).group(1)
-        return self.tmp / "nci_rca" / "rca" / rid
+        return self.tmp / "rca" / rid
 
     def test_results_come_from_the_rca_tool(self):
         out = self.run_pipeline(_Systems())
@@ -283,27 +300,42 @@ class NCIAnalysisThroughRCAToolTests(SimpleTestCase):
 
         findings = report["findings"]
         trino = [f for f in findings if f["node"] == "K2398"]
-        self.assertEqual({(f["system"], f["kpi"]) for f in trino}, {("MME", "Attach_Failure_4G")})
+        self.assertEqual({(f["system"], f["kpi"]) for f in trino}, {("MME", "ATTACH_FAIL_TIMES")})
         self.assertTrue(all(f["site"] == "K2398" for f in trino))
         # no network-level or other-site finding reaches a healthy site
         self.assertFalse([f for f in findings if f["site"] == "LU4821"])
+
+    def test_real_sheet_has_no_rules_for_the_raw_trino_counters(self):
+        """With data/thresholds.xlsx as it is, the tool loads the Trino counters but
+        skips them (no sheet row has their names): Trino adds no critical case."""
+        with _override_settings(THRESHOLDING_SHEET_PATH=_Path(_settings.BASE_DIR) / "data" / "thresholds.xlsx"):
+            out = self.run_pipeline(_Systems())
+        log = _json.loads((self.rdir() / "rca_tool_log.json").read_text())
+        msgs = [e.get("msg", "") for e in log]
+        self.assertTrue(any("MME/K2398 | KPI: ATTACH_FAIL_TIMES" in m and "NO THRESHOLD DEFINED" in m for m in msgs))
+        self.assertEqual(out["sites_summary"]["K2398"]["critical_cases"], 0)
+        self.assertEqual(out["sites_summary"]["LU4820"]["critical_cases"], 2)      # NPP unaffected
 
     def test_raw_rca_files_and_logs(self):
         self.run_pipeline(_Systems())
         rdir = self.rdir()
         files = sorted(p.name for p in rdir.iterdir() if p.suffix in (".csv", ".xlsx"))
         self.assertEqual(files, ["nci_scope.csv", "npp_kpi.csv", "remedy_kpi.csv", "thresholds.xlsx",
-                                 "trino_s1mme_attach_failure.csv", "trino_s1mme_authentication_sr.csv",
-                                 "trino_s1mme_tau_sr.csv", "viavi_kpi.csv"])
+                                 "trino_s1mme_auth_kpi.csv", "trino_s1mme_kpi.csv", "viavi_kpi.csv"])
         npp = _pd.read_csv(rdir / "npp_kpi.csv")
         self.assertIn("Cell", npp.columns)                                  # RCA tool's column name
         self.assertEqual(set(npp["Cell"]), {"L18_LU4820_04", "L18_LU4821_01"})
-        att = _pd.read_csv(rdir / "trino_s1mme_attach_failure.csv")
-        self.assertEqual(list(att.columns), ["timestamp", "NE_NAME", "MME_Attach_Failure_4G_TRINO"])
-        k = att[att["NE_NAME"] == "K2398"].set_index("timestamp")["MME_Attach_Failure_4G_TRINO"]
-        self.assertEqual(k.loc["2026-10-31 11:45:00"], 30.0)                # ClickHouse half
-        self.assertEqual(k.loc["2026-10-31 01:00:00"], 2.0)                 # Hive half
-        auth = _pd.read_csv(rdir / "trino_s1mme_authentication_sr.csv")
+        # the Trino query columns as returned: counters, no rates
+        tr = _pd.read_csv(rdir / "trino_s1mme_kpi.csv")
+        self.assertEqual(list(tr.columns), ["timestamp", "NE_NAME", "ATTACH_REQ_TIMES_TRINO",
+                                            "ATTACH_FAIL_TIMES_TRINO", "TAU_REQ_TIMES_TRINO", "TAU_FAIL_TIMES_TRINO"])
+        k = tr[tr["NE_NAME"] == "K2398"].set_index("timestamp")
+        self.assertEqual(k.loc["2026-10-31 11:45:00", "ATTACH_FAIL_TIMES_TRINO"], 300)   # ClickHouse
+        self.assertEqual(k.loc["2026-10-31 11:45:00", "ATTACH_REQ_TIMES_TRINO"], 1000)
+        self.assertEqual(k.loc["2026-10-31 01:00:00", "ATTACH_FAIL_TIMES_TRINO"], 20)    # Hive
+        auth = _pd.read_csv(rdir / "trino_s1mme_auth_kpi.csv")
+        self.assertEqual(list(auth.columns), ["timestamp", "NE_NAME", "S1MME_AUTHENTICATION_REQ_TIMES_TRINO",
+                                              "S1MME_AUTHENTICATION_FAIL_TIMES_TRINO"])
         self.assertGreaterEqual(auth["timestamp"].min(), "2026-10-31 06:00:00")   # ClickHouse rows only
         scope = _pd.read_csv(rdir / "nci_scope.csv", keep_default_na=False)
         self.assertEqual(set(scope["cell_name"]) - {""}, {"L18_LU4820_04", "L18_LU4821_01"})
@@ -371,8 +403,8 @@ class NCIAnalysisThroughRCAToolTests(SimpleTestCase):
         self.assertEqual(errs, [])
         self.assertEqual(set(results["a"]["sites_summary"]), {"LU4820"})
         self.assertEqual(set(results["b"]["sites_summary"]), {"K2398"})
-        da = self.tmp / "nci_rca" / "rca" / "a000000000000000"
-        db = self.tmp / "nci_rca" / "rca" / "b000000000000000"
+        da = self.tmp / "rca" / "a000000000000000"
+        db = self.tmp / "rca" / "b000000000000000"
         self.assertIn("INCA0001", (da / "remedy_kpi.csv").read_text())
         self.assertIn("INCB0001", (db / "remedy_kpi.csv").read_text())
         self.assertNotIn("K2398", (da / "nci_scope.csv").read_text())
@@ -400,7 +432,7 @@ class NCIAnalysisThroughRCAToolTests(SimpleTestCase):
                 time.sleep(0.25)
         self.assertEqual(resp.status_code, 200)
         data = _json.loads(resp.content)
-        self.assertEqual(set(data), {"sites_summary", "errors"})
+        self.assertEqual(set(data), {"sites_summary", "errors", "message", "portal_url"})
         for s in _SITES:
             self.assertEqual(set(data["sites_summary"][s]),
                              {"critical_cases", "minor_cases", "trouble_tickets", "FLAG"})
@@ -489,3 +521,163 @@ class TrinoTimeRegressionTests(SimpleTestCase):
         t = _svc._to_local_time(_pd.Series([bad, "2026/10/31 04:15", None, "junk"], dtype=object))
         self.assertEqual(list(t.iloc[:2]), [_pd.Timestamp("2026-10-31 10:15"), _pd.Timestamp("2026-10-31 04:15")])
         self.assertTrue(t.iloc[2:].isna().all())
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Portal link: the NCI response points at the Summary page, which loads the
+# stored result and opens the RCA tool on the same request's files.
+# ─────────────────────────────────────────────────────────────────────────────
+@_unittest.skipUnless(_HAVE_PW and _TOOL.is_file(), "Playwright/Chromium or the RCA tool is not available")
+class NCIPortalLinkTests(NCIAnalysisThroughRCAToolTests):
+    """Reuses the end-to-end setup above (fake systems, the real RCA tool)."""
+
+    def _link(self, out):
+        from urllib.parse import urlparse, parse_qs
+        u = urlparse(out["portal_url"])
+        return u, {k: v[0] for k, v in parse_qs(u.query).items()}
+
+    def test_response_carries_the_portal_link(self):
+        out = self.run_pipeline(_Systems())
+        self.assertEqual(out["message"], "Want to see more details? View this analysis on the portal.")
+        u, q = self._link(out)
+        self.assertEqual(f"{u.scheme}://{u.netloc}{u.path}", "https://10.30.30.177/callflow-portal/summary")
+        self.assertEqual(q["mode"], "nci")
+        self.assertEqual(q["sites"], ",".join(_SITES))
+        self.assertRegex(q["nci_id"], r"^[0-9a-f]{16}$")
+        self.assertEqual(self.rdir().name, q["nci_id"])          # link id = the request's RCA folder
+
+    def test_portal_get_returns_the_stored_result_with_its_rca_files(self):
+        out = self.run_pipeline(_Systems())
+        _, q = self._link(out)
+        nci_id = q["nci_id"]
+        f = APIRequestFactory()
+        job = views.NCIPortalAnalysisAPIView.as_view()(
+            f.get(f"/callflow/NCI/portal/analysis/{nci_id}"), nci_id=nci_id).data
+        self.assertEqual((job["status"], job["job_id"]), ("DONE", nci_id))
+        self.assertEqual(job["rca"]["status"], "READY")
+        self.assertEqual(job["rca"]["rca_files_url"], f"/callflow/api/analysis/{nci_id}/rca-files")
+        self.assertEqual(job["result"]["window"], {"start_date": "2026-10-31T00:00", "end_date": "2026-10-31T12:00"})
+        self.assertEqual(job["result"]["sites_summary"], out["sites_summary"])
+        self.assertEqual(job["systems"], {"trino": "COMPLETED", "npp": "COMPLETED", "viavi": "COMPLETED",
+                                          "remedy": "COMPLETED"})
+        # Summary cards and popups come from the RCA tool's own findings and tickets
+        d = job["details"]["npp_data"]["affected_cells_details"]
+        self.assertEqual(set(job["details"]["npp_data"]["cells_affected_list"]), {"LU4820", "K2398"})
+        self.assertIn("ATTACH_FAIL_TIMES", d["K2398"]["kpis"])
+        self.assertEqual(d["K2398"]["kpis"]["ATTACH_FAIL_TIMES"]["severity"], "CRITICAL")
+        self.assertEqual(job["dashboard"], {"cellsAffected": 2, "totalCells": 3, "remedyAffected": 1})
+        tickets = job["details"]["smartcare_data_metrics"]["remedy"]["remedy_output"]["K2398"]["tickets"]
+        self.assertEqual([t["incident_number"] for t in tickets], ["INC0001"])
+
+    def test_rca_tool_files_are_served_by_the_existing_routes(self):
+        from callflow.core.views.orchestrated_analysis import RCAFilesAPIView, RCAFileDownloadAPIView
+        out = self.run_pipeline(_Systems())
+        _, q = self._link(out)
+        nci_id = q["nci_id"]
+        f = APIRequestFactory()
+        listing = RCAFilesAPIView.as_view()(f.get("/x"), request_id=nci_id).data
+        names = {i["name"] for i in listing["kpi"]}
+        self.assertTrue({"npp_kpi.csv", "viavi_kpi.csv", "remedy_kpi.csv",
+                         "trino_s1mme_kpi.csv"} <= names)
+        self.assertEqual([i["name"] for i in listing["filter"]], ["nci_scope.csv"])
+        self.assertEqual([i["name"] for i in listing["threshold"]], ["thresholds.xlsx"])
+        url = next(i["url"] for i in listing["kpi"] if i["name"] == "trino_s1mme_kpi.csv")
+        self.assertEqual(url, f"/callflow/api/analysis/{nci_id}/file/trino_s1mme_kpi.csv")
+        resp = RCAFileDownloadAPIView.as_view()(f.get(url), request_id=nci_id,
+                                                filename="trino_s1mme_kpi.csv")
+        self.assertIn(b"ATTACH_FAIL_TIMES_TRINO", b"".join(resp.streaming_content))
+
+    def test_the_portal_rca_tool_shows_the_same_analysis(self):
+        """The portal iframe runs the same tool on the same files and window:
+        its per-site result equals the one behind the NCI response."""
+        from callflow.core.rca_runner.browser_runner import run_rca_tool
+        from callflow.core.orchestration import rca_files as rf
+        out = self.run_pipeline(_Systems())
+        _, q = self._link(out)
+        job = views.NCIPortalAnalysisAPIView.as_view()(
+            APIRequestFactory().get("/x"), nci_id=q["nci_id"]).data
+        base = self.tmp
+        again = run_rca_tool(
+            request_id=q["nci_id"], tool_path=_TOOL, files_listing=rf.list_ready_files(base, q["nci_id"]),
+            resolve_file=lambda n: rf.resolve_file(base, q["nci_id"], n),
+            start_date=job["result"]["window"]["start_date"], end_date=job["result"]["window"]["end_date"],
+            timezone_id="Africa/Cairo", out_dir=self.tmp / "replay")
+        mapped, _ = _pipe.map_rca_to_sites(_SITES, again["results"])
+        self.assertEqual({s: {k: v for k, v in r.items() if not k.startswith("_")} for s, r in mapped.items()},
+                         out["sites_summary"])
+
+    def test_link_keeps_working_after_the_job_cache_expires(self):
+        from callflow.core.jobs import job_manager
+        sysm = _Systems()
+        with mock.patch.object(_runner, "fetch_npp_one_site", sysm.npp), \
+                mock.patch.object(_runner, "fetch_viavi", sysm.viavi), \
+                mock.patch.object(_runner, "fetch_remedy", sysm.remedy), \
+                mock.patch.object(_svc, "run_trino_query", sysm.trino):
+            view = views.NCIAnalysisAPIView.as_view()
+            resp = view(APIRequestFactory().post("/callflow/NCI/analysis/?async=1",
+                                                 {"site_names": [{"SITE": "K2398", "FLAG": "1"}]}, format="json"))
+            job_id = resp.data["job_id"]
+            for _ in range(1200):
+                job = view(APIRequestFactory().get("/x"), job_id=job_id).data
+                if job["status"] in ("DONE", "FAILED"):
+                    break
+                time.sleep(0.25)
+        self.assertEqual(job["status"], "DONE", job.get("error"))
+        self.assertIn(f"nci_id={job_id}", job["result"]["portal_url"])   # async: link id = job id
+        from django.core.cache import cache
+        cache.clear()                                                     # job record gone
+        self.assertIsNone(job_manager.get_job(job_id))
+        stored = views.NCIPortalAnalysisAPIView.as_view()(APIRequestFactory().get("/x"), nci_id=job_id)
+        self.assertEqual(stored.status_code, 200)
+        self.assertEqual(stored.data["result"]["sites_summary"]["K2398"]["critical_cases"], 1)
+
+    def test_portal_post_runs_a_new_analysis_for_sites(self):
+        sysm = _Systems()
+        view = views.NCIPortalAnalysisAPIView.as_view()
+        with mock.patch.object(_runner, "fetch_npp_one_site", sysm.npp), \
+                mock.patch.object(_runner, "fetch_viavi", sysm.viavi), \
+                mock.patch.object(_runner, "fetch_remedy", sysm.remedy), \
+                mock.patch.object(_svc, "run_trino_query", sysm.trino):
+            resp = view(APIRequestFactory().post("/callflow/NCI/portal/analysis", {"sites": ["LU4820"]},
+                                                 format="json"))
+            self.assertEqual(resp.status_code, 202)
+            job_id = resp.data["job_id"]
+            for _ in range(1200):
+                job = view(APIRequestFactory().get("/x"), nci_id=job_id).data
+                if job["status"] in ("DONE", "FAILED"):
+                    break
+                self.assertIn(job["status"], ("PENDING", "RUNNING"))
+                self.assertTrue(set((job.get("systems") or {}).values()) <= {"PROCESSING", "COMPLETED", "FAILED"})
+                time.sleep(0.25)
+        self.assertEqual(job["status"], "DONE")
+        self.assertEqual(job["rca"]["rca_files_url"], f"/callflow/api/analysis/{job_id}/rca-files")
+
+    def test_no_data_anywhere_still_links_without_rca(self):
+        out = self.run_pipeline(_Systems(empty=("npp", "viavi", "remedy", "trino")))
+        _, q = self._link(out)
+        job = views.NCIPortalAnalysisAPIView.as_view()(APIRequestFactory().get("/x"), nci_id=q["nci_id"]).data
+        self.assertIsNone(job["rca"])                  # the portal shows the RCA tab as Not Available
+        self.assertEqual(job["result"]["errors"]["rca"],
+                         [{"period": "current", "error": "RCA not run: no data from any system"}])
+
+
+class NCIPortalRouteTests(SimpleTestCase):
+    databases = []
+
+    def test_routes_the_portal_calls(self):
+        from django.urls import resolve
+        for path in ("/callflow/NCI/portal/analysis", "/callflow/NCI/portal/analysis/",
+                     "/callflow/NCI/portal/analysis/abc123abc123abcd",
+                     "/callflow/NCI/portal/analysis/abc123abc123abcd/"):
+            self.assertIs(resolve(path).func.view_class, views.NCIPortalAnalysisAPIView, path)
+
+    def test_unknown_or_bad_id_is_404(self):
+        f = APIRequestFactory()
+        for nci_id in ("0000000000000000", "../../etc/passwd", "NOT-HEX"):
+            resp = views.NCIPortalAnalysisAPIView.as_view()(f.get("/x"), nci_id=nci_id)
+            self.assertEqual(resp.status_code, 404, nci_id)
+
+    def test_portal_post_validates_sites(self):
+        resp = views.NCIPortalAnalysisAPIView.as_view()(
+            APIRequestFactory().post("/callflow/NCI/portal/analysis", {"sites": []}, format="json"))
+        self.assertEqual(resp.status_code, 400)

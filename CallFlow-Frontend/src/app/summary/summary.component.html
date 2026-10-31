@@ -17,7 +17,7 @@
             Summary
           </button>
           <button class="nav-tab" [class.active]="activeTab === 'root-causes'" [class.disabled]="!isDataLoaded()"
-            [attr.title]="nciMode ? 'Not Available' : null" (click)="onRootCauseClick()">
+            [attr.title]="nciMode && !rcaReady ? 'Not Available' : null" (click)="onRootCauseClick()">
             Root Causes
           </button>
           <button class="nav-tab" [class.active]="activeTab === 'correlations'" (click)="setActiveTab('correlations')">

@@ -31,12 +31,13 @@ export class SummaryComponent implements OnInit, OnDestroy {
   // ── Orchestrated analysis lifecycle ────────────────────────────────
   request_id: string | null = null;
   // NCI context: Summary opened from an NCI portal_url (?mode=nci&sites=...).
-  // Same page and components; NCI provides NPP / Viavi / Remedy only, so
-  // everything else is shown in the "Not Available" state (never loading).
+  // Same page and components; NCI provides Trino / NPP / Viavi / Remedy only,
+  // so everything else is shown in the "Not Available" state (never loading).
+  // A link with nci_id opens the RCA tool on that NCI request's files.
   nciMode = false;
   nciSites: string[] = [];
   nciError: string | null = null;
-  private readonly NCI_UNAVAILABLE_SYSTEMS = ['trino', 'smartcare', 'splunk'];
+  private readonly NCI_UNAVAILABLE_SYSTEMS = ['smartcare', 'splunk'];
   private readonly NCI_UNAVAILABLE_CARDS = [
     'totalComplaints', 'citiesSpanned', 'handsetTypes',
     'hubsAffected', 'tacsLacsAffected', 'packetCoreNodes',
@@ -452,12 +453,37 @@ export class SummaryComponent implements OnInit, OnDestroy {
       this.hydrateDashboardFromResult(job);
       if (this.nciMode && job.status === 'FAILED') this.failNciSystems((job as any).error);
       // Now confirm RCA file readiness on its own lifecycle (section 15/18).
-      // NCI jobs produce no RCA files: RCA is not applicable there.
+      // NCI: the stored result already says where that request's RCA files are.
       if (!this.nciMode) {
         this.trackRcaReadiness(job.result?.request_id || this.request_id!);
+      } else if (job.status === 'DONE') {
+        this.openNciRca(job);
       }
     }
     this.cdr.detectChanges();
+  }
+
+  /** NCI link: the stored result carries that request's RCA files
+   * (rca.rca_files_url) and its analysis window. Give them to the RCA tool and
+   * open the Root Causes tab, so the link shows the RCA tool's own analysis of
+   * exactly the data behind the NCI response. No RCA files -> the tab stays
+   * "Not Available". */
+  private openNciRca(job: OrchestratedJob) {
+    const rca: any = (job as any).rca || (job.result as any)?.rca;
+    if (!rca?.rca_files_url) return;
+    const win: any = (job.result as any)?.window || {};
+    this.rcaReadiness = rca.status;
+    this.rcaFileStatuses = rca.files || {};
+    this.rcaReady = rca.status === 'READY' || rca.status === 'PARTIAL';
+    this.rcaFilesUrl = rca.rca_files_url;
+    if (!this.rcaReady) return;
+    this.RootCause_Payload = {
+      request_id: job.result?.request_id || this.request_id,
+      rca_files_url: this.rcaFilesUrl,
+      start_date: win.start_date,
+      end_date: win.end_date,
+    };
+    this.setActiveTab('root-causes');
   }
 
   /** Poll RCA readiness until files are actually READY (no manual refresh). */
@@ -698,7 +724,7 @@ export class SummaryComponent implements OnInit, OnDestroy {
   }
 
   get rcaMessage(): string {
-    if (this.nciMode) return 'Not Available';   // NCI produces no RCA files
+    if (this.nciMode && !this.rcaReady) return 'Not Available';   // NCI result without RCA files
     switch (this.rcaReadiness) {
       case 'READY': return 'RCA ready';
       case 'PARTIAL': return 'RCA ready (some system files are unavailable)';

@@ -190,6 +190,64 @@ class NCIAnalysisAPIView(BaseCallFlowAPIView):
             job_manager.update_job(job_id, status="FAILED", step="failed", error=str(e))
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Portal view of an NCI analysis: what the "portal_url" in the NCI response opens.
+# The Summary page (?mode=nci&nci_id=<id>&sites=...) polls GET <id> and shows the
+# stored result; its Root Causes tab opens the RCA tool on that request's files.
+# Without an nci_id the page POSTs the sites to run a new NCI analysis.
+# ─────────────────────────────────────────────────────────────────────────────
+from .service.portal_result import load_portal_job, _portal_system_status
+
+
+class NCIPortalAnalysisAPIView(NCIAnalysisAPIView):
+    """
+    GET  callflow/NCI/portal/analysis/<nci_id>   the stored portal job (status DONE),
+         or the running job (RUNNING / FAILED) while the analysis is still going.
+    POST callflow/NCI/portal/analysis            {"sites": ["K2398", ...]} -> 202 {job_id}
+         (the same analysis as POST /NCI/analysis/, run as a job; poll GET <job_id>).
+    """
+
+    def post(self, request):
+        raw = request.data.get("sites") or request.data.get("site_names")
+        if isinstance(raw, str):
+            raw = [s.strip() for s in raw.split(",") if s.strip()]
+        if not raw or not isinstance(raw, list):
+            return Response({"error": "sites (non-empty list) is required"}, status=status.HTTP_400_BAD_REQUEST)
+        sites, site_flags = [], {}
+        for item in raw:
+            site = str(item.get("SITE", "") if isinstance(item, dict) else item).strip()
+            if not site:
+                return Response({"error": "each site must be a site name or contain SITE"},
+                                status=status.HTTP_400_BAD_REQUEST)
+            if isinstance(item, dict) and "FLAG" in item:
+                site_flags[site] = item["FLAG"]
+            if site not in sites:
+                sites.append(site)
+        who = get_request_identity(request)
+        log_path, ts = self.get_log_file("nci", "now", "now")
+        request_logger = build_request_logger(log_path, ts, who)
+        job_id = job_manager.create_job(who=who, job_type="nci")
+        request_logger.info(f"[NCI] portal run requested by {who}, sites={sites}, job={job_id}")
+        threading.Thread(target=self._run_job,
+                         args=(job_id, sites, site_flags, request_logger, log_path, ts),
+                         daemon=True).start()
+        return Response({"job_id": job_id, "status": "PENDING"}, status=status.HTTP_202_ACCEPTED)
+
+    def get(self, request, nci_id=None):
+        if not nci_id:
+            return Response({"error": "nci_id is required"}, status=status.HTTP_400_BAD_REQUEST)
+        stored = load_portal_job(nci_id)
+        if stored is not None:
+            return Response(stored)
+        job = job_manager.get_job(nci_id)
+        if job is None or job.get("status") == "DONE":
+            # DONE without a stored result = the result could not be stored
+            return Response({"error": "NCI result not found or expired"}, status=status.HTTP_404_NOT_FOUND)
+        job = dict(job)
+        job["systems"] = {s: _portal_system_status(st) for s, st in (job.get("systems") or {}).items()}
+        return Response(job)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # RCA for a list of sites -- same analysis as the RCA tool in the frontend
 # (rca_tool_V24.html), run server-side on live NPP / Viavi / Remedy data with
 # the existing KPIAnalyzer + KPIThresholds. See service/rca_site_runner.py.

@@ -1,6 +1,6 @@
 /**
  * NCI context: the existing Summary page opened from an NCI portal_url
- * (?mode=nci&sites=...). The full UI stays; NPP / Viavi / Remedy show NCI data,
+ * (?mode=nci&sites=...). The full UI stays; Trino / NPP / Viavi / Remedy show NCI data,
  * everything NCI does not produce shows "Not Available" (never Pending/zeros).
  * The normal portal must be unchanged.
  */
@@ -29,7 +29,7 @@ function fakeOrchestration(job: any) {
 
 const NCI_JOB = {
   job_id: 'NCI-1', status: 'DONE', step: 'completed', progress_percent: 100,
-  systems: { npp: 'COMPLETED', viavi: 'COMPLETED', remedy: 'COMPLETED' },
+  systems: { trino: 'COMPLETED', npp: 'COMPLETED', viavi: 'COMPLETED', remedy: 'COMPLETED' },
   dashboard: { cellsAffected: 1, totalCells: 2, remedyAffected: 2 },
   summary: { affected_cells: { status: 'READY_WITH_DATA', value: 1 }, tickets: { status: 'READY_WITH_DATA', value: 2 } },
   details: {
@@ -73,7 +73,7 @@ describe('SummaryComponent NCI mode', () => {
     expect(c.systemRows.length).toBe(6);
     const st: any = {};
     c.systemRows.forEach((r) => (st[r.key] = r.status));
-    expect(st.trino).toBe('NOT_AVAILABLE');
+    expect(st.trino).toBe('COMPLETED');                 // NCI now uses Trino (S1-MME site KPIs)
     expect(st.smartcare).toBe('NOT_AVAILABLE');
     expect(st.splunk).toBe('NOT_AVAILABLE');
     expect(st.npp).toBe('COMPLETED');
@@ -83,17 +83,18 @@ describe('SummaryComponent NCI mode', () => {
     expect(c.abnormalJobs['splunk'].status).toBe('NOT_AVAILABLE');
     expect(c.abnormalAnyPending).toBeFalse();
     expect(calls.rcaPolled).toBeFalse();
-    expect(c.rcaMessage).toBe('Not Available');
+    expect(c.rcaMessage).toBe('Not Available');            // this stored result has no RCA files
+    expect(c.activeTab).toBe('summary');
     expect(c.overallStatus).toBe('COMPLETED');
   });
 
   it('unavailable systems stay Not Available even before the NCI job finishes', () => {
-    const running = { ...NCI_JOB, status: 'RUNNING', systems: { npp: 'PROCESSING', viavi: 'PROCESSING', remedy: 'PROCESSING' } };
+    const running = { ...NCI_JOB, status: 'RUNNING', systems: { trino: 'PROCESSING', npp: 'PROCESSING', viavi: 'PROCESSING', remedy: 'PROCESSING' } };
     const c = makeComponent(['0160'], fakeOrchestration(running).svc);
     c.ngOnInit();
     const st: any = {};
     c.systemRows.forEach((r) => (st[r.key] = r.status));
-    expect(st).toEqual({ trino: 'NOT_AVAILABLE', smartcare: 'NOT_AVAILABLE', npp: 'PROCESSING',
+    expect(st).toEqual({ trino: 'PROCESSING', smartcare: 'NOT_AVAILABLE', npp: 'PROCESSING',
                          splunk: 'NOT_AVAILABLE', viavi: 'PROCESSING', remedy: 'PROCESSING' });
     expect(c.abnormalJobs['npp'].status).toBe('RUNNING');
     expect(c.abnormalJobs['viavi'].status).toBe('RUNNING');
@@ -186,15 +187,48 @@ describe('SummaryComponent NCI mode', () => {
 
   it('failed NCI job: no system stays PROCESSING and the error is shown', () => {
     const failed = { job_id: 'NCI-1', status: 'FAILED', step: 'failed', error: 'boom',
-                     systems: { npp: 'PROCESSING', viavi: 'PROCESSING', remedy: 'PROCESSING' } };
+                     systems: { trino: 'PROCESSING', npp: 'PROCESSING', viavi: 'PROCESSING', remedy: 'PROCESSING' } };
     const c = makeComponent(['D2431'], fakeOrchestration(failed).svc);
     c.ngOnInit();
     const st: any = {};
     c.systemRows.forEach((r) => (st[r.key] = r.status));
-    expect(st).toEqual({ trino: 'NOT_AVAILABLE', smartcare: 'NOT_AVAILABLE', npp: 'FAILED',
+    expect(st).toEqual({ trino: 'FAILED', smartcare: 'NOT_AVAILABLE', npp: 'FAILED',
                          splunk: 'NOT_AVAILABLE', viavi: 'FAILED', remedy: 'FAILED' });
     expect(c.nciError).toBe('boom');
     expect(c.processing).toBeFalse();
+  });
+
+  it('link with RCA files opens the RCA tool on that request (same files, same window)', () => {
+    const withRca = { ...NCI_JOB,
+      rca: { request_id: 'abc123abc123abcd', status: 'READY', files: { npp: 'READY' },
+             rca_files_url: '/callflow/api/analysis/abc123abc123abcd/rca-files' },
+      result: { request_id: 'abc123abc123abcd', overall_status: 'COMPLETED',
+                window: { start_date: '2026-10-31T04:15', end_date: '2026-10-31T16:15' } } };
+    const { svc, calls } = fakeOrchestration(withRca);
+    const c = makeComponent(['D2431', 'K4369'], svc);
+    (c as any).readNciResultId = () => 'abc123abc123abcd';
+    c.ngOnInit();
+    expect(calls.submitted).toBeNull();
+    expect(calls.rcaPolled).toBeFalse();
+    expect(c.rcaReady).toBeTrue();
+    expect(c.isDataLoaded()).toBeTrue();
+    expect(c.rcaMessage).toBe('RCA ready');
+    expect(c.activeTab).toBe('root-causes');
+    expect(c.RootCause_Payload).toEqual({
+      request_id: 'abc123abc123abcd',
+      rca_files_url: '/callflow/api/analysis/abc123abc123abcd/rca-files',
+      start_date: '2026-10-31T04:15', end_date: '2026-10-31T16:15',
+    });
+  });
+
+  it('RCA files still being written: the tab is not opened', () => {
+    const generating = { ...NCI_JOB, rca: { status: 'GENERATING', files: {}, rca_files_url: '/x' } };
+    const c = makeComponent(['D2431'], fakeOrchestration(generating).svc);
+    (c as any).readNciResultId = () => 'abc123abc123abcd';
+    c.ngOnInit();
+    expect(c.rcaReady).toBeFalse();
+    expect(c.activeTab).toBe('summary');
+    expect(c.rcaMessage).toBe('Not Available');
   });
 
   it('expired / unknown NCI result (404) fails clearly', () => {

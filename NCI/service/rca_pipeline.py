@@ -20,27 +20,26 @@ minutes). Retrieval covers what the tool's baseline needs:
     NPP, Viavi, Trino   [start - 2 h, end] and [start - 24 h, end - 24 h]
     Remedy              [start, end]
 
-RCA input files (OUTPUT_DIR/nci_rca/rca/<request_id>/):
+RCA input files (OUTPUT_DIR/rca/<request_id>/):
     npp_kpi.csv                      NPP rows (existing writer; "cell" -> "Cell")
     viavi_kpi.csv                    Viavi rows (existing writer; FLWID -> TX)
     remedy_kpi.csv                   one row per ticket with its Remedy site (existing writer)
-    trino_s1mme_<kpi>.csv            one file per S1-MME KPI, see _trino_files
+    trino_s1mme_kpi.csv, trino_s1mme_auth_kpi.csv   the Trino query columns as returned, see _trino_files
     nci_scope.csv                    filter file: NPP's cells for the sites, plus
                                      SITE_NAME for requested sites NPP returned no cell for
     thresholds.xlsx                  the server's threshold sheet (existing provisioning)
 
-Trino in the RCA tool: the tool has no site-level S1-MME loader. Its core-node
-CSV format with an NE_NAME column is used (file name contains "mme" -> MME
-type; NE_NAME = the Trino site name -> the tool's instance). The tool then
-evaluates the KPIs with the MME rows of the threshold sheet and links an
-anomaly to a site only through its own numeric site-id rule. KPI columns are
-named so the sheet's rules match by the tool's own KPI matcher:
-    MME_Attach_Failure_4G_TRINO  -> sheet "Attach_Failure_4G_NW"
-    MME_TAU_SR_TRINO             -> sheet "TAU SR"
-    MME_Authentication_SR_TRINO  -> no sheet row today (the tool skips it; add
-                                    an "Authentication SR" MME row to enable it)
-One file per KPI, rows only where that KPI had requests, because the tool
-averages a missing value as 0.
+Trino in the RCA tool: the Trino query columns go to the tool AS RETURNED
+(counters such as ATTACH_FAIL_TIMES, no rates). The tool has no site-level
+S1-MME loader, so its core-node CSV format with an NE_NAME column is used (file
+name contains "mme" -> MME type; NE_NAME = the Trino site name -> the tool's
+instance). Each column header is the query name + "_TRINO", so the KPI the tool
+shows is exactly the query name. The tool judges a column only when the
+threshold sheet has an MME row with that name (e.g. "ATTACH_FAIL_TIMES",
+"Deviation Rate > 20%"); without one it logs "NO THRESHOLD DEFINED -- skipped".
+It links an anomaly to a site only through its own numeric site-id rule.
+The authentication counters (ClickHouse only) are in their own file, because
+the tool averages an empty value as 0.
 
 Response mapping (per requested site, from the tool's correlation results):
     critical_cases   chains[site].criticalIssues   (tool severity CRITICAL, KPI + TX)
@@ -78,24 +77,32 @@ from ..utils.helpers import NCI_CACHE_GRANULARITY_MINUTES, _add_formatted, _roun
 logger = logging.getLogger(__name__)
 
 SYSTEMS = ["trino", "npp", "viavi", "remedy"]
-OUTPUT_SUBDIR = "nci_rca"
+# Request folders live where the portal's RCA file routes read them
+# (OUTPUT_DIR/rca/<request_id>), so the portal link can open the RCA tool on
+# the same files: GET /callflow/api/analysis/<id>/rca-files and .../file/<name>.
+OUTPUT_SUBDIR = None
+PORTAL_MESSAGE = "Want to see more details? View this analysis on the portal."
 WINDOW_HOURS = 12
 BASELINE_SHIFT_HOURS = 2          # the tool's "auto" baseline: 2 hours before the window
 NPP_RESOLUTION = "daily"          # same NPP export the NCI RCA endpoint feeds the tool
 SCOPE_FILE = "nci_scope.csv"
-RESULT_FILE = "nci_result.json"
+RESULT_FILE = "nci_result.json"          # what the API returned
 REPORT_FILE = "rca_result.json"
 DIAGNOSTICS_FILE = "rca_diagnostics.json"
 PERIOD = "current"                # the analysed 12 hours, as in the NCI errors entries
 
-# KPI file name -> (column, request column, failure column, kind)
-TRINO_KPIS = {
-    "trino_s1mme_attach_failure.csv": ("MME_Attach_Failure_4G_TRINO", "ATTACH_REQ_TIMES",
-                                       "ATTACH_FAIL_TIMES", "failure_rate"),
-    "trino_s1mme_tau_sr.csv": ("MME_TAU_SR_TRINO", "TAU_REQ_TIMES", "TAU_FAIL_TIMES", "success_rate"),
-    "trino_s1mme_authentication_sr.csv": ("MME_Authentication_SR_TRINO", "S1MME_AUTHENTICATION_REQ_TIMES",
-                                          "S1MME_AUTHENTICATION_FAIL_TIMES", "success_rate"),
+# Trino columns go to the RCA tool AS THE QUERIES RETURN THEM (no rates).
+# file -> the query columns it carries. The column header is the query name
+# + "_TRINO": the tool reads the KPI name as everything before the last "_",
+# so the KPI it shows is exactly the query's name (ATTACH_FAIL_TIMES ...).
+# The authentication counters only exist in the ClickHouse query (Hive returns
+# NULL), so they get their own file with only the rows that have them: in one
+# file the tool would average the empty Hive values as 0.
+TRINO_FILES = {
+    "trino_s1mme_kpi.csv": ["ATTACH_REQ_TIMES", "ATTACH_FAIL_TIMES", "TAU_REQ_TIMES", "TAU_FAIL_TIMES"],
+    "trino_s1mme_auth_kpi.csv": ["S1MME_AUTHENTICATION_REQ_TIMES", "S1MME_AUTHENTICATION_FAIL_TIMES"],
 }
+TRINO_COL_SUFFIX = "_TRINO"
 _COUNT_COLS = ["ATTACH_REQ_TIMES", "ATTACH_FAIL_TIMES", "TAU_REQ_TIMES", "TAU_FAIL_TIMES",
                "S1MME_AUTHENTICATION_REQ_TIMES", "S1MME_AUTHENTICATION_FAIL_TIMES"]
 
@@ -105,7 +112,8 @@ def _setting(name, default):
 
 
 def base_dir():
-    return Path(settings.OUTPUT_DIR) / OUTPUT_SUBDIR
+    base = Path(settings.OUTPUT_DIR)
+    return base / OUTPUT_SUBDIR if OUTPUT_SUBDIR else base
 
 
 def lock_dir():
@@ -219,17 +227,22 @@ def trino_frame(result):
 
 
 def _trino_files(system, data, ctx):
-    """One RCA file per S1-MME KPI: timestamp, NE_NAME (= site), the KPI in %.
-    Only rows with requests for that KPI (no invented values)."""
+    """The Trino counters as returned by the queries: timestamp, NE_NAME (= the
+    site), then each query column unchanged. The only change to the rows is
+    that rows the queries split by FAIL_CAUSE_NAME are added back together per
+    time and site (trino_frame), because the tool reads one row per time."""
     df = trino_frame(data)
     files = []
-    for fname, (col, req, fail, kind) in TRINO_KPIS.items():
-        part = df[(df[req].notna()) & (df[req] > 0) & (df[fail].notna())].copy()
+    for fname, cols in TRINO_FILES.items():
+        part = df.dropna(subset=cols, how="all")
+        part = part[part[cols].notna().all(axis=1)]
         if part.empty:
             continue
-        fail_pct = 100.0 * part[fail] / part[req]
-        part[col] = (fail_pct if kind == "failure_rate" else 100.0 - fail_pct).round(4)
-        files.append((fname, part[["timestamp", "NE_NAME", col]].to_csv(index=False)))
+        out = part[["timestamp", "NE_NAME"] + cols].copy()
+        for col in cols:
+            out[col] = out[col].astype("int64")
+        out = out.rename(columns={c: c + TRINO_COL_SUFFIX for c in cols})
+        files.append((fname, out.to_csv(index=False)))
     return files
 
 
@@ -314,7 +327,23 @@ def map_rca_to_sites(sites, rca_results):
         }
         summary[site]["_rca_sites"] = sorted({str(c["site"]) for c in matched})
         summary[site]["_match"] = how
+        summary[site]["_tickets"] = _unique_tickets(tickets)
     return summary, problems
+
+
+def _unique_tickets(tickets):
+    """The tool-linked tickets of a site, one per incident (same rule as
+    _incident_ids), with the fields the portal's Remedy popup shows."""
+    out, seen = [], set()
+    for t in tickets or []:
+        tid = next((t.get(k) for k in ("incident_number", "ticket_number", "incident_id",
+                                       "ticket_id", "Ticket_ID", "ID", "id") if t.get(k)), None)
+        if tid and str(tid) in seen:
+            continue
+        if tid:
+            seen.add(str(tid))
+        out.append({k: v for k, v in t.items() if not str(k).startswith("_")})
+    return out
 
 
 def _coverage_errors(sites, collected_systems, data, notes):
@@ -372,7 +401,9 @@ def _write_json(path, obj):
 def run_nci_rca(sites, request_logger, log_path, ts, job_id=None, now=None, tool_path=None):
     """The NCI analysis through the RCA tool. Returns {"sites_summary", "errors"}."""
     rlog = request_logger
-    request_id = job_id or uuid.uuid4().hex
+    # 16 hex = the job-id format, so the API job, the RCA files and the portal
+    # link (nci_id) share one id.
+    request_id = job_id or uuid.uuid4().hex[:16]
     base = base_dir()
     t0 = time.monotonic()
     win = analysis_windows(now)
@@ -439,6 +470,8 @@ def run_nci_rca(sites, request_logger, log_path, ts, job_id=None, now=None, tool
         errors["rca"].append({"period": PERIOD, "error": "RCA not run: no data from any system"})
         summary = {s: {"critical_cases": 0, "minor_cases": 0, "trouble_tickets": 0} for s in sites}
         result = {"sites_summary": summary, "errors": errors}
+        systems = {s: (c.systems.get(s) or {}).get("status") for s in SYSTEMS}
+        _publish_portal_result(request_id, sites, result, None, {}, systems, None, complaint, rlog)
         _write_json(rdir / RESULT_FILE, {"request_id": request_id, **result})
         return result
 
@@ -493,7 +526,38 @@ def run_nci_rca(sites, request_logger, log_path, ts, job_id=None, now=None, tool
                                                        if k not in ("results", "root_cause")},
                                           "mapping": mapped,
                                           "duration_seconds": round(time.monotonic() - t0, 2)})
+    report = _read_json(rdir / REPORT_FILE)
+    _publish_portal_result(request_id, sites, result, report, mapped, systems,
+                           rf.rca_status(base, request_id), complaint, rlog)
     _write_json(rdir / RESULT_FILE, {"request_id": request_id, **result})
     rlog.info(f"[NCI] request_id={request_id} mapped {len(summary)} site(s) from the RCA results "
               f"in {round(time.monotonic() - t0, 1)}s; files in {rdir}")
     return result
+
+
+def _read_json(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def _publish_portal_result(request_id, sites, result, report, mapped, systems, rca, complaint, rlog):
+    """Store this request's portal view under its id and add the portal link to
+    the API result (top level: "message" + "portal_url"). The link opens the
+    Summary page in NCI mode, which loads GET /callflow/NCI/portal/analysis/<id>
+    and opens the RCA tool on this request's files. A storage problem is logged
+    and leaves the link out; it never fails the analysis."""
+    from .portal_result import build_portal_url, build_rca_portal_job, store_portal_job
+    window = {"start_date": complaint["start"].strftime("%Y-%m-%dT%H:%M"),
+              "end_date": complaint["end"].strftime("%Y-%m-%dT%H:%M")}
+    try:
+        portal = build_rca_portal_job(sites, result, report, mapped, systems, rca, window)
+        store_portal_job(json.loads(json.dumps(portal, default=str)), nci_id=request_id)
+    except Exception:
+        rlog.exception(f"[NCI] request_id={request_id} portal result could not be stored; no portal link")
+        return
+    result["message"] = PORTAL_MESSAGE
+    result["portal_url"] = build_portal_url(sites, nci_id=request_id)
+    rlog.info(f"[NCI] request_id={request_id} portal link {result['portal_url']} "
+              f"(RCA files: {(rca or {}).get('status')})")
