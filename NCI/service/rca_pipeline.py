@@ -24,10 +24,9 @@ RCA input files (OUTPUT_DIR/rca/<request_id>/):
     npp_kpi.csv                      NPP rows (existing writer; "cell" -> "Cell")
     viavi_kpi.csv                    Viavi rows (existing writer; FLWID -> TX)
     remedy_kpi.csv                   one row per ticket with its Remedy site (existing writer)
-    trino_s1mme_kpi.csv, trino_s1mme_auth_kpi.csv   the Trino query columns as returned, see _trino_files
-    nci_scope.csv                    filter file (myday, cell_name, SITE_NAME): NPP's cells for
-                                     the sites, plus SITE_NAME for requested sites NPP returned
-                                     no cell for; myday = the NCI window in 15-min steps
+    trino_kpi.csv, trino_auth_kpi.csv   the Trino query columns as returned, see _trino_files
+    nci_scope.csv                    filter file: NPP's cells for the sites, plus
+                                     SITE_NAME for requested sites NPP returned no cell for
     thresholds.xlsx                  the server's threshold sheet (existing provisioning)
 
 Trino in the RCA tool: the Trino query columns go to the tool AS RETURNED
@@ -100,8 +99,8 @@ PERIOD = "current"                # the analysed 12 hours, as in the NCI errors 
 # NULL), so they get their own file with only the rows that have them: in one
 # file the tool would average the empty Hive values as 0.
 TRINO_FILES = {
-    "trino_s1mme_kpi.csv": ["ATTACH_REQ_TIMES", "ATTACH_FAIL_TIMES", "TAU_REQ_TIMES", "TAU_FAIL_TIMES"],
-    "trino_s1mme_auth_kpi.csv": ["S1MME_AUTHENTICATION_REQ_TIMES", "S1MME_AUTHENTICATION_FAIL_TIMES"],
+    "trino_kpi.csv": ["ATTACH_REQ_TIMES", "ATTACH_FAIL_TIMES", "TAU_REQ_TIMES", "TAU_FAIL_TIMES"],
+    "trino_auth_kpi.csv": ["S1MME_AUTHENTICATION_REQ_TIMES", "S1MME_AUTHENTICATION_FAIL_TIMES"],
 }
 TRINO_COL_SUFFIX = "_TRINO"
 _COUNT_COLS = ["ATTACH_REQ_TIMES", "ATTACH_FAIL_TIMES", "TAU_REQ_TIMES", "TAU_FAIL_TIMES",
@@ -242,7 +241,7 @@ def _trino_files(system, data, ctx):
         out = part[["timestamp", "NE_NAME"] + cols].copy()
         for col in cols:
             out[col] = out[col].astype("int64")
-        out = out.rename(columns={c: c + TRINO_COL_SUFFIX for c in cols})
+        # out = out.rename(columns={c: c + TRINO_COL_SUFFIX for c in cols})
         files.append((fname, out.to_csv(index=False)))
     return files
 
