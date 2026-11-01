@@ -120,7 +120,7 @@ class NCIWebhookRemovedTests(SimpleTestCase):
 # POST /NCI/analysis/ through the EXISTING RCA tool (service/rca_pipeline.py)
 #
 # Only the four systems are faked (same output shapes as the real fetchers);
-# file writing, the manifest, the REAL rca_tool_V24.html in headless Chromium
+# file writing, the manifest, the REAL rca_tool_V25.html in headless Chromium
 # and the mapping are the real code.
 # ─────────────────────────────────────────────────────────────────────────────
 import datetime as _dt
@@ -148,7 +148,7 @@ try:
 except Exception:  # pragma: no cover
     _HAVE_PW = False
 
-_TOOL = _Path(_settings.BASE_DIR) / "CallFlow-Frontend" / "src" / "assets" / "external" / "rca_tool_V24.html"
+_TOOL = _Path(_settings.BASE_DIR) / "CallFlow-Frontend" / "src" / "assets" / "external" / "rca_tool_V25.html"
 _NOW = _dt.datetime(2026, 10, 31, 12, 7)          # window 2026-10-31 00:00 -> 12:00
 _START, _END = _dt.datetime(2026, 10, 31, 0, 0), _dt.datetime(2026, 10, 31, 12, 0)
 _SITES = ["LU4820", "LU4821", "K2398"]
@@ -320,7 +320,7 @@ class NCIAnalysisThroughRCAToolTests(SimpleTestCase):
         self.run_pipeline(_Systems())
         rdir = self.rdir()
         files = sorted(p.name for p in rdir.iterdir() if p.suffix in (".csv", ".xlsx"))
-        self.assertEqual(files, ["nci_scope.csv", "npp_kpi.csv", "remedy_kpi.csv", "thresholds.xlsx",
+        self.assertEqual(files, ["nci_scope.xlsx", "npp_kpi.csv", "remedy_kpi.csv", "thresholds.xlsx",
                                  "trino_s1mme_auth_kpi.csv", "trino_s1mme_kpi.csv", "viavi_kpi.csv"])
         npp = _pd.read_csv(rdir / "npp_kpi.csv")
         self.assertIn("Cell", npp.columns)                                  # RCA tool's column name
@@ -337,9 +337,9 @@ class NCIAnalysisThroughRCAToolTests(SimpleTestCase):
         self.assertEqual(list(auth.columns), ["timestamp", "NE_NAME", "S1MME_AUTHENTICATION_REQ_TIMES_TRINO",
                                               "S1MME_AUTHENTICATION_FAIL_TIMES_TRINO"])
         self.assertGreaterEqual(auth["timestamp"].min(), "2026-10-31 06:00:00")   # ClickHouse rows only
-        scope = _pd.read_csv(rdir / "nci_scope.csv", keep_default_na=False)
+        scope = _pd.read_excel(rdir / "nci_scope.xlsx", dtype=str, keep_default_na=False)
         self.assertEqual(list(scope.columns), ["myday", "cell_name", "SITE_NAME"])
-        self.assertEqual(set(scope["cell_name"]) - {""}, {"L18_LU4820_04", "L18_LU4821_01"})
+        self.assertEqual(set(scope["cell_name"]) - {""}, {"L18_LU4820_04", "L18_LU4821_01", "K2398"})
         self.assertEqual(set(scope["SITE_NAME"]) - {""}, {"K2398"})        # no NPP cell for K2398
         # myday is the NCI window in 15-min steps (00:00 .. 12:00 -> 49 rows)
         self.assertEqual(list(scope["myday"]),
@@ -412,8 +412,9 @@ class NCIAnalysisThroughRCAToolTests(SimpleTestCase):
         db = self.tmp / "rca" / "b000000000000000"
         self.assertIn("INCA0001", (da / "remedy_kpi.csv").read_text())
         self.assertIn("INCB0001", (db / "remedy_kpi.csv").read_text())
-        self.assertNotIn("K2398", (da / "nci_scope.csv").read_text())
-        self.assertNotIn("LU4820", (db / "nci_scope.csv").read_text())
+        scope = lambda d: _pd.read_excel(d / "nci_scope.xlsx", dtype=str).to_csv(index=False)
+        self.assertNotIn("K2398", scope(da))
+        self.assertNotIn("LU4820", scope(db))
 
     def test_endpoint_contract_unchanged(self):
         view = views.NCIAnalysisAPIView.as_view()
@@ -584,7 +585,7 @@ class NCIPortalLinkTests(NCIAnalysisThroughRCAToolTests):
         names = {i["name"] for i in listing["kpi"]}
         self.assertTrue({"npp_kpi.csv", "viavi_kpi.csv", "remedy_kpi.csv",
                          "trino_s1mme_kpi.csv"} <= names)
-        self.assertEqual([i["name"] for i in listing["filter"]], ["nci_scope.csv"])
+        self.assertEqual([i["name"] for i in listing["filter"]], ["nci_scope.xlsx"])
         self.assertEqual([i["name"] for i in listing["threshold"]], ["thresholds.xlsx"])
         url = next(i["url"] for i in listing["kpi"] if i["name"] == "trino_s1mme_kpi.csv")
         self.assertEqual(url, f"/callflow/api/analysis/{nci_id}/file/trino_s1mme_kpi.csv")
@@ -692,8 +693,9 @@ class NCIScopeFileTests(SimpleTestCase):
     databases = []
 
     def _rows(self, sites, cells, win):
-        csv = _pipe.scope_csv(sites, cells, win)
-        return _pd.read_csv(__import__("io").StringIO(csv), keep_default_na=False).to_dict("records")
+        xlsx = _pipe.scope_csv(sites, cells, win)
+        return _pd.read_excel(__import__("io").BytesIO(xlsx), dtype=str,
+                              keep_default_na=False).to_dict("records")
 
     def test_myday_is_the_nci_window_in_15_min_steps(self):
         win = {"start": _dt.datetime(2026, 11, 1, 5, 45), "end": _dt.datetime(2026, 11, 1, 6, 30)}
@@ -701,7 +703,7 @@ class NCIScopeFileTests(SimpleTestCase):
         self.assertEqual(rows, [
             {"myday": "2026-11-01 05:45", "cell_name": "L09_LD2431_01", "SITE_NAME": ""},
             {"myday": "2026-11-01 06:00", "cell_name": "L18_LK4369_01", "SITE_NAME": ""},
-            {"myday": "2026-11-01 06:15", "cell_name": "", "SITE_NAME": "Q7777"},
+            {"myday": "2026-11-01 06:15", "cell_name": "Q7777", "SITE_NAME": "Q7777"},
             {"myday": "2026-11-01 06:30", "cell_name": "", "SITE_NAME": ""},
         ])
 

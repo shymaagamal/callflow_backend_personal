@@ -20,7 +20,7 @@ export class RootcauseComponent implements OnInit, AfterViewInit, OnChanges {
 
   ngOnInit() {
     this.rcaUrl = this.sanitizer.bypassSecurityTrustResourceUrl(
-      'assets/external/rca_tool_V24.html'
+      'assets/external/rca_tool_V25.html'
     );
   }
 

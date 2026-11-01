@@ -3,7 +3,7 @@
 NCI data access shared by the NCI endpoints.
 
 POST /NCI/analysis/  run_nci_analysis -> rca_pipeline.run_nci_rca: the sites go
-                     through the existing RCA tool (rca_tool_V24.html); the old
+                     through the existing RCA tool (rca_tool_V25.html); the old
                      3-period KPIAnalyzer comparisons are no longer used there.
 POST /NCI/rca/       rca_site_runner, which still uses the fetchers,
                      canonicalization and build_site_summary below.

@@ -243,7 +243,7 @@ MAPPING_SITENAMES_SHEET_PATH = os.path.join(BASE_DIR, 'data', 'Mapping_of_sitena
 THRESHOLDING_SHEET_PATH = os.path.join(BASE_DIR, 'data', 'thresholds.xlsx')
 OUTPUT_DIR = Path(BASE_DIR) / "callflow_output"
 
-RCA_TOOL_PATH = BASE_DIR / "rca_tool" / "rca_tool_V24.html"
+RCA_TOOL_PATH = BASE_DIR / "rca_tool" / "rca_tool_V25.html"
 # headless RCA tool runs at once, across all workers (NCI + /rca). Each Chromium needs ~300 MB.
 RCA_RUN_MAX_BROWSERS = 3
 

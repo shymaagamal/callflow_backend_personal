@@ -249,7 +249,7 @@ class NCIPortalAnalysisAPIView(NCIAnalysisAPIView):
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RCA for a list of sites -- same analysis as the RCA tool in the frontend
-# (rca_tool_V24.html), run server-side on live NPP / Viavi / Remedy data with
+# (rca_tool_V25.html), run server-side on live NPP / Viavi / Remedy data with
 # the existing KPIAnalyzer + KPIThresholds. See service/rca_site_runner.py.
 # ─────────────────────────────────────────────────────────────────────────────
 import datetime as _dt

@@ -4,7 +4,7 @@ End-to-end tests for POST /callflow/api/rca/run.
 
 Real code under test: RCARunAPIView / RCASiteRunAPIView, rca_runner.collect
 (retrieval -> RCA file writers, manifest), rca_runner.browser_runner, and the REAL
-rca_tool_V24.html running in headless Chromium. Only the external systems are
+rca_tool_V25.html running in headless Chromium. Only the external systems are
 replaced by in-memory fakes that return data in the same shapes the real
 services return, so no Trino/Smartcare/NPP/Splunk/Viavi/Remedy is touched.
 Every test also asserts that the portal pipeline (orchestrator plan, system
@@ -49,7 +49,7 @@ except Exception:  # pragma: no cover
 
 BASE_DIR = Path(settings.BASE_DIR)
 TOOL = Path(getattr(settings, "RCA_TOOL_PATH", BASE_DIR / "CallFlow-Frontend" / "src" / "assets" /
-                    "external" / "rca_tool_V24.html"))
+                    "external" / "rca_tool_V25.html"))
 THRESHOLDS = Path(getattr(settings, "THRESHOLDING_SHEET_PATH", BASE_DIR / "data" / "thresholds.xlsx"))
 
 START, END = "2026-10-10T14:21", "2026-10-10T15:21"

@@ -1,7 +1,7 @@
 # NCI/service/rca_site_runner.py
 """
 RCA analysis for a list of sites -- the server-side equivalent of the RCA
-tool in CallFlow-Frontend/src/assets/external/rca_tool_V24.html.
+tool in CallFlow-Frontend/src/assets/external/rca_tool_V25.html.
 
 Everything that already exists in the backend is reused as-is:
   - data:      fetch_npp_one_site / fetch_viavi / fetch_remedy  (live systems)

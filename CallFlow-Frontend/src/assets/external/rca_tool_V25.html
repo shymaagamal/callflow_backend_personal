@@ -3338,6 +3338,20 @@ function processFilterFiles(startDate, endDate) {
                             if (!AppState.cellSubscribers.has(cell)) AppState.cellSubscribers.set(cell, new Set());
                             AppState.cellSubscribers.get(cell).add(String(sub));
                         }
+                        // Trino serving-cells rows (trino_cells.csv) carry the TAC in lac_tac_dec.
+                        // The nodeMap reset above cleared what parseFiles mapped, so restore
+                        // cell->TAC and TAC->subscribers here (tacToSites is backfilled by
+                        // extractSitesFromCells below). Scoped to this sheet only.
+                        if (sheetName === '_servingCells') {
+                            const tac = String(row.lac_tac_dec ?? '').trim();
+                            if (tac && tac !== '0') {
+                                AppState.nodeMap.cellToTAC.set(cell, tac);
+                                if (sub) {
+                                    if (!AppState.nodeMap.tacToSubscribers.has(tac)) AppState.nodeMap.tacToSubscribers.set(tac, new Set());
+                                    AppState.nodeMap.tacToSubscribers.get(tac).add(String(sub));
+                                }
+                            }
+                        }
                     }
                     if (row.SITE_NAME) { const s=String(row.SITE_NAME).trim(); if(s){AppState.nodeMap.sites.add(s); const n=extractNumericSiteId(s); if(n) AppState.nodeMap.numericIdToSite.set(n,s);} }
                     if (row.MME_Name)       AppState.nodeMap.MME.add(String(row.MME_Name));
@@ -6888,7 +6902,9 @@ function correlateAnomalies() {
                 if (!subProfiles.has(sub)) subProfiles.set(sub, {
                     sub, cells: new Set(), sites: new Set(), tacs: new Set(),
                     mmes: new Set(), sgws: new Set(), hsses: new Set(),
-                    dras: new Set(), ggsns: new Set(), devices: new Set()
+                    dras: new Set(), ggsns: new Set(), devices: new Set(),
+                    regions: new Set(), sub_regions: new Set(), sub_region2s: new Set(),
+                    clusters: new Set(), governorates: new Set()
                 });
                 const p = subProfiles.get(sub);
                 const cell = findCellColumn(row);
@@ -6964,7 +6980,10 @@ function correlateAnomalies() {
         function buildSharedMap(profileField) {
             const m = new Map(); // infra_value → Set(subs)
             subProfiles.forEach((p, sub) => {
-                p[profileField].forEach(val => {
+                const bag = p[profileField];
+                if (!bag || typeof bag.forEach !== 'function') return;
+                bag.forEach(val => {
+                    if (val == null || val === '') return;
                     if (!m.has(val)) m.set(val, new Set());
                     m.get(val).add(sub);
                 });
@@ -12276,6 +12295,135 @@ function exportDebugReport() {
 }
 
 // Initialize
+// ── CallFlow integration (carried over from V24): request-scoped file loading
+//    (rca_files_url), backend root-cause call, Angular iframe messages ──
+const RCA_API_ORIGIN = window.location.origin.includes('localhost')
+    ? 'https://10.30.30.177'
+    : '';  // same host when app is deployed behind /callflow
+
+function formatDateForInput(dateString) {
+    if (!dateString) return '';
+    const date = new Date(String(dateString).replace(' ', 'T'));
+    if (isNaN(date.getTime())) return String(dateString).slice(0, 16);
+    const pad = n => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+async function loadFiles(fileList) {
+    if (!fileList || fileList.length === 0) return [];
+    const result = [];
+    for (const file of fileList) {
+        if (!file || !file.url) continue;
+        const url = file.url.startsWith('http') ? file.url : (RCA_API_ORIGIN + file.url);
+        try {
+            const response = await fetch(url, { credentials: 'include' });
+            if (!response.ok) {
+                console.warn('Skip file', url, response.status);
+                continue;
+            }
+            const blob = await response.blob();
+            result.push(new File([blob], file.name || 'file.xlsx', {
+                type: blob.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            }));
+        } catch (e) {
+            console.warn('Skip file', url, e);
+        }
+    }
+    return result;
+}
+
+async function handleApiResponse(data) {
+    if (!data) {
+        document.getElementById('kpi-file-list').innerHTML = '❌ Failed to load files';
+        return;
+    }
+    // backend returns { kpi, filter, threshold } at the TOP LEVEL
+    const files = data.files || data;
+
+    AppState.kpiFiles = await loadFiles(files.kpi || []);
+    AppState.filterFile = (await loadFiles(files.filter || []))[0] || null;
+    AppState.thresholdFile = (await loadFiles(files.threshold || []))[0] || null;
+
+    updateKPIFileList();
+    updateFilterFileList();
+    updateThresholdFileList();
+    updateRunButton();
+}
+
+async function callAPIWithPayload(payload) {
+    // NEW: request-scoped RCA files from the data-availability orchestration.
+    // When Angular passes rca_files_url (only sent once files are READY for this
+    // exact request_id), load those instead of scanning by time window. This
+    // fixes both "must refresh until files appear" and "wrong request's files".
+    if (payload && payload.rca_files_url) {
+        try {
+            const rurl = payload.rca_files_url.startsWith('http')
+                ? payload.rca_files_url
+                : (RCA_API_ORIGIN + payload.rca_files_url);
+            console.log('Loading request-scoped RCA files from:', rurl);
+            const resp = await fetch(rurl, { credentials: 'include' });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const data = await resp.json();
+            if (payload.start_date) document.getElementById('ts-start').value = formatDateForInput(payload.start_date);
+            if (payload.end_date)   document.getElementById('ts-end').value   = formatDateForInput(payload.end_date);
+            await handleApiResponse(data);
+            if (AppState.kpiFiles.length && typeof startAnalysis === 'function') {
+                startAnalysis();
+            }
+            return;
+        } catch (error) {
+            console.error('Request-scoped RCA file load error:', error);
+            document.getElementById('kpi-file-list').innerHTML =
+                '❌ Failed to load request files: ' + error.message;
+            return;
+        }
+    }
+    console.log('Calling /callflow/api/root-cause with payload:', payload);
+    try {
+        const response = await fetch(RCA_API_ORIGIN + '/callflow/api/root-cause', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify(payload)
+        });
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const data = await response.json();
+        console.log('API Response:', data);
+
+        if (data.start_date) document.getElementById('ts-start').value = formatDateForInput(data.start_date);
+        if (data.end_date)   document.getElementById('ts-end').value   = formatDateForInput(data.end_date);
+        if (payload.start_date && !data.start_date) {
+            document.getElementById('ts-start').value = formatDateForInput(payload.start_date);
+        }
+        if (payload.end_date && !data.end_date) {
+            document.getElementById('ts-end').value = formatDateForInput(payload.end_date);
+        }
+
+        await handleApiResponse(data);
+
+        if (AppState.kpiFiles.length && typeof startAnalysis === 'function') {
+            startAnalysis();
+        }
+    } catch (error) {
+        console.error('API Error:', error);
+        document.getElementById('kpi-file-list').innerHTML =
+            '❌ Failed to load files from backend: ' + error.message;
+    }
+}
+
+// Angular iframe → same path v22 used
+window.addEventListener('message', function (event) {
+    const msg = event.data;
+    if (!msg || typeof msg !== 'object') return;
+    if (msg.type === 'ROOT_CAUSE_PAYLOAD' && msg.data) {
+        AppState.parentPayload = msg.data;
+        callAPIWithPayload(msg.data);
+    }
+});
+
+window.addEventListener('load', function () {
+    try { window.parent.postMessage({ type: 'RCA_IFRAME_READY' }, '*'); } catch (_) {}
+});
 console.log('Enhanced RCA Tool v3.3 initialized with advanced site scoring');
 </script>
 </body>

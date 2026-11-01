@@ -3,7 +3,7 @@ Python port of the RCA HTML tool's KPI anomaly rule — the single source of tru
 for "is a KPI abnormal".
 
 This mirrors, line-for-line, ``checkThreshold(value, baseline, threshold,
-sensFactor, columnIsCount)`` in ``assets/external/rca_tool_V24.html`` so the
+sensFactor, columnIsCount)`` in ``assets/external/rca_tool_V25.html`` so the
 Python backend and the standalone RCA tool produce the SAME anomaly decision for
 the same value / baseline / rule / sensitivity. Because the RCA HTML must stay
 standalone (no Python at runtime), equivalence is locked by the regression tests

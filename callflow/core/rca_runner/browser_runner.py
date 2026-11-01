@@ -1,6 +1,6 @@
 # callflow/core/rca_runner/browser_runner.py
 """
-Run the EXISTING RCA HTML tool (rca_tool_V24.html) in headless Chromium and
+Run the EXISTING RCA HTML tool (rca_tool_V25.html) in headless Chromium and
 return its real results.
 
 Nothing in the RCA tool is re-implemented here. The page runs unmodified and

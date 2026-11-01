@@ -2,7 +2,7 @@
 """
 Shape the RCA tool's own result objects into the public RCA report.
 
-Pure mapping: every value comes from what rca_tool_V24.html produced
+Pure mapping: every value comes from what rca_tool_V25.html produced
 (AppState.correlationResults and performRCA(...)). Nothing is recomputed:
 no scores, severities, counts or findings are derived here. The only
 transformations are renaming, numeric strings -> numbers (the tool formats

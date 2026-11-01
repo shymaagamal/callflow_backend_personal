@@ -5,7 +5,7 @@ POST /NCI/analysis/ -- the sites go through the EXISTING RCA tool.
     requested sites
       -> Trino (S1-MME site KPIs), NPP, Viavi, Remedy     existing NCI fetchers / pools
       -> raw RCA input CSVs in this request's own folder  existing RCA file writers + manifest
-      -> rca_tool_V24.html in headless Chromium           rca_runner.browser_runner (unchanged)
+      -> rca_tool_V25.html in headless Chromium           rca_runner.browser_runner (unchanged)
       -> the tool's per-site results -> NCI sites_summary
 
 Nothing here judges a KPI. The RCA tool loads the files, splits the complaint
@@ -260,9 +260,10 @@ SCOPE_STEP = "15min"
 def scope_csv(sites, npp_cells, window):
     """Filter file: myday, cell_name, SITE_NAME.
 
-    cell_name / SITE_NAME: NPP's cells for the sites, plus SITE_NAME for every
-    requested site none of whose cells NPP returned (matched by the tool's
-    site-id rule), so the tool still scores that site from Trino / Viavi / Remedy.
+    cell_name / SITE_NAME: NPP's cells for the sites (SITE_NAME empty: the tool
+    maps the cell to its site), plus a row "<site>, <site>" for every requested
+    site none of whose cells NPP returned (matched by the tool's site-id rule),
+    so the tool still scores that site from Trino / Viavi / Remedy.
 
     myday: the NCI window itself, one 15-minute step per row from the window
     start to its end. When there are more steps than cells/sites the extra rows
@@ -273,7 +274,10 @@ def scope_csv(sites, npp_cells, window):
              for t in pd.date_range(window["start"], window["end"], freq=SCOPE_STEP)]
     cell_ids = {numeric_site_id(c) for c in npp_cells}
     entries = [(c, "") for c in npp_cells]
-    entries += [("", s) for s in sites if numeric_site_id(s) not in cell_ids]
+    # A requested site with no NPP cell is written with its name in BOTH columns:
+    # V25 reads a cell_name/SITE_NAME filter as a cell list and skips rows with
+    # an empty cell_name; addCell(name, SITE_NAME) then registers the site itself.
+    entries += [(s, s) for s in sites if numeric_site_id(s) not in cell_ids]
     n = max(len(times), len(entries))
     rows = [{"myday": times[i % len(times)] if times else "",
              "cell_name": entries[i][0] if i < len(entries) else "",
@@ -505,7 +509,7 @@ def run_nci_rca(sites, request_logger, log_path, ts, job_id=None, now=None, tool
     wait_s = float(_setting("RCA_RUN_SLOT_WAIT_S", 1800))
     rlog.info(f"[NCI] request_id={request_id} RCA execution started kpi={[f['name'] for f in listing['kpi']]} "
               f"filter={[f['name'] for f in listing['filter']]} threshold={[f['name'] for f in listing['threshold']]}")
-    tool = Path(tool_path or _setting("RCA_TOOL_PATH", Path(settings.BASE_DIR) / "rca_tool_V24.html"))
+    tool = Path(tool_path or _setting("RCA_TOOL_PATH", Path(settings.BASE_DIR) / "rca_tool_V25.html"))
     with limits.slot(lock_dir(), "rca_run_browser", _setting("RCA_RUN_MAX_BROWSERS", 1), wait_s,
                      on_wait=lambda waited: progress(f"queued for the RCA tool ({waited:.0f}s)", 80)):
         rca = run_rca_tool(

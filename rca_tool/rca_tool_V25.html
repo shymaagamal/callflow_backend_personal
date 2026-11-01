@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Network RCA Tool v4.1 - SCF &amp; RAT-Aware Analysis</title>
+    <title>Network RCA Tool V30 - SCF &amp; RAT-Aware Analysis</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -13,17 +13,17 @@
     <style>
         /* [Keep all the same CSS styles from previous version] */
         :root {
-            --bg: #f8fafc;
+            --bg: #f0f2f5;
             --surface: #ffffff;
-            --surface2: #f1f5f9;
-            --border: #e2e8f0;
-            --accent: #E60000;
-            --accent2: #C40000;
+            --surface2: #f7f8fa;
+            --border: #e2e6ea;
+            --accent: #1976d2;
+            --accent2: #1565c0;
             --warn: #f59e0b;
-            --danger: #E60000;
-            --ok: #10b981;
-            --text: #1f2937;
-            --dim: #6b7280;
+            --danger: #e53935;
+            --ok: #43a047;
+            --text: #1a2333;
+            --dim: #6b7a8d;
             --font-mono: 'Inter', 'Segoe UI', sans-serif;
             --font-main: 'Inter', 'Segoe UI', Roboto, sans-serif;
             --radius-sm: 6px;
@@ -1030,6 +1030,12 @@
             color: var(--warn);
             border: 1px solid var(--warn);
         }
+
+        .flag-LOW {
+            background: rgba(120, 130, 140, 0.12);
+            color: #6b7a8d;
+            border: 1px solid #9aa5b1;
+        }
         
         .flag-NODE_TYPE {
             background: rgba(25, 118, 210, 0.1);
@@ -1166,7 +1172,7 @@
     <header class="header">
         <div class="header-logo">📡</div>
         <div>
-            <div class="header-title">Network RCA Tool v3.3</div>
+            <div class="header-title">Network RCA Tool V30</div>
             <div class="header-sub">Advanced Site Scoring • Evidence-Weighted v20</div>
         </div>
         <div class="header-status">
@@ -1291,7 +1297,7 @@
                 <select id="baseline-method" class="input-field">
                     <option value="2h_before">2 Hours Before</option>
                     <option value="yesterday">Yesterday Same Time</option>
-                    <option value="auto" selected>Auto (recommended)</option>
+                    <option value="auto" selected>Auto — yesterday same hours, else 2h before (recommended)</option>
                 </select>
                 <div class="config-label">🔍 Sensitivity</div>
                 <select id="sensitivity" class="input-field">
@@ -1592,6 +1598,9 @@ const Config = {
         { pattern: /G(\d+)/i, sitePrefix: 'G' }      // G4124 → G4124
     ],
     
+    // Planned maintenance hours (local time of the KPI timestamp): samples from
+    // startHour (inclusive) to endHour (exclusive) are ignored in KPI anomaly detection.
+    MAINTENANCE_WINDOW: { startHour: 2, endHour: 6 },
     TIMESTAMP_COLS: ['DATETIME_ID', 'myday', 'mytime', 'timestamp', 'time', 'PERIOD_TIMESTAMP', 'submit_date', 'Date', 'DateTime', 'Timestamp', 'created_date', 'Created_Date'],
     SUBSCRIBER_COLS: ['msisdn', 'imsi', 'subscriber_id', 'sub_id', 'MSISDN', 'IMSI'],
     CELL_COLS: ['cell_name', 'Cell', 'cell', 'CELL_NAME', 'cell_id', 'CELL_ID'],
@@ -3329,6 +3338,20 @@ function processFilterFiles(startDate, endDate) {
                             if (!AppState.cellSubscribers.has(cell)) AppState.cellSubscribers.set(cell, new Set());
                             AppState.cellSubscribers.get(cell).add(String(sub));
                         }
+                        // Trino serving-cells rows (trino_cells.csv) carry the TAC in lac_tac_dec.
+                        // The nodeMap reset above cleared what parseFiles mapped, so restore
+                        // cell->TAC and TAC->subscribers here (tacToSites is backfilled by
+                        // extractSitesFromCells below). Scoped to this sheet only.
+                        if (sheetName === '_servingCells') {
+                            const tac = String(row.lac_tac_dec ?? '').trim();
+                            if (tac && tac !== '0') {
+                                AppState.nodeMap.cellToTAC.set(cell, tac);
+                                if (sub) {
+                                    if (!AppState.nodeMap.tacToSubscribers.has(tac)) AppState.nodeMap.tacToSubscribers.set(tac, new Set());
+                                    AppState.nodeMap.tacToSubscribers.get(tac).add(String(sub));
+                                }
+                            }
+                        }
                     }
                     if (row.SITE_NAME) { const s=String(row.SITE_NAME).trim(); if(s){AppState.nodeMap.sites.add(s); const n=extractNumericSiteId(s); if(n) AppState.nodeMap.numericIdToSite.set(n,s);} }
                     if (row.MME_Name)       AppState.nodeMap.MME.add(String(row.MME_Name));
@@ -4031,8 +4054,143 @@ async function parseThresholdFile() {
     addLogMessage(`  ✓ Total: ${total} threshold rules loaded from sheet`, 'success');
 }
 
+// ==================== ANOMALY ACCURACY HELPERS ====================
+// Mean / std / Welch z-score between complaint and baseline samples.
+// z answers "is the complaint average really different, given how noisy this KPI is?"
+function _kpiStats(cVals, bVals) {
+    const m = a => a.reduce((s, v) => s + v, 0) / a.length;
+    const sd = (a, mu) => a.length > 1 ? Math.sqrt(a.reduce((s, v) => s + (v - mu) ** 2, 0) / (a.length - 1)) : 0;
+    const out = { nc: cVals.length, nb: bVals.length, z: null };
+    if (!cVals.length) return out;
+    out.cMean = m(cVals); out.cSd = sd(cVals, out.cMean);
+    if (bVals.length) { out.bMean = m(bVals); out.bSd = sd(bVals, out.bMean); }
+    if (out.nc >= 3 && out.nb >= 3) {
+        const se = Math.sqrt(out.cSd ** 2 / out.nc + out.bSd ** 2 / out.nb);
+        out.z = se > 0 ? (out.cMean - out.bMean) / se : (out.cMean === out.bMean ? 0 : Math.sign(out.cMean - out.bMean) * 99);
+    }
+    return out;
+}
+
+// Which direction is BAD for a KPI, from its name. 'rise' = lower is better, 'drop' = higher is better.
+function _kpiDirection(name) {
+    const n = String(name || '').toUpperCase();
+    if (/UNAVAIL|DROP|FAIL|(^|_)FR($|_)|CFR|CDR|UTIL|LOAD|CPU|REJECT|LOSS|BLOCK|CONGEST|ABNORMAL|RETRANS|LATENCY|DELAY|FLR/.test(n)) return 'rise';
+    if (/(^|_| )SR($|_| )|SUCCESS|CQI|THROU|THP|RETAIN|AVAIL|HIT/.test(n)) return 'drop';
+    return null;
+}
+
+// Removes rows whose timestamp falls in the planned maintenance window (Config.MAINTENANCE_WINDOW).
+function _rowTs(row) {
+    for (const col of Config.TIMESTAMP_COLS) {
+        if (row[col]) { const t = new Date(row[col]); if (!isNaN(t)) return t; }
+    }
+    return null;
+}
+function _inMaintenance(t) {
+    const mw = Config.MAINTENANCE_WINDOW;
+    if (!mw || !t) return false;
+    const h = t.getHours();
+    return h >= mw.startHour && h < mw.endHour;
+}
+function _dropMaintenance(rows) {
+    if (!Config.MAINTENANCE_WINDOW || !rows || !rows.length) return rows;
+    return rows.filter(r => !_inMaintenance(_rowTs(r)));
+}
+
+const _sanitizeLogged = new Set();
+// Per-run counters for the accuracy rules (shown in the site view so their effect is visible)
+let _accStats = { mwRows: 0, suppressed: 0, spikesLow: 0, cceIgnored: 0, normalRange: 0, intermittent: 0, srOnly: [] };
+// Adjusts threshold rules to the data actually present:
+//  • absolute % rules are dropped when the column clearly isn't on that scale
+//    (e.g. "SR < 98%" on a column whose values never exceed 20, CQI > 15)
+//  • for radio (NPP) KPIs the alarm direction follows the KPI's meaning
+//    (a CQI or SR rise is never a fault; a drop/fail/util fall is never a fault)
+function _sanitizeRules(rules, nodeType, kpiName, allVals, instance) {
+    if (!rules || !rules.length) return rules;
+    const maxV = allVals.length ? Math.max(...allVals) : 0;
+    const dir  = _kpiDirection(kpiName);
+    const out = [];
+    for (const r0 of rules) {
+        const r = { ...r0 };
+        // Scale check on absolute condition
+        if (r.operator && r.value !== undefined && allVals.length >= 3) {
+            let why = null;
+            if (r.operator === '<' && r.value >= 50 && maxV <= 20)
+                why = `values never exceed ${maxV.toFixed(2)} — column is not on a 0–100% success scale`;
+            else if (/CQI/i.test(kpiName) && maxV > 15)
+                why = `values up to ${maxV.toFixed(0)} — not an average CQI (0–15), likely a counter`;
+            if (why) {
+                const k = `${nodeType}|${kpiName}|scale`;
+                if (!_sanitizeLogged.has(k)) { _sanitizeLogged.add(k); addLogMessage(`    ⚠️ ${nodeType} ${kpiName}: absolute rule "${r.operator} ${r.value}" ignored — ${why}. Deviation check still applies.`, 'warn'); }
+                delete r.operator; delete r.value;
+            }
+        }
+        // Direction check (radio KPIs)
+        if (nodeType === 'NPP' && dir && r.devDev && r.devDev !== dir) {
+            const k = `${nodeType}|${kpiName}|dir`;
+            if (!_sanitizeLogged.has(k)) { _sanitizeLogged.add(k); addLogMessage(`    ⚠️ ${nodeType} ${kpiName}: rule alarms on a ${r.devDev}, but a ${r.devDev} is an improvement for this KPI — using ${dir} instead.`, 'warn'); }
+            r.devDev = dir;
+        }
+        if (r.operator || r.devDev || r.useDeviation) out.push(r);
+    }
+    return out;
+}
+
+// Decides whether a fired rule is a real, complaint-related degradation and how severe.
+function _gradeAnomaly(result, rule, cAvg, bAvg, st, baseVals, cVals) {
+    const g = _gradeAnomalyCore(result, rule, cAvg, bAvg, st, baseVals);
+    if (!g.keep || !cVals || cVals.length < 2) return g;
+    // ── Single-spike check: remove the one most extreme sample in the bad direction.
+    //    If the alarm no longer holds without it, it's a one-off spike → LOW.
+    const bad = (rule && rule.devDev) || (rule && rule.operator === '>' ? 'rise' : 'drop');
+    let idx = 0;
+    cVals.forEach((v, i) => { if (bad === 'rise' ? v > cVals[idx] : v < cVals[idx]) idx = i; });
+    const rest = cVals.filter((_, i) => i !== idx);
+    const restAvg = rest.reduce((s, v) => s + v, 0) / rest.length;
+    let stillBad;
+    if (result.reason === 'absolute' && rule && rule.operator) {
+        stillBad = (rule.operator === '>' && restAvg > rule.value) || (rule.operator === '<' && restAvg < rule.value);
+    } else if (bAvg !== null && bAvg !== 0) {
+        const limit = (rule && rule.devPct) || 20;
+        const devR = (restAvg - bAvg) / Math.abs(bAvg) * 100;
+        const zR = _kpiStats(rest, baseVals).z;
+        stillBad = (bad === 'rise' ? devR > limit : devR < -limit) && (zR === null || Math.abs(zR) >= 2);
+    } else {
+        stillBad = true;
+    }
+    if (!stillBad) {
+        const devR = (bAvg !== null && bAvg !== 0) ? ((restAvg - bAvg) / Math.abs(bAvg) * 100).toFixed(1) + '%' : restAvg.toFixed(2);
+        return { keep: true, severity: 'LOW', note: `single spike (${cVals[idx].toLocaleString()}) — without it: ${devR}` };
+    }
+    return g;
+}
+
+function _gradeAnomalyCore(result, rule, cAvg, bAvg, st, baseVals) {
+    const z = st.z;
+    const sev = (rule && rule.severity) || 'CRITICAL';
+    const limit = (rule && rule.devPct) || 20;
+    const dev = (bAvg !== null && bAvg !== 0) ? (cAvg - bAvg) / Math.abs(bAvg) * 100 : null;
+    const zTxt = z === null ? 'n/a' : z.toFixed(1);
+
+    if (result.reason === 'deviation') {
+        if (z === null) return { keep: true, severity: 'ANOMALY', note: 'too few samples to confirm' };
+        if (Math.abs(z) < 2) return { keep: false, why: `dev ${dev !== null ? dev.toFixed(1) + '%' : '?'} is within normal variation (z=${zTxt}, needs ≥2)` };
+        const strong = dev !== null && Math.abs(dev) >= 2 * limit && Math.abs(z) >= 3;
+        return { keep: true, severity: strong ? sev : 'ANOMALY' };
+    }
+    // Absolute breach
+    if (bAvg !== null && baseVals.length && rule && rule.operator) {
+        const baseBreach = (rule.operator === '<' && bAvg < rule.value) || (rule.operator === '>' && bAvg > rule.value);
+        if (baseBreach && (z === null || Math.abs(z) < 2))
+            return { keep: true, severity: 'ANOMALY', note: 'chronic — also breached in baseline, not complaint-specific' };
+    }
+    return { keep: true, severity: sev };
+}
+
 function detectAnomalies(startDate, endDate, baselineMethod, sensitivity) {
     addLogMessage('Detecting anomalies with advanced node extraction...');
+    _sanitizeLogged.clear();
+    _accStats = { mwRows: 0, suppressed: 0, spikesLow: 0, cceIgnored: 0, normalRange: 0, intermittent: 0, srOnly: [] };
     AppState.anomalies = [];
     AppState.txAnomalies = [];
     
@@ -4052,28 +4210,76 @@ function detectAnomalies(startDate, endDate, baselineMethod, sensitivity) {
         }
     }
     
+    // All column names per node type across ALL files (used for SR-only rule)
+    const _allColsByType = {};
+    for (const ds of Object.values(AppState.datasets)) {
+        if (!ds.type || !Array.isArray(ds.data)) continue;
+        const s = _allColsByType[ds.type] || (_allColsByType[ds.type] = new Set());
+        ds.data.slice(0, 500).forEach(r => Object.keys(r).forEach(k => s.add(k)));
+    }
+
     // Then process regular node data
     for (const [name, dataset] of Object.entries(AppState.datasets)) {
         if (dataset.type === 'UNKNOWN' || dataset.isTx || dataset.type === 'TICKETS') continue;
         
         addLogMessage(`Analyzing ${dataset.type} data from ${name}...`);
         
-        const { complaintRows, baselineRows } = splitTimeSeries(
-            dataset.data, startDate, endDate, baselineMethod
-        );
-        
+        const _split = splitTimeSeries(dataset.data, startDate, endDate, baselineMethod);
+        // Cell history = all rows outside the complaint window, maintenance hours excluded
+        const _histByInst = (() => {
+            let map = null;
+            return (inst) => {
+                if (!map) {
+                    map = new Map();
+                    const inC = new Set(_split.complaintRows);
+                    _dropMaintenance(dataset.data.filter(r => !inC.has(r))).forEach(r => {
+                        const k = getInstanceIdentifier(r, dataset.type);
+                        if (!map.has(k)) map.set(k, []);
+                        map.get(k).push(r);
+                    });
+                }
+                return map.get(inst) || [];
+            };
+        })();
+        const complaintRows = _dropMaintenance(_split.complaintRows);
+        const baselineRows  = _dropMaintenance(_split.baselineRows);
+        const _mwDropped = (_split.complaintRows.length - complaintRows.length) + (_split.baselineRows.length - baselineRows.length);
+        _accStats.mwRows += _mwDropped;
+        if (_mwDropped > 0) {
+            const mw = Config.MAINTENANCE_WINDOW;
+            addLogMessage(`  • Maintenance window ${String(mw.startHour).padStart(2,'0')}:00–${String(mw.endHour).padStart(2,'0')}:00 ignored: ${_mwDropped} rows excluded`);
+        }
+
         addLogMessage(`  • Complaint period: ${complaintRows.length} rows`);
         addLogMessage(`  • Baseline period: ${baselineRows.length} rows`);
         
-        const sampleRow = complaintRows[0] || {};
-        const kpiColumns = Object.keys(sampleRow).filter(col => 
+        // KPI columns = every column that holds a number in ANY complaint row
+        // (not just the first row — a blank first cell must not hide a KPI).
+        const _numCols = new Set();
+        for (const r of complaintRows.slice(0, 2000)) {
+            for (const [k, v] of Object.entries(r)) if (typeof v === 'number') _numCols.add(k);
+        }
+        let kpiColumns = [..._numCols].filter(col =>
             !Config.TIMESTAMP_COLS.includes(col) && 
             !Config.SUBSCRIBER_COLS.includes(col) &&
             !Config.CELL_COLS.includes(col) &&
-            col !== 'FLWID' && col !== 'NE_NAME' &&
-            typeof sampleRow[col] === 'number'
+            col !== 'FLWID' && col !== 'NE_NAME'
         );
         
+        // When a KPI exists both as a raw counter (X) and as a success rate (X_SR) — in this
+        // file or any other NPP file — analyse only the success rate. ERAB_Retain is never
+        // analysed on its own (only ERAB_Retain_SR matters).
+        {
+            const _skip = kpiColumns.filter(c =>
+                (dataset.type === 'NPP' && /^ERAB_?Retain$/i.test(c)) ||
+                _allColsByType[dataset.type]?.has(c + '_SR'));
+            if (_skip.length) {
+                kpiColumns = kpiColumns.filter(c => !_skip.includes(c));
+                _accStats.srOnly.push(..._skip);
+                addLogMessage(`  • Analysing SR only — skipped counter column(s): ${_skip.join(', ')}`);
+            }
+        }
+
         // Unique KPI names and node instances present in this file
         const uniqueKpiNames = [...new Set(kpiColumns.map(c => extractNodeAndKPI(c, dataset.type).kpiName))];
         const uniqueNodes    = [...new Set(kpiColumns.map(c => extractNodeAndKPI(c, dataset.type).nodeInstance).filter(Boolean))];
@@ -4138,14 +4344,20 @@ function detectAnomalies(startDate, endDate, baselineMethod, sensitivity) {
                     .filter(v => !isNaN(v) && v > 0);
                 const columnIsCount = allValues.some(v => v > 101);
 
-                const complaintVals = rows.map(r => r[kpiCol] == null ? 0 : Number(r[kpiCol]) || 0);
+                // Empty / non-numeric samples are excluded (not counted as 0) so missing
+                // 15-min intervals don't drag averages down.
+                const _num = r => { const v = r[kpiCol]; if (v === null || v === undefined || v === '') return null; const n = Number(v); return isNaN(n) ? null : n; };
+                const complaintVals = rows.map(_num).filter(v => v !== null);
+                if (complaintVals.length === 0) continue;
                 const complaintAvg  = complaintVals.reduce((s, v) => s + v, 0) / complaintVals.length;
 
                 let baselineAvg = null;
+                let baseVals = [];
                 if (baselineForInstance.length > 0) {
-                    const baseVals = baselineForInstance.map(r => r[kpiCol] == null ? 0 : Number(r[kpiCol]) || 0);
-                    baselineAvg = baseVals.reduce((s, v) => s + v, 0) / baseVals.length;
+                    baseVals = baselineForInstance.map(_num).filter(v => v !== null);
+                    if (baseVals.length) baselineAvg = baseVals.reduce((s, v) => s + v, 0) / baseVals.length;
                 }
+                const _stats = _kpiStats(complaintVals, baseVals);
 
                 // ── No-data guard ──
                 // Skip when complaint value is 0 (or near-zero) with no meaningful baseline.
@@ -4155,7 +4367,9 @@ function detectAnomalies(startDate, endDate, baselineMethod, sensitivity) {
                 const baselineIsPositive = baselineAvg !== null && baselineAvg > 0.5;
                 if (complaintIsZero && !baselineIsPositive) continue;
 
-                const thresholdRules = getThresholdForKPI(dataset.type, extracted.kpiName);
+                const thresholdRules = _sanitizeRules(
+                    getThresholdForKPI(dataset.type, extracted.kpiName),
+                    dataset.type, extracted.kpiName, [...complaintVals, ...baseVals], instance);
 
                 // ── Detailed KPI extraction log ──
                 const devPct   = (baselineAvg && Math.abs(baselineAvg) > 0)
@@ -4186,7 +4400,44 @@ function detectAnomalies(startDate, endDate, baselineMethod, sensitivity) {
                     const r = checkThreshold(complaintAvg, baselineAvg, threshold, sensFactor, columnIsCount);
                     if (r.isAnomaly) { result = r; matchedRule = threshold; break; }
                 }
-                
+
+                // ── Accuracy gate: significance + severity grading ──
+                if (result.isAnomaly) {
+                    const g = _gradeAnomaly(result, matchedRule, complaintAvg, baselineAvg, _stats, baseVals, complaintVals);
+                    if (!g.keep) {
+                        _accStats.suppressed++;
+                        addLogMessage(`    ✓ suppressed ${dataset.type}/${instance} | ${extracted.kpiName} | ${g.why}`);
+                        result = { isAnomaly: false };
+                    } else {
+                        result.severity = g.severity;
+                        if (g.severity === 'LOW') _accStats.spikesLow++;
+                        if (g.note) result.description = (result.description || 'Deviation') + ' — ' + g.note;
+                    }
+                }
+
+                // ── Intermittent / zero-baseline check (lower-is-better KPIs: fail/drop rates) ──
+                // Low-traffic cells show bursts (one failure → 10–50%) between long runs of 0.
+                // Judge them against the cell's own history, not just the narrow baseline window.
+                if (result.isAnomaly && result.severity !== 'LOW' && matchedRule &&
+                    (matchedRule.devDev === 'rise' || matchedRule.operator === '>' || _kpiDirection(extracted.kpiName) === 'rise')) {
+                    const zeroN = complaintVals.filter(v => v === 0).length;
+                    const zeroShare = zeroN / complaintVals.length;
+                    const baseZero = baselineAvg !== null && Math.abs(baselineAvg) < 1e-9;
+                    if (zeroShare >= 0.5 || baseZero) {
+                        const hist = _histByInst(instance).map(_num).filter(v => v !== null);
+                        const hAvg = hist.length ? hist.reduce((s, v) => s + v, 0) / hist.length : null;
+                        if (hist.length >= 8 && complaintAvg <= hAvg * 1.5) {
+                            _accStats.normalRange++;
+                            addLogMessage(`    ✓ suppressed ${dataset.type}/${instance} | ${extracted.kpiName} | val ${complaintAvg.toFixed(2)} is within this cell's normal range (history avg ${hAvg.toFixed(2)}, ${hist.length} samples)`);
+                            result = { isAnomaly: false };
+                        } else if (zeroShare >= 0.5) {
+                            _accStats.intermittent++;
+                            result.severity = 'LOW';
+                            result.description = (result.description || 'Deviation') + ` — intermittent: non-zero in ${complaintVals.length - zeroN} of ${complaintVals.length} intervals`;
+                        }
+                    }
+                }
+
                 if (result.isAnomaly) {
                     const matchedKpi = extracted.kpiName;
                     const ruleDesc = matchedRule ? (
@@ -4241,8 +4492,9 @@ function detectAnomalies(startDate, endDate, baselineMethod, sensitivity) {
                         instance: instance,
                         site: site,
                         complaintVal: complaintAvg.toFixed(3),
-                        baselineVal: baselineAvg ? baselineAvg.toFixed(3) : null,
+                        baselineVal: baselineAvg !== null ? baselineAvg.toFixed(3) : null,
                         devPct: baselineAvg ? (((complaintAvg - baselineAvg) / Math.abs(baselineAvg)) * 100).toFixed(1) : null,
+                        zScore: _stats.z !== null ? _stats.z.toFixed(1) : null,
                         devDev: matchedRule ? matchedRule.devDev : null,
                         threshold: result.description || 'Threshold violation',
                         severity: result.severity || 'ANOMALY',
@@ -4268,6 +4520,47 @@ function detectAnomalies(startDate, endDate, baselineMethod, sensitivity) {
         }
     }
     
+    // ── CCE_Util only counts when DL_PRB_Util on the SAME cell rises by a similar amount ──
+    // DL_PRB_Util may live in a different NPP file/sheet, so look it up across all NPP datasets.
+    {
+        const prbSources = Object.values(AppState.datasets).filter(ds => ds.type === 'NPP' && Array.isArray(ds.data))
+            .map(ds => {
+                const keys = new Set(); ds.data.slice(0, 500).forEach(r => Object.keys(r).forEach(k => keys.add(k)));
+                const col = [...keys].find(k => /DL_?PRB_?UTIL/i.test(k));
+                return col ? { ds, col } : null;
+            }).filter(Boolean);
+        const prbVals = (cell, which) => {
+            const out = [];
+            for (const { ds, col } of prbSources) {
+                const sp = splitTimeSeries(ds.data, startDate, endDate, baselineMethod);
+                const rows = _dropMaintenance(which === 'c' ? sp.complaintRows : sp.baselineRows);
+                rows.forEach(r => {
+                    if (getInstanceIdentifier(r, 'NPP', col) !== cell) return;
+                    const v = r[col];
+                    if (v === null || v === undefined || v === '') return;
+                    const n = Number(v); if (!isNaN(n)) out.push(n);
+                });
+            }
+            return out;
+        };
+        const before = AppState.anomalies.length;
+        AppState.anomalies = AppState.anomalies.filter(a => {
+            if (a.nodeType !== 'NPP' || !/CCE_?UTIL/i.test(a.displayKpi || a.kpiName)) return true;
+            const cceDev = parseFloat(a.devPct);
+            const pc = prbVals(a.instance, 'c'), pb = prbVals(a.instance, 'b');
+            const st = _kpiStats(pc, pb);
+            const prbDev = (pc.length && pb.length && st.bMean) ? (st.cMean - st.bMean) / Math.abs(st.bMean) * 100 : null;
+            const ok = prbDev !== null && !isNaN(cceDev) && cceDev > 0 && prbDev >= 0.8 * cceDev && (st.z === null || st.z >= 2);
+            const prbTxt = prbDev === null ? (pc.length ? 'no baseline' : 'no DL_PRB_Util data for this cell') : (prbDev >= 0 ? '↑' : '↓') + Math.abs(prbDev).toFixed(1) + '%';
+            if (ok) { a.threshold = (a.threshold || '') + ` — with DL_PRB_Util ${prbTxt}`; return true; }
+            _accStats.cceIgnored++;
+            addLogMessage(`    ✓ ignored NPP/${a.instance} | CCE_Util ↑${a.devPct}% — DL_PRB_Util ${prbTxt} (needs ≥ ↑${isNaN(cceDev) ? '?' : (0.8 * cceDev).toFixed(1)}%)`);
+            return false;
+        });
+        if (AppState.anomalies.length < before)
+            addLogMessage(`CCE_Util check: ${before - AppState.anomalies.length} CCE_Util alarm(s) ignored — no matching DL_PRB_Util rise on the same cell`, 'success');
+    }
+
     // ── DEDUPLICATION: same (nodeType + instance + kpiName) detected multiple times ──
     // This happens when a KPI column appears under different raw column names in the
     // NPP file (e.g. two columns both resolving to CFR for the same cell).
@@ -4409,6 +4702,12 @@ function getThresholdForKPI(nodeType, kpiName) {
         }
     }
 
+    // X_SR with no rule of its own → use the rule written for X (e.g. "ERAB_Retain" row → ERAB_Retain_SR)
+    if (/_SR$/i.test(kpiName)) {
+        const baseRules = getThresholdForKPI(nodeType, kpiName.replace(/_SR$/i, ''));
+        if (baseRules.length) return baseRules;
+    }
+
     return [];   // no rules found — column will be skipped
 }
 
@@ -4544,46 +4843,54 @@ function splitTimeSeries(data, startDate, endDate, method) {
     });
     
     let baselineRows = [];
+    // Clip the comparison window to where complaint data actually exists, so a
+    // complaint period ending at 23:59 doesn't compare 05–11h today with 05–23h yesterday.
+    let effEnd = end;
+    if (start) {
+        let lastTs = null;
+        complaintRows.forEach(r => {
+            const t = r[tsCol] ? new Date(r[tsCol]) : null;
+            if (t && !isNaN(t) && (!lastTs || t > lastTs)) lastTs = t;
+        });
+        if (lastTs && (!effEnd || lastTs < effEnd)) effEnd = lastTs;
+    }
+    const sameWindowYesterday = () => {
+        const yStart = new Date(start.getTime() - 24 * 3600000);
+        const yEnd = effEnd ? new Date(effEnd.getTime() - 24 * 3600000)
+                            : new Date(start.getTime() - 24 * 3600000 + 2 * 3600000);
+        return data.filter(row => {
+            if (!row[tsCol]) return false;
+            const ts = new Date(row[tsCol]);
+            return ts >= yStart && ts <= yEnd;
+        });
+    };
     if (start && method !== 'none') {
-        if (method === '2h_before') {
-            const bEnd = new Date(start);
-            const bStart = new Date(start.getTime() - 2 * 3600000);
-            baselineRows = data.filter(row => {
-                if (!row[tsCol]) return false;
-                const ts = new Date(row[tsCol]);
-                return ts >= bStart && ts < bEnd;
-            });
-        } else if (method === 'yesterday') {
-            const yStart = new Date(start.getTime() - 24 * 3600000);
-            const yEnd = end ? new Date(end.getTime() - 24 * 3600000) : 
-                        new Date(start.getTime() - 24 * 3600000 + 2 * 3600000);
-            baselineRows = data.filter(row => {
-                if (!row[tsCol]) return false;
-                const ts = new Date(row[tsCol]);
-                return ts >= yStart && ts <= yEnd;
-            });
-        } else if (method === 'auto') {
-            const bEnd = new Date(start);
-            const bStart = new Date(start.getTime() - 2 * 3600000);
-            baselineRows = data.filter(row => {
-                if (!row[tsCol]) return false;
-                const ts = new Date(row[tsCol]);
-                return ts >= bStart && ts < bEnd;
-            });
-            
+        if (method === 'auto') {
+            // Time-of-day matched baseline first (D-1 same hours) — RAN/core KPIs follow
+            // a daily traffic pattern, so "2h before" (often night hours) inflates deviations.
+            baselineRows = sameWindowYesterday();
             if (baselineRows.length === 0) {
-                const yStart = new Date(start.getTime() - 24 * 3600000);
-                const yEnd = end ? new Date(end.getTime() - 24 * 3600000) : 
-                            new Date(start.getTime() - 24 * 3600000 + 2 * 3600000);
+                const bEnd = new Date(start);
+                const bStart = new Date(start.getTime() - 2 * 3600000);
                 baselineRows = data.filter(row => {
                     if (!row[tsCol]) return false;
                     const ts = new Date(row[tsCol]);
-                    return ts >= yStart && ts <= yEnd;
+                    return ts >= bStart && ts < bEnd;
                 });
             }
+        } else if (method === 'yesterday') {
+            baselineRows = sameWindowYesterday();
+        } else if (method === '2h_before') {
+            const bEnd = new Date(start);
+            const bStart = new Date(start.getTime() - 2 * 3600000);
+            baselineRows = data.filter(row => {
+                if (!row[tsCol]) return false;
+                const ts = new Date(row[tsCol]);
+                return ts >= bStart && ts < bEnd;
+            });
         }
     }
-    
+
     return { complaintRows, baselineRows };
 }
 
@@ -6075,7 +6382,7 @@ function correlateAnomalies() {
             
             siteAnomalies.get(site).push(a);
             if (a.severity === 'CRITICAL') siteCritical.set(site, siteCritical.get(site) + 1);
-            else siteAnomalyCount.set(site, siteAnomalyCount.get(site) + 1);
+            else if (a.severity !== 'LOW') siteAnomalyCount.set(site, siteAnomalyCount.get(site) + 1);
             
             siteKpis.get(site).add(a.kpiName);
             siteNodeTypes.get(site).add(a.nodeType);
@@ -6263,7 +6570,7 @@ function correlateAnomalies() {
         siteDetails: [...allSites].map(site => ({
             site,
             inFilterSites:    filterSites.has(site),
-            anomalyCount:     (siteAnomalies.get(site) || []).length,
+            anomalyCount:     (siteAnomalies.get(site) || []).filter(x => x.severity !== 'LOW').length,
             criticalCount:    siteCritical.get(site) || 0,
             anomalyOnlyCount: siteAnomalyCount.get(site) || 0,
             txCount:          siteTxCount.get(site) || 0,
@@ -6595,7 +6902,9 @@ function correlateAnomalies() {
                 if (!subProfiles.has(sub)) subProfiles.set(sub, {
                     sub, cells: new Set(), sites: new Set(), tacs: new Set(),
                     mmes: new Set(), sgws: new Set(), hsses: new Set(),
-                    dras: new Set(), ggsns: new Set(), devices: new Set()
+                    dras: new Set(), ggsns: new Set(), devices: new Set(),
+                    regions: new Set(), sub_regions: new Set(), sub_region2s: new Set(),
+                    clusters: new Set(), governorates: new Set()
                 });
                 const p = subProfiles.get(sub);
                 const cell = findCellColumn(row);
@@ -6671,7 +6980,10 @@ function correlateAnomalies() {
         function buildSharedMap(profileField) {
             const m = new Map(); // infra_value → Set(subs)
             subProfiles.forEach((p, sub) => {
-                p[profileField].forEach(val => {
+                const bag = p[profileField];
+                if (!bag || typeof bag.forEach !== 'function') return;
+                bag.forEach(val => {
+                    if (val == null || val === '') return;
                     if (!m.has(val)) m.set(val, new Set());
                     m.get(val).add(sub);
                 });
@@ -6716,6 +7028,7 @@ function correlateAnomalies() {
         // Anomaly check helpers
         const anomalyNodeTypes = new Map();
         AppState.anomalies.forEach(a => {
+            if (a.severity === 'LOW') return;
             const key = a.instance ? a.instance.toLowerCase() : '';
             anomalyNodeTypes.set(key, (anomalyNodeTypes.get(key) || 0) + (a.severity === 'CRITICAL' ? 2 : 1));
         });
@@ -7465,13 +7778,16 @@ function renderKPIChart() {
             const devArrow = devPct > 0 ? '↑' : '↓';
             const devText  = !isNaN(devPct)
                 ? `<span style="color:${devColor};font-weight:700;">${devArrow}${Math.abs(devPct).toFixed(1)}% vs baseline</span>`
-                : '<span style="color:#888;">No baseline data</span>';
+                : (parseFloat(aRef.baselineVal) === 0
+                    ? '<span style="color:#888;">Baseline window was 0 (no % change possible)</span>'
+                    : '<span style="color:#888;">No baseline data</span>');
             badge.innerHTML = `
                 <span class="flag-badge flag-${aRef.severity}" style="font-size:12px;">${aRef.severity}</span>
                 &nbsp; ${devText}
                 ${!isNaN(baselineVal) ? `&nbsp;|&nbsp; <span style="color:#2196f3;">&#9135; Baseline: ${baselineVal.toFixed(3)}</span>` : ''}
                 ${threshVal !== undefined ? `&nbsp;|&nbsp; <span style="color:#f44336;">&#9135;&#9135; Threshold: ${thresh.operator || ''} ${threshVal}</span>` : ''}
                 ${startDt && endDt ? `&nbsp;|&nbsp; <span style="color:rgba(244,67,54,0.9);">&#9646; Complaint: ${startDt.toLocaleDateString()} – ${endDt.toLocaleDateString()}</span>` : ''}
+                ${/ — /.test(aRef.threshold || '') ? `<div style="margin-top:4px;font-size:11px;color:#6b7a8d;">ℹ️ ${String(aRef.threshold).split(' — ').slice(1).join(' · ')}</div>` : ''}
             `;
             // Append DoD/WoW availability
             const _d = AppState.currentKPIChart.data;
@@ -7481,7 +7797,7 @@ function renderKPIChart() {
                 badge.innerHTML += `&nbsp;&nbsp;|&nbsp;&nbsp;`
                     + (_dodOk ? `<span style="background:rgba(255,152,0,0.15);color:#E65100;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;">&#128197; ${_d.dodLabel||'DoD'} ✓</span>&nbsp;` : `<span style="color:var(--dim);font-size:11px;">DoD: no prior-day data in file</span>&nbsp;`)
                     + (_wowOk ? `<span style="background:rgba(156,39,176,0.12);color:#7B1FA2;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;">&#128198; ${_d.wowLabel||'WoW'} ✓</span>` : `<span style="color:var(--dim);font-size:11px;">WoW: no prior-week data in file</span>`)
-                    + `&nbsp;&nbsp;<span style="color:var(--dim);font-size:11px;">&nbsp;&#128308; shaded = complaint window</span>`;
+                    + `&nbsp;&nbsp;<span style="color:var(--dim);font-size:11px;">&nbsp;&#128308; shaded = complaint window &nbsp;·&nbsp; grey = maintenance 02–06h (ignored)</span>`;
             }
             badge.style.display = 'block';
         } else {
@@ -7492,7 +7808,7 @@ function renderKPIChart() {
                 const _wowOk2 = _d2.wowSeries && _d2.wowSeries.length > 0;
                 badge.innerHTML = (_dodOk2 ? `<span style="background:rgba(255,152,0,0.15);color:#E65100;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;">&#128197; DoD ✓</span>&nbsp;` : `<span style="color:var(--dim);font-size:11px;">DoD: no prior-day data</span>&nbsp;`)
                     + (_wowOk2 ? `<span style="background:rgba(156,39,176,0.12);color:#7B1FA2;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:600;">&#128198; WoW ✓</span>` : `<span style="color:var(--dim);font-size:11px;">WoW: no prior-week data</span>`)
-                    + `&nbsp;&nbsp;<span style="color:var(--dim);font-size:11px;">&#128308; shaded = complaint window</span>`;
+                    + `&nbsp;&nbsp;<span style="color:var(--dim);font-size:11px;">&#128308; shaded = complaint window &nbsp;·&nbsp; grey = maintenance 02–06h (ignored)</span>`;
                 badge.style.display = _dodOk2 || _wowOk2 ? 'flex' : 'none';
             } else {
                 badge.style.display = 'none';
@@ -7504,11 +7820,26 @@ function renderKPIChart() {
     const complaintBandPlugin = {
         id: 'complaintBandPlugin',
         beforeDraw(chart) {
-            const cfg = chart.options.plugins.complaintBand;
-            if (!cfg || !cfg.start || !cfg.end) return;
             const { ctx, chartArea, scales } = chart;
             const xScale = scales.x;
             if (!xScale) return;
+            // Maintenance window bands (grey) — these hours are ignored in anomaly detection
+            const mw = Config.MAINTENANCE_WINDOW;
+            if (mw && xScale.min && xScale.max) {
+                const d = new Date(xScale.min); d.setHours(0, 0, 0, 0);
+                ctx.save();
+                ctx.fillStyle = 'rgba(120,130,140,0.10)';
+                for (; d.getTime() <= xScale.max; d.setDate(d.getDate() + 1)) {
+                    const s = new Date(d); s.setHours(mw.startHour);
+                    const e = new Date(d); e.setHours(mw.endHour);
+                    const xa = Math.max(xScale.getPixelForValue(s.getTime()), chartArea.left);
+                    const xb = Math.min(xScale.getPixelForValue(e.getTime()), chartArea.right);
+                    if (xb > xa) ctx.fillRect(xa, chartArea.top, xb - xa, chartArea.height);
+                }
+                ctx.restore();
+            }
+            const cfg = chart.options.plugins.complaintBand;
+            if (!cfg || !cfg.start || !cfg.end) return;
             const x1 = xScale.getPixelForValue(cfg.start);
             const x2 = xScale.getPixelForValue(cfg.end);
             if (isNaN(x1) || isNaN(x2)) return;
@@ -11484,6 +11815,26 @@ function showSiteDetails(site) {
         `;
     }
     
+    // Order rows by importance: CRITICAL → ANOMALY → others → LOW
+    const _sevRank = { CRITICAL: 0, ANOMALY: 1, WARNING: 2, LOW: 9 };
+    filteredData.sort((a, b) => (_sevRank[a.severity] ?? 5) - (_sevRank[b.severity] ?? 5));
+
+    // Accuracy rules summary (V28) — shows what was filtered out for this run
+    {
+        const s = _accStats || {};
+        const mw = Config.MAINTENANCE_WINDOW;
+        const lowN = filteredData.filter(a => a.severity === 'LOW').length;
+        bodyHTML += '<div style="margin:var(--sp-md) 0;padding:8px 12px;border-left:3px solid #9aa5b1;background:rgba(120,130,140,0.08);border-radius:6px;font-size:12px;color:#4a5562;">'
+            + '<strong>Accuracy rules (V30):</strong> '
+            + (mw ? `maintenance ${String(mw.startHour).padStart(2,'0')}–${String(mw.endHour).padStart(2,'0')}h excluded <b>${s.mwRows || 0}</b> rows` : 'no maintenance window')
+            + ` · <b>${s.suppressed || 0}</b> noisy deviations suppressed`
+            + ` · <b>${s.spikesLow || 0}</b> single spikes → LOW` + (lowN ? ` (${lowN} on this site)` : '')
+            + ` · <b>${s.normalRange || 0}</b> within cell's normal range · <b>${s.intermittent || 0}</b> intermittent → LOW`
+            + ` · <b>${s.cceIgnored || 0}</b> CCE_Util ignored (no matching DL_PRB_Util rise)`
+            + (s.srOnly && s.srOnly.length ? ` · SR only, skipped: ${[...new Set(s.srOnly)].join(', ')}` : '')
+            + '</div>';
+    }
+
     if (filteredData.length > 0) {
         bodyHTML += '<h3 style="color:var(--accent);margin:var(--sp-lg) 0 var(--sp-md);">KPI Anomalies — click any row to view chart</h3>'
             + '<table class="kpi-table"><thead><tr>'
@@ -11944,6 +12295,135 @@ function exportDebugReport() {
 }
 
 // Initialize
+// ── CallFlow integration (carried over from V24): request-scoped file loading
+//    (rca_files_url), backend root-cause call, Angular iframe messages ──
+const RCA_API_ORIGIN = window.location.origin.includes('localhost')
+    ? 'http://127.0.0.1:8057'
+    : '';  // same host when app is deployed behind /callflow
+
+function formatDateForInput(dateString) {
+    if (!dateString) return '';
+    const date = new Date(String(dateString).replace(' ', 'T'));
+    if (isNaN(date.getTime())) return String(dateString).slice(0, 16);
+    const pad = n => String(n).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+async function loadFiles(fileList) {
+    if (!fileList || fileList.length === 0) return [];
+    const result = [];
+    for (const file of fileList) {
+        if (!file || !file.url) continue;
+        const url = file.url.startsWith('http') ? file.url : (RCA_API_ORIGIN + file.url);
+        try {
+            const response = await fetch(url, { credentials: 'include' });
+            if (!response.ok) {
+                console.warn('Skip file', url, response.status);
+                continue;
+            }
+            const blob = await response.blob();
+            result.push(new File([blob], file.name || 'file.xlsx', {
+                type: blob.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            }));
+        } catch (e) {
+            console.warn('Skip file', url, e);
+        }
+    }
+    return result;
+}
+
+async function handleApiResponse(data) {
+    if (!data) {
+        document.getElementById('kpi-file-list').innerHTML = '❌ Failed to load files';
+        return;
+    }
+    // backend returns { kpi, filter, threshold } at the TOP LEVEL
+    const files = data.files || data;
+
+    AppState.kpiFiles = await loadFiles(files.kpi || []);
+    AppState.filterFile = (await loadFiles(files.filter || []))[0] || null;
+    AppState.thresholdFile = (await loadFiles(files.threshold || []))[0] || null;
+
+    updateKPIFileList();
+    updateFilterFileList();
+    updateThresholdFileList();
+    updateRunButton();
+}
+
+async function callAPIWithPayload(payload) {
+    // NEW: request-scoped RCA files from the data-availability orchestration.
+    // When Angular passes rca_files_url (only sent once files are READY for this
+    // exact request_id), load those instead of scanning by time window. This
+    // fixes both "must refresh until files appear" and "wrong request's files".
+    if (payload && payload.rca_files_url) {
+        try {
+            const rurl = payload.rca_files_url.startsWith('http')
+                ? payload.rca_files_url
+                : (RCA_API_ORIGIN + payload.rca_files_url);
+            console.log('Loading request-scoped RCA files from:', rurl);
+            const resp = await fetch(rurl, { credentials: 'include' });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const data = await resp.json();
+            if (payload.start_date) document.getElementById('ts-start').value = formatDateForInput(payload.start_date);
+            if (payload.end_date)   document.getElementById('ts-end').value   = formatDateForInput(payload.end_date);
+            await handleApiResponse(data);
+            if (AppState.kpiFiles.length && typeof startAnalysis === 'function') {
+                startAnalysis();
+            }
+            return;
+        } catch (error) {
+            console.error('Request-scoped RCA file load error:', error);
+            document.getElementById('kpi-file-list').innerHTML =
+                '❌ Failed to load request files: ' + error.message;
+            return;
+        }
+    }
+    console.log('Calling /callflow/api/root-cause with payload:', payload);
+    try {
+        const response = await fetch(RCA_API_ORIGIN + '/callflow/api/root-cause', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify(payload)
+        });
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const data = await response.json();
+        console.log('API Response:', data);
+
+        if (data.start_date) document.getElementById('ts-start').value = formatDateForInput(data.start_date);
+        if (data.end_date)   document.getElementById('ts-end').value   = formatDateForInput(data.end_date);
+        if (payload.start_date && !data.start_date) {
+            document.getElementById('ts-start').value = formatDateForInput(payload.start_date);
+        }
+        if (payload.end_date && !data.end_date) {
+            document.getElementById('ts-end').value = formatDateForInput(payload.end_date);
+        }
+
+        await handleApiResponse(data);
+
+        if (AppState.kpiFiles.length && typeof startAnalysis === 'function') {
+            startAnalysis();
+        }
+    } catch (error) {
+        console.error('API Error:', error);
+        document.getElementById('kpi-file-list').innerHTML =
+            '❌ Failed to load files from backend: ' + error.message;
+    }
+}
+
+// Angular iframe → same path v22 used
+window.addEventListener('message', function (event) {
+    const msg = event.data;
+    if (!msg || typeof msg !== 'object') return;
+    if (msg.type === 'ROOT_CAUSE_PAYLOAD' && msg.data) {
+        AppState.parentPayload = msg.data;
+        callAPIWithPayload(msg.data);
+    }
+});
+
+window.addEventListener('load', function () {
+    try { window.parent.postMessage({ type: 'RCA_IFRAME_READY' }, '*'); } catch (_) {}
+});
 console.log('Enhanced RCA Tool v3.3 initialized with advanced site scoring');
 </script>
 </body>
