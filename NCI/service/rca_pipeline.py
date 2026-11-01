@@ -72,7 +72,7 @@ from callflow.core.rca_runner.browser_runner import RCARunError, run_rca_tool
 from callflow.core.rca_runner.report import build_report
 from callflow.core.services.trino_site_kpi_service import  fetch_trino_site_kpis
 from callflow.core.views.orchestrated_analysis import AnalysisOrchestratorAPIView as _Writers
-
+from io import BytesIO
 from ..utils.helpers import NCI_CACHE_GRANULARITY_MINUTES, _add_formatted, _round_down
 
 logger = logging.getLogger(__name__)
@@ -86,7 +86,7 @@ PORTAL_MESSAGE = "Want to see more details? View this analysis on the portal."
 WINDOW_HOURS = 12
 BASELINE_SHIFT_HOURS = 2          # the tool's "auto" baseline: 2 hours before the window
 NPP_RESOLUTION = "daily"          # same NPP export the NCI RCA endpoint feeds the tool
-SCOPE_FILE = "nci_scope.csv"
+SCOPE_FILE = "nci_scope.xlsx"
 RESULT_FILE = "nci_result.json"          # what the API returned
 REPORT_FILE = "rca_result.json"
 DIAGNOSTICS_FILE = "rca_diagnostics.json"
@@ -278,7 +278,11 @@ def scope_csv(sites, npp_cells, window):
     rows = [{"myday": times[i % len(times)] if times else "",
              "cell_name": entries[i][0] if i < len(entries) else "",
              "SITE_NAME": entries[i][1] if i < len(entries) else ""} for i in range(n)]
-    return pd.DataFrame(rows, columns=["myday", "cell_name", "SITE_NAME"]).to_csv(index=False)
+    df = pd.DataFrame(rows, columns=["myday", "cell_name", "SITE_NAME"])
+    buf = BytesIO()
+    with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
+        df.to_excel(writer, index=False, sheet_name="NCI Scope")
+    return buf.getvalue()
 
 
 def _log_files(base, request_id, rlog):
