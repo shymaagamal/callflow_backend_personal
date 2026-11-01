@@ -27,7 +27,7 @@ RCA input files (OUTPUT_DIR/rca/<request_id>/):
     trino_s1mme_kpi.csv, trino_s1mme_auth_kpi.csv   the Trino query columns as returned, see _trino_files
     nci_scope.csv                    filter file (myday, cell_name, SITE_NAME): NPP's cells for
                                      the sites, plus SITE_NAME for requested sites NPP returned
-                                     no cell for; myday inside the window (see scope_csv)
+                                     no cell for; myday = the NCI window in 15-min steps
     thresholds.xlsx                  the server's threshold sheet (existing provisioning)
 
 Trino in the RCA tool: the Trino query columns go to the tool AS RETURNED
@@ -251,34 +251,30 @@ def _trino_rows(data):
     return len(trino_frame(data))
 
 
-def scope_csv(sites, npp_cells, npp=None, window=None):
+SCOPE_STEP = "15min"
+
+
+def scope_csv(sites, npp_cells, window):
     """Filter file: myday, cell_name, SITE_NAME.
 
-    Rows: NPP's cells for the sites, plus SITE_NAME for every requested site
-    none of whose cells NPP returned (matched by the tool's site-id rule), so
-    the tool still scores that site from Trino / Viavi / Remedy.
+    cell_name / SITE_NAME: NPP's cells for the sites, plus SITE_NAME for every
+    requested site none of whose cells NPP returned (matched by the tool's
+    site-id rule), so the tool still scores that site from Trino / Viavi / Remedy.
 
-    myday must lie INSIDE the analysis window: the tool's processFilterFiles
-    drops every filter row whose time is outside Start..End (filterByTimeRange),
-    and a dropped row unregisters that cell or site. A cell's myday is its
-    first NPP time inside the window; a cell with no NPP row there, and a
-    SITE_NAME row, get the window start."""
-    start = window["start"] if window else None
-    first_seen = {}
-    if npp is not None and not npp.empty and start is not None:
-        cell_col = "Cell" if "Cell" in npp.columns else ("cell" if "cell" in npp.columns else None)
-        if cell_col and "DATETIME_ID" in npp.columns:
-            t = pd.to_datetime(npp["DATETIME_ID"], errors="coerce")
-            inside = npp.assign(_t=t)[(t >= start) & (t <= window["end"])]
-            first_seen = inside.groupby(inside[cell_col].astype(str).str.strip())["_t"].min().to_dict()
-
-    def day(ts):
-        return ts.strftime("%Y-%m-%d %H:%M") if ts is not None and not pd.isna(ts) else ""
-
+    myday: the NCI window itself, one 15-minute step per row from the window
+    start to its end. When there are more steps than cells/sites the extra rows
+    carry only the time; when there are more cells/sites than steps the steps
+    repeat. Every time lies inside the window, which matters: the tool's
+    processFilterFiles drops filter rows whose time is outside Start..End."""
+    times = [t.strftime("%Y-%m-%d %H:%M")
+             for t in pd.date_range(window["start"], window["end"], freq=SCOPE_STEP)]
     cell_ids = {numeric_site_id(c) for c in npp_cells}
-    rows = [{"myday": day(first_seen.get(c, start)), "cell_name": c, "SITE_NAME": ""} for c in npp_cells]
-    rows += [{"myday": day(start), "cell_name": "", "SITE_NAME": s}
-             for s in sites if numeric_site_id(s) not in cell_ids]
+    entries = [(c, "") for c in npp_cells]
+    entries += [("", s) for s in sites if numeric_site_id(s) not in cell_ids]
+    n = max(len(times), len(entries))
+    rows = [{"myday": times[i % len(times)] if times else "",
+             "cell_name": entries[i][0] if i < len(entries) else "",
+             "SITE_NAME": entries[i][1] if i < len(entries) else ""} for i in range(n)]
     return pd.DataFrame(rows, columns=["myday", "cell_name", "SITE_NAME"]).to_csv(index=False)
 
 
@@ -472,7 +468,7 @@ def run_nci_rca(sites, request_logger, log_path, ts, job_id=None, now=None, tool
                   f"rows={st.get('rows')} files={st.get('files')} error={st.get('error')}")
 
     npp_cells = collect._npp_cells(data.get("npp"))
-    rf.write_system_file(base, request_id, "scope", SCOPE_FILE, scope_csv(sites, npp_cells, data.get("npp"), complaint))
+    rf.write_system_file(base, request_id, "scope", SCOPE_FILE, scope_csv(sites, npp_cells, complaint))
     rf.set_data_status(base, request_id, "scope", rf.DATA_COMPLETED)
     threshold_path = getattr(settings, "THRESHOLDING_SHEET_PATH", None)
     tinfo = rf.provision_threshold(base, request_id, threshold_path) if threshold_path else {"copied": False}

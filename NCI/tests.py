@@ -341,8 +341,10 @@ class NCIAnalysisThroughRCAToolTests(SimpleTestCase):
         self.assertEqual(list(scope.columns), ["myday", "cell_name", "SITE_NAME"])
         self.assertEqual(set(scope["cell_name"]) - {""}, {"L18_LU4820_04", "L18_LU4821_01"})
         self.assertEqual(set(scope["SITE_NAME"]) - {""}, {"K2398"})        # no NPP cell for K2398
-        # every row carries a time inside the window, so the tool keeps it
-        self.assertEqual(set(scope["myday"]), {"2026-10-31 00:00"})
+        # myday is the NCI window in 15-min steps (00:00 .. 12:00 -> 49 rows)
+        self.assertEqual(list(scope["myday"]),
+                         list(_pd.date_range("2026-10-31 00:00", "2026-10-31 12:00", freq="15min")
+                              .strftime("%Y-%m-%d %H:%M")))
         remedy = _pd.read_csv(rdir / "remedy_kpi.csv")
         self.assertEqual(list(remedy["site"]), ["K2398", "K2398"])          # raw rows, not summaries
 
@@ -689,19 +691,24 @@ class NCIPortalRouteTests(SimpleTestCase):
 class NCIScopeFileTests(SimpleTestCase):
     databases = []
 
-    def test_myday_is_inside_the_window(self):
-        win = {"start": _dt.datetime(2026, 11, 1, 0, 0), "end": _dt.datetime(2026, 11, 1, 12, 0)}
-        npp = _pd.DataFrame({
-            "DATETIME_ID": ["2026-10-31 23:45:00", "2026-11-01 05:45:00", "2026-11-01 06:00:00",
-                            "2026-10-31 22:00:00"],
-            "Cell": ["L09_LD2431_01", "L09_LD2431_01", "L09_LD2431_01", "L18_LK4369_01"]})
-        csv = _pipe.scope_csv(["D2431", "K4369", "Q7777"], ["L09_LD2431_01", "L18_LK4369_01"], npp, win)
-        rows = _pd.read_csv(__import__("io").StringIO(csv), keep_default_na=False).to_dict("records")
+    def _rows(self, sites, cells, win):
+        csv = _pipe.scope_csv(sites, cells, win)
+        return _pd.read_csv(__import__("io").StringIO(csv), keep_default_na=False).to_dict("records")
+
+    def test_myday_is_the_nci_window_in_15_min_steps(self):
+        win = {"start": _dt.datetime(2026, 11, 1, 5, 45), "end": _dt.datetime(2026, 11, 1, 6, 30)}
+        rows = self._rows(["D2431", "K4369", "Q7777"], ["L09_LD2431_01", "L18_LK4369_01"], win)
         self.assertEqual(rows, [
-            # first NPP time inside the window (23:45 the day before is baseline data)
             {"myday": "2026-11-01 05:45", "cell_name": "L09_LD2431_01", "SITE_NAME": ""},
-            # NPP had this cell only before the window -> window start, so it stays registered
-            {"myday": "2026-11-01 00:00", "cell_name": "L18_LK4369_01", "SITE_NAME": ""},
-            # a requested site with no NPP cell
-            {"myday": "2026-11-01 00:00", "cell_name": "", "SITE_NAME": "Q7777"},
+            {"myday": "2026-11-01 06:00", "cell_name": "L18_LK4369_01", "SITE_NAME": ""},
+            {"myday": "2026-11-01 06:15", "cell_name": "", "SITE_NAME": "Q7777"},
+            {"myday": "2026-11-01 06:30", "cell_name": "", "SITE_NAME": ""},
         ])
+
+    def test_more_cells_than_steps_repeat_the_window_times(self):
+        win = {"start": _dt.datetime(2026, 11, 1, 0, 0), "end": _dt.datetime(2026, 11, 1, 0, 15)}
+        rows = self._rows([], ["L09_LA0001_01", "L09_LA0002_01", "L09_LA0003_01"], win)
+        self.assertEqual([r["myday"] for r in rows],
+                         ["2026-11-01 00:00", "2026-11-01 00:15", "2026-11-01 00:00"])
+        self.assertEqual([r["cell_name"] for r in rows],
+                         ["L09_LA0001_01", "L09_LA0002_01", "L09_LA0003_01"])
