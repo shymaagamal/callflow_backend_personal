@@ -338,8 +338,11 @@ class NCIAnalysisThroughRCAToolTests(SimpleTestCase):
                                               "S1MME_AUTHENTICATION_FAIL_TIMES_TRINO"])
         self.assertGreaterEqual(auth["timestamp"].min(), "2026-10-31 06:00:00")   # ClickHouse rows only
         scope = _pd.read_csv(rdir / "nci_scope.csv", keep_default_na=False)
+        self.assertEqual(list(scope.columns), ["myday", "cell_name", "SITE_NAME"])
         self.assertEqual(set(scope["cell_name"]) - {""}, {"L18_LU4820_04", "L18_LU4821_01"})
         self.assertEqual(set(scope["SITE_NAME"]) - {""}, {"K2398"})        # no NPP cell for K2398
+        # every row carries a time inside the window, so the tool keeps it
+        self.assertEqual(set(scope["myday"]), {"2026-10-31 00:00"})
         remedy = _pd.read_csv(rdir / "remedy_kpi.csv")
         self.assertEqual(list(remedy["site"]), ["K2398", "K2398"])          # raw rows, not summaries
 
@@ -681,3 +684,24 @@ class NCIPortalRouteTests(SimpleTestCase):
         resp = views.NCIPortalAnalysisAPIView.as_view()(
             APIRequestFactory().post("/callflow/NCI/portal/analysis", {"sites": []}, format="json"))
         self.assertEqual(resp.status_code, 400)
+
+
+class NCIScopeFileTests(SimpleTestCase):
+    databases = []
+
+    def test_myday_is_inside_the_window(self):
+        win = {"start": _dt.datetime(2026, 11, 1, 0, 0), "end": _dt.datetime(2026, 11, 1, 12, 0)}
+        npp = _pd.DataFrame({
+            "DATETIME_ID": ["2026-10-31 23:45:00", "2026-11-01 05:45:00", "2026-11-01 06:00:00",
+                            "2026-10-31 22:00:00"],
+            "Cell": ["L09_LD2431_01", "L09_LD2431_01", "L09_LD2431_01", "L18_LK4369_01"]})
+        csv = _pipe.scope_csv(["D2431", "K4369", "Q7777"], ["L09_LD2431_01", "L18_LK4369_01"], npp, win)
+        rows = _pd.read_csv(__import__("io").StringIO(csv), keep_default_na=False).to_dict("records")
+        self.assertEqual(rows, [
+            # first NPP time inside the window (23:45 the day before is baseline data)
+            {"myday": "2026-11-01 05:45", "cell_name": "L09_LD2431_01", "SITE_NAME": ""},
+            # NPP had this cell only before the window -> window start, so it stays registered
+            {"myday": "2026-11-01 00:00", "cell_name": "L18_LK4369_01", "SITE_NAME": ""},
+            # a requested site with no NPP cell
+            {"myday": "2026-11-01 00:00", "cell_name": "", "SITE_NAME": "Q7777"},
+        ])
