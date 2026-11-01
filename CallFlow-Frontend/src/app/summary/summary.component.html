@@ -32,8 +32,22 @@
   <!-- Main Content Area -->
   <main *ngIf="activeTab != 'root-causes'" class="main-content">
     <div class="container-fluid ms-5">
+      <!-- NCI portal link: only Root Causes is open; every other view says so -->
+      <div *ngIf="isViewRestricted()" class="no-permission card p-5 my-5 text-center">
+        <div class="no-permission-icon" aria-hidden="true">🔒</div>
+        <h3 class="mb-2">{{ NO_PERMISSION_MESSAGE }}</h3>
+        <p class="text-muted mb-1">This link opens the Root Causes analysis of NCI request
+          <strong>{{ request_id }}</strong><span *ngIf="nciSites.length"> ({{ nciSites.join(', ') }})</span>.</p>
+        <p class="text-muted mb-3" *ngIf="!rcaReady && processing">Loading the root cause analysis…</p>
+        <p class="text-muted mb-3" *ngIf="!rcaReady && !processing">
+          The root cause analysis is not available for this request<span *ngIf="nciError">: {{ nciError }}</span>.</p>
+        <button *ngIf="rcaReady" type="button" class="btn btn-danger" (click)="setActiveTab('root-causes')">
+          Go to Root Causes
+        </button>
+      </div>
+
       <!-- SUMMARY TAB CONTENT -->
-      <div *ngIf="activeTab === 'summary'">
+      <div *ngIf="activeTab === 'summary' && !isViewRestricted('summary')">
 
         <!-- Data-availability analysis progress (real backend status, not faked) -->
         <div class="analysis-progress card p-3 mb-4" *ngIf="request_id || nciMode">
@@ -324,7 +338,7 @@
     </div>
 
     <!-- CORRELATIONS TAB CONTENT -->
-    <div *ngIf="activeTab === 'correlations'">
+    <div *ngIf="activeTab === 'correlations' && !isViewRestricted('correlations')">
       <app-correlations [totalComplaints]="Total_Complaints" [topCell]="topcell" [topHandset]="tophandset"
         [Abnormal_Kpis_RawData]="Abnormal_Kpis_RawData"></app-correlations>
     </div>
@@ -522,4 +536,4 @@
     </div>
   </div>
 
-</div>
+</div>

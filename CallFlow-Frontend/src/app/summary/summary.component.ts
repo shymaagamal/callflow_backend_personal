@@ -35,6 +35,10 @@ export class SummaryComponent implements OnInit, OnDestroy {
   // so everything else is shown in the "Not Available" state (never loading).
   // A link with nci_id opens the RCA tool on that NCI request's files.
   nciMode = false;
+  // Opened from the NCI portal link (nci_id): only the Root Causes view is
+  // open; every other view says the user has no permission to access it.
+  nciPortalLink = false;
+  readonly NO_PERMISSION_MESSAGE = "You don't have permission to access this view.";
   nciSites: string[] = [];
   nciError: string | null = null;
   private readonly NCI_UNAVAILABLE_SYSTEMS = ['smartcare', 'splunk'];
@@ -350,6 +354,7 @@ export class SummaryComponent implements OnInit, OnDestroy {
     // Link from the NCI API: show THAT result (stored by the API), no new run.
     const resultId = this.readNciResultId();
     if (resultId) {
+      this.nciPortalLink = true;
       this.setNciSystems('PROCESSING');
       this.request_id = resultId;
       this.startOrchestration(resultId, this.orchestration.nciJobsUrl);
@@ -1173,6 +1178,11 @@ getTopHandset_Type(metricsArr: any[]): string | null {
     this.stats.citiesSpanned = 0
   }
 
+/** True when this view is closed for the NCI portal link (all but Root Causes). */
+isViewRestricted(tab: string = this.activeTab): boolean {
+  return this.nciPortalLink && tab !== 'root-causes';
+}
+
 isDataLoaded(): boolean {
   // Root Causes tab is enabled ONLY when RCA files are actually ready
   // (section 18) -- never before.
@@ -1199,4 +1209,4 @@ onRootCauseClick() {
   Navigate_Correlation_Page() {
     this.router.navigate(['/Correlation']);
   }
-}
+}

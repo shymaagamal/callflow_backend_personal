@@ -250,4 +250,44 @@ describe('SummaryComponent NCI mode', () => {
     expect(c.systemRows.find((r) => r.key === 'npp')!.status).toBe('FAILED');
     expect(c.systemRows.find((r) => r.key === 'splunk')!.status).toBe('NOT_AVAILABLE');
   });
+
+  it('portal link: only Root Causes is open, every other view says no permission', () => {
+    const withRca = { ...NCI_JOB,
+      rca: { request_id: 'abc123abc123abcd', status: 'READY', files: { npp: 'READY' },
+             rca_files_url: '/callflow/api/analysis/abc123abc123abcd/rca-files' },
+      result: { request_id: 'abc123abc123abcd', overall_status: 'COMPLETED',
+                window: { start_date: '2026-10-31T04:15', end_date: '2026-10-31T16:15' } } };
+    const c = makeComponent(['D2431'], fakeOrchestration(withRca).svc);
+    (c as any).readNciResultId = () => 'abc123abc123abcd';
+    c.ngOnInit();
+    expect(c.nciPortalLink).toBeTrue();
+    expect(c.activeTab).toBe('root-causes');
+    expect(c.isViewRestricted()).toBeFalse();
+    for (const tab of ['summary', 'correlations']) {
+      c.setActiveTab(tab);
+      expect(c.isViewRestricted()).toBeTrue();
+    }
+    expect(c.NO_PERMISSION_MESSAGE).toBe("You don't have permission to access this view.");
+  });
+
+  it('portal link without RCA files: the other views stay closed too', () => {
+    const generating = { ...NCI_JOB, rca: { status: 'GENERATING', files: {}, rca_files_url: '/x' } };
+    const c = makeComponent(['D2431'], fakeOrchestration(generating).svc);
+    (c as any).readNciResultId = () => 'abc123abc123abcd';
+    c.ngOnInit();
+    expect(c.activeTab).toBe('summary');
+    expect(c.isViewRestricted()).toBeTrue();
+  });
+
+  it('NCI run without a portal link and the normal portal keep every view open', () => {
+    const c = makeComponent(['0160'], fakeOrchestration(NCI_JOB).svc);
+    c.ngOnInit();
+    expect(c.nciMode).toBeTrue();
+    expect(c.nciPortalLink).toBeFalse();
+    expect(c.isViewRestricted('summary')).toBeFalse();
+    expect(c.isViewRestricted('correlations')).toBeFalse();
+    const n = makeComponent(null);
+    n.ngOnInit();
+    expect(n.isViewRestricted('summary')).toBeFalse();
+  });
 });
