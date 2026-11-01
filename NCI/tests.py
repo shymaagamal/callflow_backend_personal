@@ -284,7 +284,7 @@ class NCIAnalysisThroughRCAToolTests(SimpleTestCase):
         s = out["sites_summary"]
         self.assertEqual(set(s), set(_SITES))
         for row in s.values():
-            self.assertEqual(set(row), {"critical_cases", "minor_cases", "trouble_tickets"})
+            self.assertEqual(set(row), {"critical_cases", "minor_cases", "trouble_tickets", "score"})
 
         # the numbers are the RCA tool's own per-site results (its report in the request folder)
         report = _json.loads((self.rdir() / "rca_result.json").read_text())
@@ -293,7 +293,11 @@ class NCIAnalysisThroughRCAToolTests(SimpleTestCase):
         self.assertEqual(s["LU4820"]["critical_cases"], by_site["LU4820"]["critical_issues"])
         self.assertGreater(s["K2398"]["critical_cases"], 0)                  # Trino attach failures
         self.assertEqual(s["K2398"]["critical_cases"], by_site["K2398"]["critical_issues"])
-        self.assertEqual(s["LU4821"], {"critical_cases": 0, "minor_cases": 0, "trouble_tickets": 0})
+        # score: the tool's own site score, as shown in its site ranking
+        for site in ("LU4820", "K2398"):
+            self.assertGreater(s[site]["score"], 0)
+            self.assertEqual(s[site]["score"], by_site[site]["score"])
+        self.assertEqual(s["LU4821"], {"critical_cases": 0, "minor_cases": 0, "trouble_tickets": 0, "score": 0})
         # the Remedy incident is listed twice; the tool links both rows to K2398, counted once
         self.assertEqual(by_site["K2398"]["tickets"], 2)
         self.assertEqual(s["K2398"]["trouble_tickets"], 1)
@@ -383,7 +387,7 @@ class NCIAnalysisThroughRCAToolTests(SimpleTestCase):
         out = self.run_pipeline(_Systems(empty=("npp", "viavi", "remedy", "trino")))
         self.assertEqual(out["errors"]["rca"], [{"period": "current", "error": "RCA not run: no data from any system"}])
         self.assertTrue(all(out["errors"][s] for s in ("npp", "viavi", "remedy", "trino")))
-        self.assertEqual(out["sites_summary"]["LU4820"], {"critical_cases": 0, "minor_cases": 0, "trouble_tickets": 0})
+        self.assertEqual(out["sites_summary"]["LU4820"], {"critical_cases": 0, "minor_cases": 0, "trouble_tickets": 0, "score": 0})
         self.assertNotIn("RCA execution started", self.logs)
 
     def test_concurrent_requests_use_their_own_files(self):
@@ -441,7 +445,7 @@ class NCIAnalysisThroughRCAToolTests(SimpleTestCase):
         self.assertEqual(set(data), {"sites_summary", "errors", "message", "portal_url"})
         for s in _SITES:
             self.assertEqual(set(data["sites_summary"][s]),
-                             {"critical_cases", "minor_cases", "trouble_tickets", "FLAG"})
+                             {"critical_cases", "minor_cases", "trouble_tickets", "score", "FLAG"})
             self.assertEqual(data["sites_summary"][s]["FLAG"], f"flag-{s}")
         self.assertEqual(job["status"], "DONE", job.get("error"))
         self.assertEqual({k: {kk: vv for kk, vv in v.items()} for k, v in job["result"]["sites_summary"].items()},
@@ -458,15 +462,16 @@ class NCIMappingTests(SimpleTestCase):
 
     def test_mapping_exact_then_site_id_never_other_sites(self):
         results = {"chains": [
-            {"site": "LK2398", "criticalIssues": 3, "anomalyIssues": 1,
+            {"site": "LK2398", "criticalIssues": 3, "anomalyIssues": 1, "score": 40,
              "ticketList": [{"incident_number": "I1"}, {"incident_number": "I1"}, {"incident_number": "I2"}]},
-            {"site": "LU4820", "criticalIssues": 2, "anomalyIssues": 0, "ticketList": []},
+            {"site": "LU4820", "criticalIssues": 2, "anomalyIssues": 0, "score": 25, "ticketList": []},
             {"site": "HUB9999", "criticalIssues": 9, "anomalyIssues": 9, "ticketList": []},
         ]}
         out, problems = _pipe.map_rca_to_sites(["K2398", "LU4820", "Q5555"], results)
         self.assertEqual({k: v["critical_cases"] for k, v in out.items()}, {"K2398": 3, "LU4820": 2, "Q5555": 0})
         self.assertEqual(out["K2398"]["trouble_tickets"], 2)
         self.assertEqual(out["K2398"]["_rca_sites"], ["LK2398"])
+        self.assertEqual({k: v["score"] for k, v in out.items()}, {"K2398": 40, "LU4820": 25, "Q5555": 0})
         self.assertEqual(problems, [{"period": "current", "site": "Q5555",
                                      "error": "the RCA tool linked no data to this site"}])
 
@@ -751,3 +756,16 @@ class ParallelRetrievalTests(SimpleTestCase):
             df = _pipe._retrieve_viavi(["K2398"], wins, "", "ts", notes, mock.Mock())
         self.assertEqual(sorted(df["PERIOD_TIMESTAMP"]), [1, 2])
         self.assertEqual(notes["viavi_failures"], [])
+
+
+class NCIScoreTests(SimpleTestCase):
+    databases = []
+
+    def test_site_matched_to_several_rca_sites_gets_the_highest_score(self):
+        results = {"chains": [
+            {"site": "LD2431", "criticalIssues": 1, "anomalyIssues": 0, "score": 120, "ticketList": []},
+            {"site": "D2431", "criticalIssues": 2, "anomalyIssues": 1, "score": 300, "ticketList": []},
+        ]}
+        out, _ = _pipe.map_rca_to_sites(["X2431"], results)
+        self.assertEqual(out["X2431"]["critical_cases"], 3)      # counts add up
+        self.assertEqual(out["X2431"]["score"], 300)             # score: the highest, not 420

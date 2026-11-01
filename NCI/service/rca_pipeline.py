@@ -44,8 +44,9 @@ the tool averages an empty value as 0.
 
 Response mapping (per requested site, from the tool's correlation results):
     critical_cases   chains[site].criticalIssues   (tool severity CRITICAL, KPI + TX)
-    minor_cases      chains[site].anomalyIssues    (every other tool severity)
+    minor_cases      chains[site].anomalyIssues    (other tool severities; V25 leaves out LOW)
     trouble_tickets  unique incidents in chains[site].ticketList
+    score            chains[site].score            (the tool's site score; highest if several)
 A requested site is matched to the tool's site name exactly, else by the
 tool's numeric site id (extractNumericSiteId); NPP cell names make the tool
 use e.g. "LK2398" for the requested "K2398". A site the tool did not score,
@@ -318,7 +319,7 @@ def _incident_ids(tickets):
 
 
 def map_rca_to_sites(sites, rca_results):
-    """{requested site: {critical_cases, minor_cases, trouble_tickets}}, plus
+    """{requested site: {critical_cases, minor_cases, trouble_tickets, score}}, plus
     errors["rca"] entries for sites the tool's results cannot be tied to."""
     chains = (rca_results or {}).get("chains") or []
     by_name = {}
@@ -353,6 +354,9 @@ def map_rca_to_sites(sites, rca_results):
             "critical_cases": int(sum(c.get("criticalIssues") or 0 for c in matched)),
             "minor_cases": int(sum(c.get("anomalyIssues") or 0 for c in matched)),
             "trouble_tickets": _incident_ids(tickets),
+            # the tool's own site score (chains[].score); scores are not additive,
+            # so a site matched to several RCA sites gets the highest one
+            "score": int(max((c.get("score") or 0 for c in matched), default=0)),
         }
         summary[site]["_rca_sites"] = sorted({str(c["site"]) for c in matched})
         summary[site]["_match"] = how
@@ -497,7 +501,8 @@ def run_nci_rca(sites, request_logger, log_path, ts, job_id=None, now=None, tool
         # to analyse. Reported per system, not as healthy sites.
         rlog.warning(f"[NCI] request_id={request_id} RCA tool not run: no KPI file is ready")
         errors["rca"].append({"period": PERIOD, "error": "RCA not run: no data from any system"})
-        summary = {s: {"critical_cases": 0, "minor_cases": 0, "trouble_tickets": 0} for s in sites}
+        summary = {s: {"critical_cases": 0, "minor_cases": 0, "trouble_tickets": 0, "score": 0}
+                   for s in sites}
         result = {"sites_summary": summary, "errors": errors}
         systems = {s: (c.systems.get(s) or {}).get("status") for s in SYSTEMS}
         _publish_portal_result(request_id, sites, result, None, {}, systems, None, complaint, rlog)
@@ -537,6 +542,7 @@ def run_nci_rca(sites, request_logger, log_path, ts, job_id=None, now=None, tool
     for site, row in mapped.items():
         rlog.info(f"[NCI] request_id={request_id} site={site} -> RCA site(s) {row['_rca_sites']} "
                   f"(match: {row['_match']}) critical={row['critical_cases']} minor={row['minor_cases']} "
+                  f"score={row['score']} "
                   f"tickets={row['trouble_tickets']}")
     summary = {s: {k: v for k, v in row.items() if not k.startswith("_")} for s, row in mapped.items()}
     result = {"sites_summary": summary, "errors": errors}
