@@ -25,8 +25,9 @@ RCA input files (OUTPUT_DIR/rca/<request_id>/):
     viavi_kpi.csv                    Viavi rows (existing writer; FLWID -> TX)
     remedy_kpi.csv                   one row per ticket with its Remedy site (existing writer)
     trino_kpi.csv, trino_auth_kpi.csv   the Trino query columns as returned, see _trino_files
-    nci_scope.csv                    filter file: NPP's cells for the sites, plus
-                                     SITE_NAME for requested sites NPP returned no cell for
+    nci_scope.csv                    filter file (myday, cell_name, SITE_NAME): NPP's cells for
+                                     the sites, plus SITE_NAME for requested sites NPP returned
+                                     no cell for; myday = the NCI window in 15-min steps
     thresholds.xlsx                  the server's threshold sheet (existing provisioning)
 
 Trino in the RCA tool: the Trino query columns go to the tool AS RETURNED
@@ -179,11 +180,14 @@ def _retrieve_npp(sites, windows, log_path, ts, notes, rlog):
 
 
 def _retrieve_viavi(sites, windows, log_path, ts, notes, rlog):
+    """Both windows at once (the Viavi pool allows several connections)."""
     from .analysis_runner import fetch_viavi
     frames, failures = [], []
-    for name, w in windows.items():
+    with ThreadPoolExecutor(max_workers=max(1, len(windows))) as ex:
+        futs = {name: ex.submit(fetch_viavi, sites, w, log_path, ts) for name, w in windows.items()}
+    for name, fut in futs.items():
         try:
-            df = fetch_viavi(sites, w, log_path, ts)
+            df = fut.result()
             if df is not None and not df.empty:
                 frames.append(df)
         except Exception as e:

@@ -712,3 +712,40 @@ class NCIScopeFileTests(SimpleTestCase):
                          ["2026-11-01 00:00", "2026-11-01 00:15", "2026-11-01 00:00"])
         self.assertEqual([r["cell_name"] for r in rows],
                          ["L09_LA0001_01", "L09_LA0002_01", "L09_LA0003_01"])
+
+
+class ParallelRetrievalTests(SimpleTestCase):
+    databases = []
+
+    def test_trino_queries_run_at_the_same_time(self):
+        # current = ClickHouse + Hive, prev_1day = Hive: 3 queries. The barrier
+        # only opens when all 3 are running together; sequential runs would time out.
+        barrier = _threading.Barrier(3, timeout=10)
+
+        def query(sql):
+            barrier.wait()
+            return _pd.DataFrame()
+
+        now = _dt.datetime(2026, 11, 1, 12, 0)
+        with mock.patch.object(_svc, "run_trino_query", query):
+            res = _svc.fetch_trino_site_kpis(["K2398"], start=now - _dt.timedelta(hours=14), end=now,
+                                             now=now, window_names=("current", "prev_1day"))
+        self.assertEqual(res["errors"], {})
+        # reported in the planned order, not the order they finished
+        self.assertEqual([(q["window"], q["source"]) for q in res["queries"]],
+                         [("current", "hive_s1mme_kpi"), ("current", "clickhouse_15min"),
+                          ("prev_1day", "hive_s1mme_kpi")])
+
+    def test_viavi_windows_run_at_the_same_time(self):
+        barrier = _threading.Barrier(2, timeout=10)
+
+        def viavi(sites, w, log_path, ts):
+            barrier.wait()
+            return _pd.DataFrame({"PERIOD_TIMESTAMP": [w["start"]]})
+
+        wins = {"primary": {"start": 1}, "yesterday": {"start": 2}}
+        notes = {}
+        with mock.patch.object(_runner, "fetch_viavi", viavi):
+            df = _pipe._retrieve_viavi(["K2398"], wins, "", "ts", notes, mock.Mock())
+        self.assertEqual(sorted(df["PERIOD_TIMESTAMP"]), [1, 2])
+        self.assertEqual(notes["viavi_failures"], [])

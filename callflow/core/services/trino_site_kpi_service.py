@@ -27,6 +27,7 @@ import datetime
 import logging
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pandas as pd
@@ -34,6 +35,8 @@ import pandas as pd
 from ..constants.trino_sites_queries import trino_s1mme_QUERIES
 from .trino_service import _epochs, _LOCAL_TZ
 from ..utils.trino_client import run_trino_query
+
+TRINO_PARALLEL_QUERIES = 4   # at most 3 today: current = ClickHouse + Hive, prev_1day = Hive
 
 logger = logging.getLogger(__name__)
 
@@ -289,25 +292,37 @@ def fetch_trino_site_kpis(site_names, log_path="", tablename=None, start=None, e
     log.info("[SITE KPI] Trino S1-MME for %d site(s) %s; ClickHouse from %s, Hive before",
              len(sites), sites, cutoff)
 
+    # Every (window, source) query is independent: run them all at once.
+    # Results are read back in the original order, so logs and "queries" keep it.
+    plan = [(name, source, part_start, part_end)
+            for name, window in windows.items()
+            for source, part_start, part_end in split_window(window["start"], window["end"], cutoff)]
+    with ThreadPoolExecutor(max_workers=max(1, min(len(plan), TRINO_PARALLEL_QUERIES)),
+                            thread_name_prefix="trino-site") as ex:
+        futures = [ex.submit(run_trino_queries, name, source, site_list, ps, pe, log)
+                   for name, source, ps, pe in plan]
+
     out, rows, queries, errors = {}, {}, [], {}
+    frames_by_window = {name: [] for name in windows}
+    failed_windows = set()
+    for (name, source, part_start, part_end), fut in zip(plan, futures):
+        try:
+            frame, entry = fut.result()
+            frames_by_window[name].append(frame)
+        except Exception as e:
+            failed_windows.add(name)
+            errors["%s.s1mme.%s" % (name, source)] = str(e)
+            entry = {"window": name, "source": source, "start": str(part_start),
+                     "end": str(part_end), "rows": None, "error": str(e)}
+        queries.append(entry)
+
     for name, window in windows.items():
         out[name] = {"start": str(window["start"]), "end": str(window["end"]), "s1mme": [], "s6a": []}
         rows[name] = []
-        frames, failed = [], False
-        for source, part_start, part_end in split_window(window["start"], window["end"], cutoff):
-            try:
-                frame, entry = run_trino_queries(name, source, site_list, part_start, part_end, log)
-                frames.append(frame)
-            except Exception as e:
-                failed = True
-                errors["%s.s1mme.%s" % (name, source)] = str(e)
-                entry = {"window": name, "source": source, "start": str(part_start),
-                         "end": str(part_end), "rows": None, "error": str(e)}
-            queries.append(entry)
-        if failed:
+        if name in failed_windows:
             log.error("[SITE KPI] %s: a query failed; no S1-MME totals for this window", name)
             continue
-        combined = combine_parts(frames)
+        combined = combine_parts(frames_by_window[name])
         out[name]["s1mme"] = _records(per_site(combined))
         rows[name] = _records(combined)
         missing = sorted(set(sites) - set(combined[QUERY_SITE_COL].dropna()))
