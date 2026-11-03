@@ -8,7 +8,19 @@ GET  .../smartcare/jobs/<job_id>                     -> job record (status, step
 GET  .../smartcare/jobs/<job_id>/result              -> the exact analysis body with its original
                                                         HTTP status once finished, 202 while running
 
-Response headers: X-MI-Job-Id, and on finished results X-MI-Partial / X-MI-Warnings.
+Request bodies
+  single (unchanged):   {"start_date", "end_date", "Complain_Type": "Data"|"Voice", "msisdn_list": [...]}
+  multi-complaint:      {"start_date", "end_date", "complaints": [
+                            {"category": "Home Wireless"|"MI"|"Network", "subcategory": "...",
+                             "msisdn_list": [...]}, ...]}
+  A multi-complaint result is grouped by category / subcategory (see batch.py).
+
+Submission order: validate -> dedup (identical active request returns its job,
+no quota used) -> queue capacity (429) -> daily quota (429, one per accepted
+request) -> create job -> dispatch. Polling status/result never uses quota.
+
+Response headers: X-MI-Job-Id, X-MI-Daily-Remaining on accepted submissions,
+and on finished results X-MI-Partial / X-MI-Warnings.
 """
 import logging
 import threading
@@ -54,7 +66,7 @@ def _wants_async(request, default_mode):
 
 def _with_job_headers(resp, job):
     resp["X-MI-Job-Id"] = job["job_id"]
-    if job.get("status") in ("DONE", "FAILED"):
+    if job.get("status") in jobs.FINISHED:
         resp["X-MI-Partial"] = "true" if job.get("partial") else "false"
         codes = sorted({w.get("code") for w in job.get("warnings") or [] if w.get("code")})
         if codes:
@@ -91,7 +103,7 @@ def wait_for(job_id, timeout_s):
     delay = 0.5
     while True:
         job = jobs.get_job(job_id)
-        if job is None or job.get("status") in ("DONE", "FAILED"):
+        if job is None or job.get("status") in jobs.FINISHED:
             return job
         if time.monotonic() >= deadline:
             return job
@@ -114,17 +126,20 @@ class _SubmitView(APIView):
             "end_date": request.data.get("end_date"),
             "Complain_Type": request.data.get("Complain_Type"),
             "imsi": request.data.get("imsi"),
+            "complaints": request.data.get("complaints"),
             "user": _identity(request),
         }
         want_async = _wants_async(request, self.default_mode())
         # free the DB connection opened by the session/auth lookup before any waiting
         db.close_old_connections()
 
+        is_batch = validation.is_batch(params)
         try:
-            req = validation.parse_request(params)
+            req = validation.parse_batch(params) if is_batch else validation.parse_request(params)
         except validation.RequestError as e:
-            code = e.legacy_status if self.legacy_errors else 400
-            logger.info("MI request rejected endpoint=%s status=%s error=%s", self.endpoint, code, e.message)
+            code = e.legacy_status if (self.legacy_errors and not is_batch) else 400
+            logger.info("MI request rejected endpoint=%s status=%s batch=%s error=%s",
+                        self.endpoint, code, is_batch, e.message)
             return Response(response.error_body(e.message), status=code)
 
         params = req.to_params()
@@ -142,27 +157,69 @@ class _SubmitView(APIView):
                                 status=status.HTTP_429_TOO_MANY_REQUESTS)
                 resp["Retry-After"] = "120"
                 return resp
-            jobs.create_job(job_id, req.user, params, self.endpoint, day)
-            jobs.pending_add(job_id)
+            try:
+                quota = jobs.reserve_submission()
+            except jobs.QuotaExceeded as e:
+                jobs.release_inflight(fp, job_id)
+                logger.warning("MI daily limit reached endpoint=%s limit=%s used=%s resets_at=%s user=%s",
+                               self.endpoint, e.limit, e.used, e.resets_at, req.user)
+                return _quota_rejected(e)
+            try:
+                jobs.create_job(job_id, req.user, params, self.endpoint, day, quota=quota)
+                jobs.pending_add(job_id)
+            except Exception:
+                jobs.release_submission(quota)       # no job exists -> the submission does not count
+                jobs.release_inflight(fp, job_id)
+                raise
             how = dispatch(job_id, params, fp, day, wait=not want_async)
-            logger.info("MI job submitted job_id=%s endpoint=%s via=%s async=%s complain_type=%s msisdns=%d",
-                        job_id, self.endpoint, how, want_async, req.complain_type, len(req.msisdns))
+            if is_batch:
+                logger.info("MI job submitted job_id=%s endpoint=%s via=%s async=%s groups=%d msisdns=%d "
+                            "plan=%s quota_used=%s/%s", job_id, self.endpoint, how, want_async, len(req.groups),
+                            req.msisdn_count, ";".join(f"{g.category}/{g.subcategory}/{g.complain_type}/"
+                                                       f"{len(g.msisdns)}" for g in req.groups),
+                            quota.get("used"), quota.get("limit"))
+            else:
+                logger.info("MI job submitted job_id=%s endpoint=%s via=%s async=%s complain_type=%s msisdns=%d "
+                            "quota_used=%s/%s", job_id, self.endpoint, how, want_async, req.complain_type,
+                            len(req.msisdns), quota.get("used"), quota.get("limit"))
 
         if want_async:
             job = jobs.get_job(job_id) or {"job_id": job_id, "status": "PENDING"}
             body = {"job_id": job_id, "status": job.get("status"), **_links(request, job_id)}
+            if is_batch:
+                body["groups"] = len(req.groups)
+            if job.get("expires_at"):
+                body["retention_hours"] = round(config.job_ttl_s() / 3600, 2)
             if deduplicated:
                 body["deduplicated"] = True
-            return _with_job_headers(Response(body, status=status.HTTP_202_ACCEPTED), job)
+            elif job.get("quota"):
+                body["daily_quota"] = job["quota"]
+            resp = _with_job_headers(Response(body, status=status.HTTP_202_ACCEPTED), job)
+            if not deduplicated and (job.get("quota") or {}).get("remaining") is not None:
+                resp["X-MI-Daily-Remaining"] = str(job["quota"]["remaining"])
+            return resp
 
         job = wait_for(job_id, config.sync_wait_timeout_s())
         if job is None:
             return Response(response.error_body("MI job expired"), status=500)
-        if job.get("status") not in ("DONE", "FAILED"):
+        if job.get("status") not in jobs.FINISHED:
             body = {"job_id": job_id, "status": job.get("status"),
                     "detail": "still running; poll result_url", **_links(request, job_id)}
             return _with_job_headers(Response(body, status=status.HTTP_202_ACCEPTED), job)
         return _with_job_headers(Response(job.get("result"), status=job.get("http_status") or 500), job)
+
+
+def _quota_rejected(e):
+    body = response.error_body(str(e))
+    body.update({"daily_limit": e.limit, "used_today": e.used, "resets_at": e.resets_at})
+    resp = Response(body, status=status.HTTP_429_TOO_MANY_REQUESTS)
+    try:
+        from datetime import datetime
+        reset = datetime.fromisoformat(e.resets_at)
+        resp["Retry-After"] = str(max(1, int((reset - datetime.now(reset.tzinfo)).total_seconds())))
+    except Exception:
+        pass
+    return resp
 
 
 class MISmartcareView(_SubmitView):
@@ -194,7 +251,9 @@ class JobResultView(APIView):
         job = jobs.get_job(job_id) if job_id else None
         if job is None:
             return Response({"error": "job not found or expired"}, status=status.HTTP_404_NOT_FOUND)
-        if job.get("status") not in ("DONE", "FAILED"):
+        if job.get("status") not in jobs.FINISHED:
             return _with_job_headers(Response({"job_id": job_id, "status": job.get("status"),
-                                               "step": job.get("step")}, status=status.HTTP_202_ACCEPTED), job)
+                                               "step": job.get("step"),
+                                               "progress_percent": job.get("progress_percent")},
+                                              status=status.HTTP_202_ACCEPTED), job)
         return _with_job_headers(Response(job.get("result"), status=job.get("http_status") or 500), job)

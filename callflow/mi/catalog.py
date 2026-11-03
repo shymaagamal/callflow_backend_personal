@@ -12,6 +12,62 @@ from .Queries.voice_queries import smartcare_Voice_QUERIES
 DATA = "Data"
 VOICE = "Voice"
 
+# ------------------------------------------------- complaint categories
+# The ONLY place that decides which analysis a complaint category gets.
+# Keys are the category names the frontend sends (matched case-insensitively,
+# extra spaces ignored); values are the Complain_Type the pipeline runs.
+CATEGORY_COMPLAIN_TYPE = OrderedDict([
+    ("Home Wireless", DATA),
+    ("MI", DATA),
+    ("Network", VOICE),
+])
+
+# Allowed subcategories per category. An EMPTY tuple (or a category missing
+# here) accepts any non-empty subcategory. Fill from the complaint sheet, e.g.
+#   "Home Wireless": ("HG", ...),
+#   "MI": ("MI Connection", "MI Disconnection Not Solved", ...),
+#   "Network": ("Call Forward / Third Call", ...),
+SUBCATEGORIES = {
+    "Home Wireless": (),
+    "MI": (),
+    "Network": (),
+}
+
+# How the response labels each Complain_Type.
+COMPLAIN_TYPE_LABEL = {DATA: "DATA", VOICE: "VOICE"}
+
+
+def _norm(text):
+    return " ".join(str(text).split()).casefold()
+
+
+def resolve_category(name):
+    """Canonical category name for `name`, or None when it is not mapped."""
+    wanted = _norm(name)
+    for category in CATEGORY_COMPLAIN_TYPE:
+        if _norm(category) == wanted:
+            return category
+    return None
+
+
+def complain_type_for(category):
+    return CATEGORY_COMPLAIN_TYPE[category]
+
+
+def resolve_subcategory(category, name):
+    """
+    (canonical subcategory, error). With an allow-list for the category the
+    name must be in it (case-insensitive); otherwise any non-empty text.
+    """
+    text = " ".join(str(name).split())
+    allowed = SUBCATEGORIES.get(category) or ()
+    if not allowed:
+        return text, None
+    for sub in allowed:
+        if _norm(sub) == _norm(text):
+            return sub, None
+    return None, f"unknown subcategory {text!r} for {category}; allowed: {', '.join(allowed)}"
+
 
 def query_set(complain_type):
     """OrderedDict name -> SQL template, in the original execution order."""

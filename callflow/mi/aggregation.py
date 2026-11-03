@@ -75,7 +75,7 @@ class _Metrics:
 
 # ---------------------------------------------------------------- Data
 DATA_EMPTY = (("suspected_sites", dict), ("suspected_cells_raw", dict), ("suspected_sgws", list),
-              ("rat_counts", dict), ("DRA_NAME", dict), ("OCS_NAME", dict), ("PCRF_NAME", dict),
+              ("rat_counts", dict), ("DRA_NAME", dict), ("OCS_NAME", dict), ("VPCRF_NAME", dict),
               ("region_counts", dict), ("subregion_counts", dict), ("sgsn_counts", dict),
               ("tac_counts", dict), ("mme_counts", dict))
 
@@ -205,4 +205,4 @@ def aggregate_voice(nodes, ctx, export=None):
               base_rows=0 if base is None else len(base),
               unavailable=",".join(m.unavailable) or "none",
               **{f"n_{k}": len(v) for k, v in out.items()})
-    return out, list(out["Suspected_Cells"].keys())
+    return out, list(out["Suspected_Cells"].keys())

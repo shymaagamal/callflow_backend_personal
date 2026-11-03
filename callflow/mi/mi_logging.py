@@ -21,6 +21,7 @@ import traceback
 from collections import OrderedDict
 from contextlib import contextmanager
 from datetime import datetime
+from pathlib import Path
 
 from . import config, outputs
 
@@ -123,16 +124,23 @@ class JobContext:
     """Logging, timings and output folder of ONE job."""
 
     def __init__(self, job_id, who="unknown", complain_type=None, msisdn_count=0,
-                 window=None, mode="worker", day=None):
+                 window=None, mode="worker", day=None, tags=None, directory=None):
+        """
+        tags      - key=value fields written right after job_id on EVERY line
+                    (multi-complaint groups: parent_job_id, group, category,
+                    subcategory, complain_type), and copied into summary.json.
+        directory - output folder; default MI/jobs/<day>/<job_id>.
+        """
         setup_app_logging()
         self.job_id = job_id
+        self.tags = OrderedDict(tags or {})
         self.who = who
         self.complain_type = complain_type
         self.msisdn_count = msisdn_count
         self.window = window or {}
         self.mode = mode
         self.day = day or outputs.today_str()
-        self.dir = outputs.job_dir(job_id, self.day)
+        self.dir = Path(directory) if directory is not None else outputs.job_dir(job_id, self.day)
         self.stages = []
         self.queries = []
         self.warnings = []
@@ -191,8 +199,8 @@ class JobContext:
 
     # ------------------------------------------------------------ logging
     def event(self, _event, level=logging.INFO, **fields):
-        line = " ".join([f"job_id={self.job_id}", f"event={_event}"] +
-                        [f"{k}={_fmt(v)}" for k, v in fields.items()])
+        line = " ".join([f"job_id={self.job_id}"] + [f"{k}={_fmt(v)}" for k, v in self.tags.items()] +
+                        [f"event={_event}"] + [f"{k}={_fmt(v)}" for k, v in fields.items()])
         self.log.log(level, line)
         if level >= logging.INFO:
             self.app_log.log(level, line)
@@ -261,6 +269,7 @@ class JobContext:
         return {
             "ts": datetime.now().isoformat(timespec="seconds"),
             "job_id": self.job_id,
+            **self.tags,
             "who": self.who,
             "mode": self.mode,
             "pid": os.getpid(),

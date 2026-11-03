@@ -77,7 +77,30 @@ def log_retention_days() -> int:
 
 
 def job_retention_days() -> int:
-    return _int("MI_JOB_RETENTION_DAYS", 7)
+    """
+    Days the jobs/<date>/ folders are kept (0 = never delete). Never shorter
+    than the Redis job retention: a job created just before midnight and
+    finished later must keep its files for the whole MI_JOB_TTL_S after it
+    finished, so values below min_job_retention_days() are raised to it.
+    """
+    days = _int("MI_JOB_RETENTION_DAYS", 7)
+    if days <= 0:
+        return days
+    minimum = min_job_retention_days()
+    if days < minimum:
+        logger.warning("MI_JOB_RETENTION_DAYS=%s is shorter than the job retention; using %s", days, minimum)
+        return minimum
+    return days
+
+
+def min_job_retention_days() -> int:
+    """
+    jobs/<D>/ is deleted on day D+N+1, so a job created late on D keeps its
+    folder for ~N days. N must cover queue wait + run time + MI_JOB_TTL_S
+    (run time estimated as MI_SYNC_WAIT_TIMEOUT_S). Default: 2.
+    """
+    seconds = job_ttl_s() + slot_wait_s() + sync_wait_timeout_s()
+    return int(-(-seconds // 86400))
 
 
 def log_level() -> str:
@@ -236,7 +259,36 @@ def slot_ttl_s() -> int:
 
 
 def job_ttl_s() -> int:
-    return _int("MI_JOB_TTL_S", 24 * 3600)
+    """
+    How long a job record (status, categorised results, errors) stays readable:
+    24h after it COMPLETED / FAILED. While running, every heartbeat re-arms it;
+    reading (polling) never extends it. After that the API returns 404.
+    """
+    return max(1, _int("MI_JOB_TTL_S", 24 * 3600))
+
+
+# ------------------------------------------------- multi-complaint requests
+def max_complaint_groups() -> int:
+    """Complaint groups (category/subcategory) allowed in one request."""
+    return max(1, _int("MI_MAX_COMPLAINT_GROUPS", 20))
+
+
+def daily_submission_limit() -> int:
+    """
+    Accepted MI submissions per calendar day across ALL users (one request =
+    one submission, however many groups / MSISDNs). 0 disables the limit. The
+    day follows settings.TIME_ZONE.
+    """
+    return _int("MI_DAILY_SUBMISSION_LIMIT", 100)
+
+
+def daily_limit_timezone():
+    """
+    IANA name of the timezone whose midnight resets the daily limit.
+    Empty (default) = settings.TIME_ZONE (the project uses 'UTC', i.e. 02:00 /
+    03:00 Cairo time); set MI_DAILY_LIMIT_TIMEZONE=Africa/Cairo for local midnight.
+    """
+    return str(_get("MI_DAILY_LIMIT_TIMEZONE", "") or "").strip() or None
 
 
 def job_stale_s() -> int:

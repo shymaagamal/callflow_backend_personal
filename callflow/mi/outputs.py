@@ -8,6 +8,8 @@ Everything MI writes lives under CALLFLOW_OUTPUT/MI (config.output_dir()):
           job.log  request.json  summary.json  result.json
           sc_nodes.csv  sc_nodes_before_voice.csv  sc_data.csv  matched_master.csv
           sitename_errors.log
+          groups/gNN/                     multi-complaint request: one folder per complaint
+                                          group (same files as a single job), never shared
       latest/<file>.csv                   newest copy of each export (atomic replace)
 
 plus, for existing consumers, atomic copies of the three fixed-name CSVs in
@@ -16,6 +18,11 @@ MI_LEGACY_EXPORT_DIR (default /home/Shorouk/CallFlow).
 Date-named folders mean no file is ever rotated by one process while another
 is writing it (Gunicorn runs several processes); retention deletes whole
 folders older than MI_LOG_RETENTION_DAYS / MI_JOB_RETENTION_DAYS.
+
+Job folders always outlive the Redis job record (MI_JOB_TTL_S, 24h after the
+job finished): config.job_retention_days() is never below the days that need,
+so a result the API can still return also still has its files. Once the
+record has expired the API answers 404 even if the folder is still on disk.
 """
 import json
 import logging

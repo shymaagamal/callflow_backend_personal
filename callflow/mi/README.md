@@ -75,6 +75,43 @@ uses no CPU and no Smartcare connection, because the work happens in the MI work
 CORE/NCI workers, the 15-minute caller should POST with `?async=1` (or to `/callflow/mi/api/smartcare`)
 and poll `result_url`.
 
+### Multi-complaint requests (since 2026-11-03)
+
+Same endpoints. A body with `complaints` instead of `Complain_Type` + `msisdn_list`:
+
+```json
+{"start_date": "2026-10-20T13:00", "end_date": "2026-10-20T14:59",
+ "complaints": [
+   {"category": "Home Wireless", "subcategory": "HG", "msisdn_list": ["1065506902", "1021396763"]},
+   {"category": "MI", "subcategory": "MI Connection", "msisdn_list": ["1020170742"]},
+   {"category": "Network", "subcategory": "Call Forward / Third Call", "msisdn_list": ["1065506902"]}]}
+```
+
+* **Mapping** (only in `catalog.CATEGORY_COMPLAIN_TYPE`): Home Wireless → Data, MI → Data, Network → Voice.
+  Allowed subcategories: `catalog.SUBCATEGORIES` (empty = any non-empty text).
+* **Validation** before anything is created; all errors in one 400, prefixed `complaints[i]`.
+  The same MSISDN may be in several groups; the same category + subcategory twice is rejected.
+* **Execution**: one parent job, one slot, one heartbeat. `batch.run_groups` calls the existing
+  `pipeline.run` once per group, one group after another (queries inside a group still run in
+  parallel), so Smartcare sessions stay `MI_MAX_CONCURRENT × MI_QUERY_PARALLELISM`. Each group has
+  its own folder `jobs/<day>/<job_id>/groups/gNN/` and job id `<job_id>-gNN`; every line carries
+  `parent_job_id group category subcategory complain_type`, and the parent `job.log` has one
+  `event=group_done` line per group (requested/analyzed MSISDNs, status, duration, error).
+  `grep job_id=<job_id>` finds the parent and all groups.
+* **Statuses**: group `COMPLETED | PARTIALLY_COMPLETED | NO_DATA | FAILED` (`PENDING | RUNNING` while
+  waiting); parent `PENDING → RUNNING → COMPLETED | PARTIALLY_COMPLETED | FAILED`. Result endpoint:
+  200, or 500 when every group failed. The body is grouped by category → subcategories; each
+  subcategory has `analysis_result` (the unchanged single-complaint body; `null` for NO_DATA/FAILED),
+  `requested_msisdns`, `analyzed_msisdns`, `error`, `failed_queries`, `warnings`, `duration_s`.
+  The status endpoint shows finished groups while the others still run.
+* **Daily limit**: `MI_DAILY_SUBMISSION_LIMIT` accepted submissions per day across all users
+  (Redis `mi:quota:<date>`, one atomic Lua INCR). One request = one submission. Invalid requests,
+  duplicates of an active job, queue-full rejections and polling do not count. Over the limit →
+  429 with `resets_at` and `Retry-After`. Single-complaint requests count too.
+* **Retention**: job records expire 24h after COMPLETED/FAILED; running jobs are kept alive by the
+  heartbeat; then 404. Job folders are never deleted before that (`MI_JOB_RETENTION_DAYS` ≥ 2).
+* Single-complaint bodies work exactly as before (`DONE`/`FAILED`, same body).
+
 ## 4. Outputs and logs: `CALLFLOW_OUTPUT/MI/`
 
 Default `…/callflow_portal/callflow_output/MI` (`settings.OUTPUT_DIR/MI`); override with an absolute
@@ -296,4 +333,7 @@ The `.env` lines and `callflow_output/MI/` are harmless to keep. Nothing in the 
 | `MI_SYNC_WAIT_TIMEOUT_S` | 3600 | then 202 + job_id |
 | `MI_MAX_CONCURRENT` | 1 | running jobs across all processes |
 | `MI_MAX_QUEUED_JOBS` | 5 | queued + running; beyond → 429 |
-| `MI_JOB_TTL_S` / `MI_JOB_STALE_S` | 86400 / 300 | job record lifetime / lost-worker detection |
+| `MI_JOB_TTL_S` / `MI_JOB_STALE_S` | 86400 / 300 | job record kept 24h after it finished (polling never extends it) / lost-worker detection |
+| `MI_DAILY_SUBMISSION_LIMIT` | 100 | accepted submissions per calendar day, all users; 0 = off |
+| `MI_DAILY_LIMIT_TIMEZONE` | `settings.TIME_ZONE` (UTC) | whose midnight resets the limit, e.g. `Africa/Cairo` |
+| `MI_MAX_COMPLAINT_GROUPS` | 20 | complaint groups per request |

@@ -44,8 +44,29 @@ def _report_outcome(ctx, outcome, role="query"):
                     tables=",".join(str(t) for t in failed_tables), error=outcome.error)
 
 
+# Columns that carry the subscriber number in the Smartcare rows (VoLTE /
+# REG queries name it IMPU_TEL_URI / IMPU_TEL_URI1).
+SUBSCRIBER_FIELDS = ("MSISDN", "IMPU_TEL_URI1", "IMPU_TEL_URI")
+
+
+def analyzed_msisdns(result, requested):
+    """How many of the requested MSISDNs appear in at least one Smartcare row."""
+    wanted = {str(m).strip() for m in requested}
+    found = set()
+    for col in SUBSCRIBER_FIELDS:
+        if col in result.columns:
+            found.update(str(v).strip() for v in result[col].dropna().unique())
+    return len(wanted & found)
+
+
 def run(params, ctx, connect_fn=None):
+    """
+    One Complain_Type for one MSISDN list. Besides (http_status, body) it leaves
+    on ctx: query_statuses {query: ok|partial|failed|unavailable|gave_up},
+    result_rows and analyzed_msisdns (used by the multi-complaint runner).
+    """
     session = pool = None
+    ctx.query_statuses, ctx.result_rows, ctx.analyzed_msisdns = OrderedDict(), None, None
     try:
         with ctx.stage("input_validation"):
             try:
@@ -73,12 +94,15 @@ def run(params, ctx, connect_fn=None):
             outcomes = executor.run_many(queries)
             for (name, template), outcome in zip(queries, outcomes):    # original order
                 _report_outcome(ctx, outcome)
+                ctx.query_statuses[name] = outcome.status
                 frame, renamed = catalog.normalise_subscriber_column(name, outcome.frame)
                 if renamed:
                     ctx.event("subscriber_column_mapped", query=name, column=renamed, to="MSISDN",
                               rows=len(frame))
                 frames.append(frame)
         result = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        ctx.result_rows = len(result)
+        ctx.analyzed_msisdns = analyzed_msisdns(result, req.msisdns)
         csv_path = outputs.export_csv(result, 'sc_nodes_raw.csv', ctx.dir, job_log=ctx.log)
         ctx.event("raw_result_exported", complain_type=req.complain_type, rows=len(result),
                   columns=len(result.columns), csv=csv_path)
