@@ -236,13 +236,37 @@ def _py(v):
 
 # -- Trino ----------------------------------------------------------------------
 
+# Hive s1mme_kpi daypartition values. Both spellings are listed because the
+# partition format is not fixed here; a value that matches no partition costs
+# nothing. Keep only the real one once confirmed.
+HIVE_DAYPARTITION_FORMATS = ("%Y%m%d", "%Y-%m-%d")
+
+
+def daypartition_list(start, end):
+    """The daypartition values [start, end) can touch, as a SQL IN list.
+
+    Days are local (Africa/Cairo), like time_t. The day before start is
+    included too, in case partitions are cut on UTC days (Cairo is ahead of
+    UTC, so a local time can sit in the previous UTC day)."""
+    s = start.astimezone(_LOCAL_TZ) if getattr(start, "tzinfo", None) else start
+    e = end.astimezone(_LOCAL_TZ) if getattr(end, "tzinfo", None) else end
+    last = (e - datetime.timedelta(microseconds=1)).date() if e > s else s.date()
+    day, days = s.date() - datetime.timedelta(days=1), []
+    while day <= last:
+        days.append(day)
+        day += datetime.timedelta(days=1)
+    values = [d.strftime(f) for d in days for f in HIVE_DAYPARTITION_FORMATS]
+    return "(" + ", ".join("'%s'" % v for v in values) + ")"
+
+
 def run_trino_queries(window_name, source, site_list, start, end, request_logger=None):
     """Run one query for [start, end). Returns (normalised frame, query log entry).
     Errors are raised after they are logged."""
     log = request_logger or logger
     start_epoch, end_epoch, start_lit, end_lit = _epochs(start, end)
     sql = trino_s1mme_QUERIES[source].format(
-        site_list=site_list, start_epoch=start_epoch, end_epoch=end_epoch)
+        site_list=site_list, start_epoch=start_epoch, end_epoch=end_epoch,
+        day_list=daypartition_list(start, end))   # unused by the ClickHouse query
     entry = {"window": window_name, "source": source,
              "start": start_lit, "end": end_lit,
              "start_epoch": start_epoch, "end_epoch": end_epoch}

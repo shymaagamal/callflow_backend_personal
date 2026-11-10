@@ -327,6 +327,7 @@ def map_rca_to_sites(sites, rca_results):
         if c.get("site"):
             by_name.setdefault(str(c["site"]), []).append(c)
     # numeric id -> requested sites sharing it (ambiguous when > 1)
+    sites = list(dict.fromkeys(sites))          # a repeated site is not a second site
     req_by_id = {}
     for s in sites:
         req_by_id.setdefault(numeric_site_id(s), []).append(s)
@@ -434,6 +435,12 @@ def _write_json(path, obj):
 def run_nci_rca(sites, request_logger, log_path, ts, job_id=None, now=None, tool_path=None):
     """The NCI analysis through the RCA tool. Returns {"sites_summary", "errors"}."""
     rlog = request_logger
+    # The same site sent twice is one site: duplicates would also make the
+    # site-id match below see "several requested sites" and assign nothing.
+    requested = list(sites)
+    sites = list(dict.fromkeys(requested))
+    if len(sites) != len(requested):
+        rlog.info(f"[NCI] duplicate site(s) removed: {requested} -> {sites}")
     # 16 hex = the job-id format, so the API job, the RCA files and the portal
     # link (nci_id) share one id.
     request_id = job_id or uuid.uuid4().hex[:16]

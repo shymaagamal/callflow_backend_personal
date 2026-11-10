@@ -383,6 +383,13 @@ class NCIAnalysisThroughRCAToolTests(SimpleTestCase):
         self.assertEqual(out["sites_summary"]["K2398"]["trouble_tickets"], 0)
         self.assertGreater(out["sites_summary"]["K2398"]["critical_cases"], 0)   # Trino still analysed
 
+    def test_a_site_sent_several_times_is_analysed_once(self):
+        once = self.run_pipeline(_Systems())
+        twice = self.run_pipeline(_Systems(), sites=["LU4820", "LU4820", "LU4821", "K2398", "K2398"])
+        self.assertEqual(twice["sites_summary"], once["sites_summary"])
+        self.assertFalse([e for e in twice["errors"]["rca"] if "shared by requested sites" in e["error"]])
+        self.assertIn("duplicate site(s) removed", self.logs)
+
     def test_no_data_anywhere_skips_the_tool(self):
         out = self.run_pipeline(_Systems(empty=("npp", "viavi", "remedy", "trino")))
         self.assertEqual(out["errors"]["rca"], [{"period": "current", "error": "RCA not run: no data from any system"}])
@@ -769,3 +776,59 @@ class NCIScoreTests(SimpleTestCase):
         out, _ = _pipe.map_rca_to_sites(["X2431"], results)
         self.assertEqual(out["X2431"]["critical_cases"], 3)      # counts add up
         self.assertEqual(out["X2431"]["score"], 300)             # score: the highest, not 420
+
+
+class NCIDuplicateSiteTests(SimpleTestCase):
+    databases = []
+
+    # Same shape as request e2a4c48e32ab4a64: D3426 sent 3 times; the tool names
+    # the site LD3426 (4G cells) and also LMD3426 / ND3426 (2G/3G cells).
+    CHAINS = {"chains": [
+        {"site": "LD3426", "criticalIssues": 15, "anomalyIssues": 14, "score": 5863,
+         "ticketList": [{"incident_number": "INC000082618500"}, {"incident_number": "INC000082526534"}]},
+        {"site": "LMD3426", "criticalIssues": 0, "anomalyIssues": 0, "score": 0, "ticketList": []},
+        {"site": "ND3426", "criticalIssues": 0, "anomalyIssues": 0, "score": 0, "ticketList": []},
+    ]}
+
+    def test_repeated_site_gets_the_tool_results(self):
+        out, problems = _pipe.map_rca_to_sites(["D3426", "D3426", "D3426"], self.CHAINS)
+        self.assertEqual(problems, [])
+        row = out["D3426"]
+        self.assertEqual((row["critical_cases"], row["minor_cases"], row["trouble_tickets"], row["score"]),
+                         (15, 14, 2, 5863))
+        self.assertEqual(row["_rca_sites"], ["LD3426", "LMD3426", "ND3426"])
+
+    def test_two_different_sites_with_one_id_are_still_refused(self):
+        out, problems = _pipe.map_rca_to_sites(["D3426", "K3426"], self.CHAINS)
+        self.assertEqual(out["D3426"]["critical_cases"], 0)
+        self.assertEqual(len(problems), 2)
+        self.assertIn("shared by requested sites ['D3426', 'K3426']", problems[0]["error"])
+
+
+class HiveDayPartitionTests(SimpleTestCase):
+    databases = []
+
+    def test_day_list_covers_the_window_plus_the_day_before(self):
+        days = _svc.daypartition_list(_dt.datetime(2026, 11, 3, 1, 30), _dt.datetime(2026, 11, 3, 7, 30))
+        self.assertEqual(days, "('20261102', '2026-11-02', '20261103', '2026-11-03')")
+
+    def test_end_at_midnight_does_not_add_the_next_day(self):
+        days = _svc.daypartition_list(_dt.datetime(2026, 11, 2, 18, 0), _dt.datetime(2026, 11, 3, 0, 0))
+        self.assertNotIn("20261103", days)
+        self.assertIn("20261102", days)
+
+    def test_hive_sql_filters_the_partition_first_clickhouse_unchanged(self):
+        seen = {}
+
+        def query(sql):
+            seen["hive" if "s1mme_kpi a" in sql else "clickhouse"] = sql
+            return _pd.DataFrame()
+
+        now = _dt.datetime(2026, 11, 3, 13, 30)
+        with mock.patch.object(_svc, "run_trino_query", query):
+            _svc.fetch_trino_site_kpis(["D3426"], start=now - _dt.timedelta(hours=12), end=now,
+                                       now=now, window_names=("current",))
+        hive = seen["hive"]
+        self.assertIn("WHERE a.daypartition IN ('20261102', '2026-11-02', '20261103', '2026-11-03')", hive)
+        self.assertLess(hive.index("a.daypartition IN"), hive.index("date_parse(a.time_t"))
+        self.assertNotIn("daypartition", seen["clickhouse"])

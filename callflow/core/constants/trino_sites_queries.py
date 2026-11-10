@@ -8,6 +8,9 @@
 #   {start_epoch}  {end_epoch}           -- integer epoch seconds, half-open
 #                                           range [start, end) so the two
 #                                           periods never overlap
+#   {day_list}     ('20261102','2026-11-02',...) -- Hive only: the daypartition
+#                                           values the range can touch, so Hive
+#                                           reads those partitions only
 #
 # Both queries return the SAME columns (names and order):
 #   Time, Site_Logical_Name, ATTACH_REQ_TIMES, ATTACH_FAIL_TIMES,
@@ -50,6 +53,10 @@ GROUP BY
 # counters, so those two columns are NULL (not 0): "no data", not "no attempts".
 # The cell -> site dimension is de-duplicated (as the old Smartcare query did
 # with GROUP BY 1, 2) so a CGISAI listed twice cannot double the counts.
+# daypartition (the partition key) is filtered first, so Hive reads only the
+# days the window touches instead of the whole table. time_t is varchar and
+# the table has no unix-time column, so the exact [start, end) bound still
+# parses time_t -- but only on the rows of those partitions.
 trino_s1mme_history_hive = """SELECT
     a.time_t AS Time,
     c.site_name AS Site_Logical_Name,
@@ -79,7 +86,8 @@ INNER JOIN (
     FROM hive.smartcare.dim_loc_cgisai
     WHERE site_name IN {site_list}
 ) c ON a.sai_cgi_ecgi = c.CGISAI
-WHERE to_unixtime(date_parse(a.time_t, '%Y/%m/%d %H:%i')) >= {start_epoch}
+WHERE a.daypartition IN {day_list}
+  AND to_unixtime(date_parse(a.time_t, '%Y/%m/%d %H:%i')) >= {start_epoch}
   AND to_unixtime(date_parse(a.time_t, '%Y/%m/%d %H:%i')) < {end_epoch}
 GROUP BY
     a.time_t,
