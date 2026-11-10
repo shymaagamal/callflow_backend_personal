@@ -86,12 +86,50 @@ def _poll_url(request, job_id):
     return f"{request.path.rstrip('/')}/{job_id}/"
 
 
+def _parse_site_items(data):
+    """The requested sites from the NCI body. Accepted:
+
+        [{"SITE": "D3426", "FLAG": "TOP"}, {"SITE": "3426", "FLAG": "WORK"}, ...]
+        {"site_names": [ ...same items... ], "async": true}     (previous format)
+
+    Returns (sites, flags, error). sites: unique, in request order. flags:
+    {site: "TOP"} -- a site sent several times with different flags keeps all
+    of them, joined in order ("TOP, WORK"). SITE may be a number (3426)."""
+    items = data if isinstance(data, list) else (
+        data.get("site_names") if isinstance(data, dict) else None)
+    if not items or not isinstance(items, list):
+        return None, None, "a non-empty list of {SITE, FLAG} items is required"
+    sites, flags = [], {}
+    for item in items:
+        if not isinstance(item, dict) or "SITE" not in item or "FLAG" not in item:
+            return None, None, "Each item must contain SITE and FLAG"
+        site = str(item["SITE"]).strip() if item["SITE"] is not None else ""
+        if not site:
+            return None, None, "SITE must not be empty"
+        flag = "" if item["FLAG"] is None else str(item["FLAG"]).strip()
+        if site not in flags:
+            sites.append(site)
+            flags[site] = []
+        if flag and flag not in flags[site]:
+            flags[site].append(flag)
+    return sites, {s: ", ".join(f) for s, f in flags.items()}, None
+
+
+def _apply_flags(result, site_flags):
+    """FLAG on each site of sites_summary (the request's FLAG values)."""
+    if isinstance(result, dict) and isinstance(result.get("sites_summary"), dict):
+        for site, summary in result["sites_summary"].items():
+            if site in site_flags:
+                summary["FLAG"] = site_flags[site]
+    return result
+
+
 # @method_decorator(require_api_token, name="dispatch")
 class NCIAnalysisAPIView(BaseCallFlowAPIView):
     """
     POST callflow/NCI/analysis/            (add ?async=1 for job mode)
-    body: {"site_names": [{"SITE": "...", "FLAG": "..."}, ...],
-           "async": true}             # optional, same as ?async=1
+    body: [{"SITE": "D3426", "FLAG": "TOP"}, {"SITE": "3426", "FLAG": "WORK"}, ...]
+    The previous body {"site_names": [...same items...], "async": true} still works.
 
     Default: blocks until the 3-period x 3-source analysis completes and
     returns the full result in one response.
@@ -103,23 +141,9 @@ class NCIAnalysisAPIView(BaseCallFlowAPIView):
     """
 
     def post(self, request):
-        print("NCI Analysis called")
-        site_names = request.data.get("site_names")
-        if not site_names or not isinstance(site_names, list):
-            return Response(
-                {"error": "site_names (non-empty list) is required"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        for item in site_names:
-            if not isinstance(item, dict) or "SITE" not in item or "FLAG" not in item:
-                return Response(
-                    {"error": "Each site_names item must contain SITE and FLAG"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-        sites = [item["SITE"] for item in site_names]
-        site_flags = {item["SITE"]: item["FLAG"] for item in site_names}
+        sites, site_flags, error = _parse_site_items(request.data)
+        if error:
+            return Response({"error": error}, status=status.HTTP_400_BAD_REQUEST)
 
         async_mode = _is_async(request)
         who = get_request_identity(request)
@@ -127,19 +151,14 @@ class NCIAnalysisAPIView(BaseCallFlowAPIView):
 
         request_logger = build_request_logger(log_path, ts, who)
         request_logger.info(
-            f"[NCI] requested by {who}, sites={len(site_names)}, async={async_mode}"
+            f"[NCI] requested by {who}, sites={sites}, flags={site_flags}, async={async_mode}"
         )
         _log_ignored_callback(request, request_logger, "[NCI]")
 
         if not async_mode:
             # ── Synchronous path (default) ──────────────────────────────
             try:
-                result = run_nci_analysis(sites, request_logger, log_path, ts)
-                # Add FLAG to each site in sites_summary
-                if isinstance(result, dict) and isinstance(result.get("sites_summary"), dict):
-                    for site, summary in result["sites_summary"].items():
-                        if site in site_flags:
-                            summary["FLAG"] = site_flags[site]
+                result = _apply_flags(run_nci_analysis(sites, request_logger, log_path, ts), site_flags)
                 request_logger.info(f"[NCI] final response generated for {len(sites)} site(s)")
 
                 return Response(
@@ -175,11 +194,8 @@ class NCIAnalysisAPIView(BaseCallFlowAPIView):
 
     def _run_job(self, job_id, sites, site_flags, request_logger, log_path, ts):
         try:
-            result = run_nci_analysis(sites, request_logger, log_path, ts, job_id=job_id)
-            if isinstance(result, dict) and isinstance(result.get("sites_summary"), dict):
-                for site, summary in result["sites_summary"].items():
-                    if site in site_flags:
-                        summary["FLAG"] = site_flags[site]
+            result = _apply_flags(run_nci_analysis(sites, request_logger, log_path, ts, job_id=job_id),
+                                  site_flags)
 
             safe_result = _json_safe(result)
             job_manager.update_job(job_id, status="DONE", step="completed", progress_percent=100, result=safe_result)

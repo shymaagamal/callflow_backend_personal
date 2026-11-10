@@ -832,3 +832,63 @@ class HiveDayPartitionTests(SimpleTestCase):
         self.assertIn("WHERE a.daypartition IN ('20261102', '2026-11-02', '20261103', '2026-11-03')", hive)
         self.assertLess(hive.index("a.daypartition IN"), hive.index("date_parse(a.time_t"))
         self.assertNotIn("daypartition", seen["clickhouse"])
+
+
+class NCIRequestBodyTests(SimpleTestCase):
+    databases = []
+    BODY = [
+        {"SITE": "D3426", "FLAG": "TOP"},
+        {"SITE": "3426", "FLAG": "WORK"},
+        {"SITE": "3112", "FLAG": "HOME"},
+        {"SITE": "K2244", "FLAG": "Realtime"},
+        {"SITE": "K2242", "FLAG": "Realtime"},
+    ]
+
+    def post(self, body, path="/callflow/NCI/analysis/"):
+        def analysis(sites, *a, **k):
+            return {"sites_summary": {s: {"critical_cases": 0, "minor_cases": 0, "trouble_tickets": 0,
+                                          "score": 0} for s in sites}, "errors": {}}
+        with mock.patch.object(views, "run_nci_analysis", side_effect=analysis) as run:
+            resp = views.NCIAnalysisAPIView.as_view()(APIRequestFactory().post(path, body, format="json"))
+        return resp, run
+
+    def test_list_body(self):
+        resp, run = self.post(self.BODY)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(run.call_args.args[0], ["D3426", "3426", "3112", "K2244", "K2242"])
+        self.assertEqual({s: r["FLAG"] for s, r in resp.data["sites_summary"].items()},
+                         {"D3426": "TOP", "3426": "WORK", "3112": "HOME",
+                          "K2244": "Realtime", "K2242": "Realtime"})
+
+    def test_previous_site_names_body_still_works(self):
+        resp, run = self.post({"site_names": self.BODY})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(run.call_args.args[0], ["D3426", "3426", "3112", "K2244", "K2242"])
+
+    def test_same_site_with_several_flags_is_one_site_keeping_every_flag(self):
+        resp, run = self.post([{"SITE": "D3426", "FLAG": "TOP"}, {"SITE": "D3426", "FLAG": "WORK"},
+                               {"SITE": "D3426", "FLAG": "TOP"}, {"SITE": "D3426", "FLAG": "HOME"}])
+        self.assertEqual(run.call_args.args[0], ["D3426"])
+        self.assertEqual(resp.data["sites_summary"]["D3426"]["FLAG"], "TOP, WORK, HOME")
+
+    def test_numeric_site_is_text(self):
+        resp, run = self.post([{"SITE": 3426, "FLAG": "WORK"}])
+        self.assertEqual(run.call_args.args[0], ["3426"])
+        self.assertEqual(resp.data["sites_summary"]["3426"]["FLAG"], "WORK")
+
+    def test_list_body_async_with_query_param(self):
+        def analysis(sites, *a, **k):
+            return {"sites_summary": {s: {} for s in sites}, "errors": {}}
+        view = views.NCIAnalysisAPIView.as_view()
+        with mock.patch.object(views, "run_nci_analysis", side_effect=analysis):
+            resp = view(APIRequestFactory().post("/callflow/NCI/analysis/?async=1", self.BODY, format="json"))
+            self.assertEqual(resp.status_code, 202)
+            job = _wait(view, "/callflow/NCI/analysis/", resp.data["job_id"])
+        self.assertEqual(job["result"]["sites_summary"]["3112"]["FLAG"], "HOME")
+
+    def test_bad_bodies(self):
+        for body in ([], {}, {"site_names": []}, [{"SITE": "D3426"}], [{"FLAG": "TOP"}],
+                     [{"SITE": " ", "FLAG": "TOP"}], ["D3426"]):
+            resp, run = self.post(body)
+            self.assertEqual(resp.status_code, 400, body)
+            run.assert_not_called()
