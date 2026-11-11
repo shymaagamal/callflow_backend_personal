@@ -38,11 +38,11 @@ SMARTCARE_CS_VOLTE_KEYS = (
 )
 
 
-def _is_latest_6h(startdate, now=None):
-    """Same 6-hour rule as trino_site_kpi_service: cutoff = now (rounded down to
-    15 min) - RECENT_HOURS. True when the whole window is inside the latest 6 hours."""
+def _six_hour_cutoff(now=None):
+    """Same 6-hour rule as trino_site_kpi_service: now (rounded down to 15 min)
+    - RECENT_HOURS. Before it -> Trino/Hive KPI tables, from it on -> latest-6H sources."""
     now = _round_down(now or datetime.datetime.now(), NCI_CACHE_GRANULARITY_MINUTES)
-    return startdate >= now - timedelta(hours=RECENT_HOURS)
+    return now - timedelta(hours=RECENT_HOURS)
 
 
 def _run_trino_queries(queries_dict, params):
@@ -112,19 +112,6 @@ def smartcareNodesQueries(
         queries_dict = smartcare_nodes_QUERIES_data
         query_category = "data"
     
-    # 6-hour routing: CS/VoLTE use Smartcare inside the latest 6 h and Trino
-    # otherwise; S1MME (Data) uses the ClickHouse latest-6H or the Hive after-6H query.
-    latest_6h = _is_latest_6h(startdate)
-    if query_category == "voice":
-        if latest_6h:
-            trino_queries = {}
-        else:
-            queries_dict = {k: v for k, v in queries_dict.items() if k not in SMARTCARE_CS_VOLTE_KEYS}
-            trino_queries = trino_voice_QUERIES
-    else:
-        trino_queries = trino_s1mme_QUERIES_latest_6H if latest_6h else trino_s1mme_QUERIES_after_6H
-    logger.info(f"[SMARTCARE NODES] latest_6h={latest_6h} trino_queries={list(trino_queries)}")
-
     tablename = calculate_tablename(startdate)   
     msisdn_str = format_sql_in(msisdn_list, quote=True)
     params = {
@@ -134,40 +121,80 @@ def smartcareNodesQueries(
         'msisdn_tuple': msisdn_str,
     }
     logger.info(f"Running {query_category.upper()} queries for {len(msisdn_list)} MSISDNs")
-  
+
+    # 6-hour routing: split [startdate, enddate] at the cutoff (as split_window does).
+    #   older part  -> Trino versions (CS/VoLTE KPI tables, S1MME Hive after-6H)
+    #   recent part -> Smartcare CS/VoLTE queries, S1MME ClickHouse latest-6H
+    # The other Smartcare queries always run over the whole window.
+    cutoff = _six_hour_cutoff()
+    old_part = (startdate, min(enddate, cutoff)) if startdate < min(enddate, cutoff) else None
+    recent_part = (max(startdate, cutoff), enddate) if max(startdate, cutoff) < enddate else None
+
+    if query_category == "voice":
+        cs_volte = {k: v for k, v in queries_dict.items() if k in SMARTCARE_CS_VOLTE_KEYS}
+        others = {k: v for k, v in queries_dict.items() if k not in SMARTCARE_CS_VOLTE_KEYS}
+        if old_part is None:          # whole window in the latest 6 h: unchanged
+            smartcare_runs = [(queries_dict, startdate, enddate)]
+        elif recent_part is None:     # whole window older than 6 h
+            smartcare_runs = [(others, startdate, enddate)]
+        else:                         # window crosses the cutoff
+            smartcare_runs = [(others, startdate, enddate), (cs_volte, *recent_part)]
+        trino_runs = [(trino_voice_QUERIES, *old_part)] if old_part else []
+    else:
+        smartcare_runs = [(queries_dict, startdate, enddate)]
+        trino_runs = []
+        if old_part:
+            trino_runs.append((trino_s1mme_QUERIES_after_6H, *old_part))
+        if recent_part:
+            trino_runs.append((trino_s1mme_QUERIES_latest_6H, *recent_part))
+
+    logger.info(
+        f"[SMARTCARE NODES] cutoff={cutoff} old_part={old_part} recent_part={recent_part} "
+        f"smartcare={[(list(q), str(s), str(e)) for q, s, e in smartcare_runs]} "
+        f"trino={[(list(q), str(s), str(e)) for q, s, e in trino_runs]}"
+    )
+
     CHUNK_HOURS  = 2
-    chunks = []
-    current = startdate
-    while current < enddate:
-        chunk_end = min(current + datetime.timedelta(hours=CHUNK_HOURS), enddate)
-        chunks.append((current, chunk_end))
-        current = chunk_end
-
-    logger.info(f"[SMARTCARE NODES] split into {len(chunks)} chunks of {CHUNK_HOURS}h each")
-
     all_chunks_data = []
-    for i, (chunk_start, chunk_end) in enumerate(chunks, 1):
-        chunk_params = {
+    chunks = []
+    for run_queries, run_start, run_end in smartcare_runs:
+        run_chunks = []
+        current = run_start
+        while current < run_end:
+            chunk_end = min(current + datetime.timedelta(hours=CHUNK_HOURS), run_end)
+            run_chunks.append((current, chunk_end))
+            current = chunk_end
+        chunks.extend(run_chunks)
+        logger.info(f"[SMARTCARE NODES] {len(run_queries)} queries split into {len(run_chunks)} chunks of {CHUNK_HOURS}h each")
+
+        for i, (chunk_start, chunk_end) in enumerate(run_chunks, 1):
+            chunk_params = {
+                **params,
+                "start_date": str(chunk_start),
+                "end_date": str(chunk_end),
+            }
+            logger.info(f"[SMARTCARE NODES] chunk {i}/{len(run_chunks)}: {chunk_start} -> {chunk_end}")
+
+            chunk_data = execute_smartcare_queries(
+                queries_dict=run_queries,
+                params=chunk_params,
+                log_path=logs_file,
+            )
+            if not chunk_data.empty:
+                all_chunks_data.append(chunk_data)
+
+    # Trino queries run once per part (not per 2-hour chunk). When the window is
+    # split, the older part's time_t end stops 1 minute before the cutoff so the
+    # bucket starting at the cutoff is not counted by both sides.
+    for run_queries, run_start, run_end in trino_runs:
+        time_t_end = run_end - timedelta(minutes=1) if (recent_part and run_end == cutoff) else run_end
+        all_chunks_data.extend(_run_trino_queries(run_queries, {
             **params,
-            "start_date": str(chunk_start),
-            "end_date": str(chunk_end),
-        }
-        logger.info(f"[SMARTCARE NODES] chunk {i}/{len(chunks)}: {chunk_start} -> {chunk_end}")
-
-        chunk_data = execute_smartcare_queries(
-            queries_dict=queries_dict,
-            params=chunk_params,
-            log_path=logs_file,
-        )
-        if not chunk_data.empty:
-            all_chunks_data.append(chunk_data)
-
-    # Trino queries run once over the whole window (not per 2-hour chunk).
-    all_chunks_data.extend(_run_trino_queries(trino_queries, {
-        **params,
-        'start_time_t': time_t_literal(startdate),
-        'end_time_t': time_t_literal(enddate),
-    }))
+            'start_date': str(run_start),
+            'end_date': str(run_end),
+            'start_time_t': time_t_literal(run_start),
+            'end_time_t': time_t_literal(time_t_end),
+        }))
 
     raw_df = pd.concat(all_chunks_data, ignore_index=True) if all_chunks_data else pd.DataFrame()
     logger.info(f"[SMARTCARE NODES] combined total -> {len(raw_df)} rows across {len(chunks)} chunks")
