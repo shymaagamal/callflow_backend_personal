@@ -30,12 +30,14 @@ class SmartcareAPIView(BaseCallFlowAPIView):
                 start_dt,
                 end_dt,
                 complain_type,
-                log_path="",
+                log_path=os.path.join(settings.LOG_DIR, "smartcare_api.log")
             )
             result=payload["processed_data"]
 
             result = result.drop(columns= ['NODE'], errors='ignore')  # Drop 'NODE' column if it exists
-            result['dest_host'] = result['dest_host'].str.split('.').str[0]  # Keep only the first part of dest_host
+            if 'dest_host' in result.columns:
+                result['dest_host'] = result['dest_host'].astype(str).str.strip()  # Ensure dest_host is a string and strip whitespace
+                result['dest_host'] = result['dest_host'].str.split('.').str[0]  # Keep only the first part of dest_host
             timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             csv_path = os.path.join(settings.OUTPUT_DIR,"VOICE", f"smartcare_VOICE_{timestamp}.csv")
             if not os.path.exists(os.path.dirname(csv_path)):

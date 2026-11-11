@@ -408,14 +408,13 @@ def smartcareOutput_Aggregated(data, logs_file, complain_type, timestamp):
     suspected_cells_raw = [] 
     cell_counts = {} 
     site_counts = {} 
-    try: 
+    try:
+        print("Processing Smartcare data...", logs_file) 
         if data is None or data.empty: 
             return data, site_counts, cell_counts, suspected_sgw 
         # Only SGW is required now; cell_name is optional 
-        if 'SGW_SGSN_NAME' not in data.columns: 
-            raise KeyError("Missing required column: SGW_SGSN_NAME") 
-        data = data.copy() 
-        data['SGW_SGSN_NAME'] = data['SGW_SGSN_NAME'].astype(str).str.strip() 
+        if 'SGW_SGSN_NAME' in data.columns and 'SGSN_SGW_NAME' in data.columns:
+            data['SGW_SGSN_NAME'] = data['SGW_SGSN_NAME'].astype(str).str.strip() 
         # ---------- Optional cell_name handling ---------- 
         has_cell_name = 'cell_name' in data.columns 
         if has_cell_name: 
@@ -426,8 +425,6 @@ def smartcareOutput_Aggregated(data, logs_file, complain_type, timestamp):
             if not data.empty: 
                 cell_counts = data['cell_name'].value_counts().to_dict() 
                 suspected_cells_raw = data['cell_name'].unique().tolist() 
-                # suspected_cells = tuple(suspected_cells_raw) 
-                # Optional site extraction (only if cell_name exists) 
                 try: 
                     data = process_sitename(data, 'cell_name', logs_file) 
                     if 'modified_site_name' in data.columns: 
@@ -442,8 +439,9 @@ def smartcareOutput_Aggregated(data, logs_file, complain_type, timestamp):
             return data, site_counts, cell_counts, suspected_sgw 
         # ---------- SGW / PGW processing (always) ---------- 
         try: 
-            data.rename(columns={'SGW_SGSN_NAME': 'SGW_PGW_NAME'}, inplace=True) 
-            data['SGW_SGSN_NAME'] = data['SGW_PGW_NAME']  # Keep original for reference
+            if 'SGW_PGW_NAME' in data.columns and 'SGW_SGSN_NAME' in data.columns:
+                data.rename(columns={'SGW_SGSN_NAME': 'SGW_PGW_NAME'}, inplace=True) 
+                data['SGW_SGSN_NAME'] = data['SGW_PGW_NAME']  # Keep original for reference
         except Exception as e: 
             with open(logs_file, 'a') as logs_f: 
                 logs_f.write(f'SGW rename error: {str(e)}\n') 
@@ -579,5 +577,3 @@ def calculate_subs_per_cell_site_handset(nodesdata, ts: str) -> dict:
             'subs_per_handset_type': [], 
         }  
 
-def voice_specific_aggregation(nodesdata):
-    pass

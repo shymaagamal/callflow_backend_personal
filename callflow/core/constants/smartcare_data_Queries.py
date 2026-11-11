@@ -1,61 +1,53 @@
-smartcare_nodes_GBIUPS ="""SELECT from_unixtime(floor(unix_timestamp(from_unixtime(PROC_STARTTIME)) / 300) * 300, 'yyyy/MM/dd HH:mm') AS myday,
+smartcare_nodes_GBIUPS ="""SELECT FROM_UNIXTIME(PROC_STARTTIME,'yyyy-MM-dd HH:mm') as mytime,
 MSISDN,
-IMEI,
-C.TER_BRAND_NAME as IMEI_Brand,
-C.TER_MODEL_NAME as IMEI_Model,
-sai_cgi_ecgi AS CELL,
-B.cell_name,
+TER_BRAND_NAME,
+TER_MODEL_NAME,
 a.SGSN_ID,
-E.SGSN_MME_NAME,
-'3G' AS RAT,
-MS_IP
-FROM ps.detail_cdr_gbiups_{tablename} A
-LEFT JOIN sdr_nethouse.dim_loc_cgisai B ON A.sai_cgi_ecgi = B.CGISAI
-LEFT JOIN sdr_nethouse.dim_loc_sgsn_mme E ON A.SGSN_ID = E.SGSN_MME_ID
-LEFT JOIN nethouse.dim_terminal C ON SUBSTR(A.IMEI, 1, 8) = C.TAC AND A.IMEI IS NOT NULL
+c.SGSN_NAME,
+case when rat = 1 then '3G' when rat = 2 then'2G' else rat end as RAT,
+UNIFIED_FAILCAUSE_NAME,
+sum(case when MM_TRAN_TYPE = 23 and MM_TRANS_SUCCED_FLAG is not null then 1 else 0 end) as ATTACH_REQ_TIMES,
+sum(case when MM_TRAN_TYPE = 23 and MM_TRANS_SUCCED_FLAG = 0 then 1 else 0 end) as ATTACH_SUCCEED_TIMES,
+sum(case when MM_TRAN_TYPE = 23 and MM_TRANS_SUCCED_FLAG = 1 then 1 else 0 end) as ATTACH_FAIL_TIMES,
+sum(case when MM_TRAN_TYPE = 29 and MM_TRANS_SUCCED_FLAG is not null then 1 else 0 end) as RAU_REQ_TIMES,
+sum(case when MM_TRAN_TYPE = 29 and MM_TRANS_SUCCED_FLAG = 0 then 1 else 0 end) as RAU_SUCCEED_TIMES,
+sum(case when MM_TRAN_TYPE = 29 and MM_TRANS_SUCCED_FLAG = 1 then 1 else 0 end) as RAU_FAIL_TIMES,
+sum(case when SECONDARY_PDP_FLAG = 0 and PDP_SUCCEED_FLAG is not null then 1 else 0 end) as PDP_ACTIVE_REQ_TIMES,
+sum(case when SECONDARY_PDP_FLAG = 0 and PDP_SUCCEED_FLAG = 0 then 1 else 0 end) as PDP_ACTIVE_SUCCEED_TIMES,
+sum(case when SECONDARY_PDP_FLAG = 0 and PDP_SUCCEED_FLAG = 1 then 1 else 0 end) as PDP_ACTIVE_FAIL_TIMES,
+sum(case when AUTH_CIPHER_SUCCEED_FLAG is not null then 1 else 0 end) as AUTH_REQ_TIMES,
+sum(case when AUTH_CIPHER_SUCCEED_FLAG = 0 then 1 else 0 end) as AUTH_SUCCEED_TIMES,
+sum(case when AUTH_CIPHER_SUCCEED_FLAG > 0 then 1 else 0 end) as AUTH_FAIL_TIMES
+FROM ps.detail_cdr_gbiups_{tablename} a 
+left join  nethouse.DIM_PSSAE_SIG_TRANS_CAUSE_NEW b on 
+(CASE WHEN ((PROC_FIRFAIL_PROT) IS NOT NULL AND (PROC_FIRFAIL_TRANS) IS NOT NULL AND (PROC_FIRFAIL_CAUSE_TYPE) IS NOT NULL AND (PROC_FIRFAIL_CAUSE) IS NOT NULL) THEN 
+concat(PROC_FIRFAIL_PROT,'-',PROC_FIRFAIL_TRANS,'-',PROC_FIRFAIL_CAUSE_TYPE,'-',PROC_FIRFAIL_CAUSE) END) =
+concat(PROBE_PROTOCOL_ID,'-',PROBE_TRANS_ID,'-',FAIL_TYPE_ID,'-',FAIL_CAUSE_ID)
+left join sdr_nethouse.dim_loc_sgsn c on a.SGSN_ID = c.SGSN_ID
+left join sdr_nethouse.dim_terminal d on left(a.imei,8) = d.tac
 WHERE 
 PROC_STARTTIME BETWEEN unix_timestamp('{start_date}') 
 AND unix_timestamp('{end_date}')
-AND msisdn IN {msisdn_tuple}
-AND (sai_cgi_ecgi IS NOT NULL OR IMSI IS NOT NULL OR MSISDN IS NOT NULL)"""
+AND msisdn in {msisdn_tuple}
+group by 1,2,3,4,5,6,7,8
+order by 1"""
 
-
-smartcare_nodes_S1mme="""SELECT from_unixtime(floor(unix_timestamp(from_unixtime(PROC_STARTTIME)) / 300) * 300, 'yyyy/MM/dd HH:mm') AS myday,
-MSISDN,
-IMEI,
-C.TER_BRAND_NAME as IMEI_Brand,
-C.TER_MODEL_NAME as IMEI_Model,
-sai_cgi_ecgi AS CELL,
---B.cell_name,
-a.MME_ID,
-E.MME_Name,
-SGW_DATA_IP,
-L.NE_NAME as SGW_SGSN_NAME,
-'4G' AS RAT,
-MS_IP,
-CAST(
-conv(
-substr(
-substr(cast(rai_tai AS STRING), 5),
-length(substr(cast(rai_tai AS STRING), 5)) - 3,
-4
-),
-16,
-10
-) AS BIGINT
-) AS TAC
-FROM ps.DETAIL_CDR_S1MME_{tablename} A
-LEFT JOIN(SELECT DISTINCT CGISAI, CELL_NAME, CONV(TAC, 16, 10) AS TAC_DECIMAL, SITE_NAME, LAYER4NAME, LAYER3NAME, LAYER2NAME FROM SDR_NETHOUSE.DIM_LOC_CGISAI) C ON A.sai_cgi_ecgi = C.CGISAI 
-LEFT JOIN sdr_nethouse.dim_loc_cgisai B ON A.sai_cgi_ecgi = B.CGISAI
-LEFT JOIN nethouse.dim_terminal C ON SUBSTR(A.IMEI, 1, 8) = C.TAC AND A.IMEI IS NOT NULL
-LEFT JOIN sdr_nethouse.dim_loc_mme E ON A.MME_ID = E.MME_ID
-LEFT JOIN sdr_nethouse.ex_cfg_sgw_ip L ON A.SGW_DATA_IP = L.NE_IP
-WHERE 
-PROC_STARTTIME BETWEEN unix_timestamp('{start_date}') 
+smartcare_SGW_S1MME = """SELECT
+from_unixtime(floor(unix_timestamp(from_unixtime(PROC_STARTTIME)) / 300) * 300, 'yyyy/MM/dd HH:mm') AS myday,
+a.MSISDN,
+a.SGW_DATA_IP,
+E.NE_NAME as SGW_NAME
+FROM ps.detail_cdr_s1mme_{tablename} a
+LEFT JOIN SDR_NETHOUSE.EX_CFG_SGW_IP E ON A.SGW_DATA_IP = E.NE_IP
+WHERE
+PROC_STARTTIME BETWEEN unix_timestamp('{start_date}')
 AND unix_timestamp('{end_date}')
-AND msisdn IN {msisdn_tuple}
-AND (sai_cgi_ecgi IS NOT NULL OR a.MME_ID IS NOT NULL OR SGW_DATA_IP IS NOT NULL)"""
-
+AND MSISDN IN {msisdn_tuple}
+GROUP by
+myday,
+a.MSISDN,
+a.SGW_DATA_IP,
+E.NE_NAME"""
 
 smartcare_nodes_S6a="""SELECT from_unixtime(floor(unix_timestamp(from_unixtime(CALC_TIME)) / 300) * 300, 'yyyy/MM/dd HH:mm') AS myday,
 MSISDN,
@@ -168,13 +160,9 @@ GROUP by 1, 2"""
 
 smartcare_nodes_QUERIES_data ={
     'smartcare_nodes_GBIUPS':smartcare_nodes_GBIUPS,
-    'smartcare_nodes_S1mme':smartcare_nodes_S1mme,
+    'smartcare_SGW_S1MME':smartcare_SGW_S1MME,
     'smartcare_nodes_S6a':smartcare_nodes_S6a,
     'smartcare_nodes_DNS_Internet':smartcare_nodes_DNS_Internet,
     'smartcare_nodes_SGIDiameter':smartcare_nodes_SGIDiameter,
 	'smartcare_nodes_dns':smartcare_nodes_dns,
-	# "smartcare_nodes_s1mme_4G_cell_only":smartcare_nodes_s1mme_4G_cell_only,
-    # "smartcare_nodes_s1mme_4G_device_info":smartcare_nodes_s1mme_4G_device_info,
-    # "smartcare_nodes_s1mme_4G_core_nodes":smartcare_nodes_s1mme_4G_core_nodes,
-    # "smartcare_nodes_s1mme_4G_ms_ip":smartcare_nodes_s1mme_4G_ms_ip
 }

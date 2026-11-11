@@ -1,0 +1,101 @@
+ 
+
+-----------------------------------S1MME from trino –latest 6H 
+
+ 
+
+select from_unixtime(STARTTIME) as mytime,msisdn,mme_name,'4G' as RAT,ter_brand_name,ter_model_name,b.FAIL_CAUSE_NAME, 
+
+  
+
+SUM(cast(s1mme_attach_req_times as integer)) AS s1mme_attach_req_times, 
+
+SUM(cast(S1MME_ATTACH_FAIL_TIMES as integer)) AS S1MME_ATTACH_FAIL_TIMES, 
+
+  
+
+SUM(cast(TAU_REQ_TIMES as integer)) AS TAU_REQ_TIMES, 
+
+SUM(cast(TAU_FAIL_TIMES as integer)) AS TAU_FAIL_TIMES, 
+
+  
+
+SUM(cast(S1MME_AUTHENTICATION_REQ_TIMES as integer)) AS S1MME_AUTHENTICATION_REQ_TIMES, 
+
+SUM(cast(S1MME_AUTHENTICATION_FAIL_TIMES as integer)) AS S1MME_AUTHENTICATION_FAIL_TIMES 
+
+  
+
+  
+
+from clickhouse.e2e.BKPI_SIGNAL_S1MME_CISAI_15MIN a 
+
+left join HIVE.SMARTCARE.DIM_PSSAE_SIG_TRANS_CAUSE b 
+
+on a.PS_SIG_FAILCAUSE = 
+
+CONCAT(cast(b.PROBE_PROTOCOL_ID as VARCHAR),'-',cast(b.PROBE_TRANS_ID as VARCHAR),'-',cast(b.FAIL_TYPE_ID as VARCHAR),'-',cast(b.FAIL_CAUSE_ID as VARCHAR)) 
+
+  
+
+where msisdn = '1018988812' 
+
+and STARTTIME BETWEEN to_unixtime(cast('2026-10-28 05:10:30' as timestamp)) 
+
+and to_unixtime(cast('2026-10-28 13:45:33' as timestamp)) 
+
+  
+
+group by 1,2,3,4,5,6,7 
+
+order by 1 
+
+ 
+
+ 
+
+--------------------------S1MME After 6H 
+
+ 
+
+select time_t as mytime,msisdn,mme_name,'4G' as RAT,ter_brand_name,ter_model_name,b.FAIL_CAUSE_NAME, 
+
+SUM(cast(s1mme_attach_req_times as integer)) AS s1mme_attach_req_times, 
+
+SUM(cast(s1mme_attach_succ_times as integer)) AS s1mme_attach_succ_times, 
+
+SUM(cast(periodic_tau_req_times as integer)) AS periodic_tau_req_times, 
+
+SUM(cast(periodic_tau_succ_times as integer)) AS periodic_tau_succ_times, 
+
+SUM(cast(combined_tala_update_req_times as integer)) AS combined_tala_update_req_times, 
+
+SUM(cast(combined_tala_update_succ_times as integer)) AS combined_tala_update_succ_times, 
+
+SUM(cast(0 as integer)) AS S1MME_AUTHENTICATION_REQ_TIMES, 
+
+SUM(cast(0 as integer)) AS S1MME_AUTHENTICATION_SUCC_TIMES 
+
+from HIVE.SMARTCARE.s1mme_kpi a 
+
+left join HIVE.SMARTCARE.DIM_PSSAE_SIG_TRANS_CAUSE b 
+
+on a.PS_SIG_FAILCAUSE = 
+
+CONCAT(cast(b.PROBE_PROTOCOL_ID as VARCHAR),'-',cast(b.PROBE_TRANS_ID as VARCHAR),'-',cast(b.FAIL_TYPE_ID as VARCHAR),'-',cast(b.FAIL_CAUSE_ID as VARCHAR)) 
+
+where msisdn = '1018988812' 
+
+and time_t between '2026/10/27 09:20' 
+
+and '2026/10/27 13:45' 
+
+group by 1,2,3,4,5,6,7 
+
+order by 1 
+
+ 
+
+ 
+
+ 
