@@ -19,7 +19,50 @@ from .smartcare_query_runner import (
 )
 from callflow.core.utils.data_utils import process_sitename
 from ..utils.java_sanitize import sanitize_for_cache
+from concurrent.futures import ThreadPoolExecutor
+from ..utils.trino_client import run_trino_query
+from ..constants.trino_voice_queries import trino_voice_QUERIES
+from ..constants.trino_data_queries import trino_s1mme_QUERIES_latest_6H, trino_s1mme_QUERIES_after_6H
+from .trino_site_kpi_service import (
+    RECENT_HOURS, NCI_CACHE_GRANULARITY_MINUTES, _round_down, time_t_literal,
+)
 logger = logging.getLogger(__name__)
+
+# Smartcare CS / VoLTE queries that are replaced by trino_voice_QUERIES when the
+# window is older than the latest RECENT_HOURS (6 h).
+SMARTCARE_CS_VOLTE_KEYS = (
+    'smartcare_network_CS_MOC',
+    'smartcare_network_CS_MTC',
+    'smartcare_network_voice_VoLTE_CFR_CSR_MO_CALL',
+    'smartcare_network_VoLTE_CFR_CSR_MT_CALL_voice',
+)
+
+
+def _is_latest_6h(startdate, now=None):
+    """Same 6-hour rule as trino_site_kpi_service: cutoff = now (rounded down to
+    15 min) - RECENT_HOURS. True when the whole window is inside the latest 6 hours."""
+    now = _round_down(now or datetime.datetime.now(), NCI_CACHE_GRANULARITY_MINUTES)
+    return startdate >= now - timedelta(hours=RECENT_HOURS)
+
+
+def _run_trino_queries(queries_dict, params):
+    """Run each Trino query once over the whole window. A failed query gives no
+    rows (same as a failed Smartcare query), it does not fail the others."""
+    def one(item):
+        name, sql = item
+        try:
+            df = run_trino_query(sql.format(**params))
+            logger.info(f"[SMARTCARE NODES] Trino {name} -> {0 if df is None else len(df)} rows")
+            return df
+        except Exception:
+            logger.exception(f"[SMARTCARE NODES] Trino {name} failed")
+            return None
+    items = list(queries_dict.items())
+    if not items:
+        return []
+    with ThreadPoolExecutor(max_workers=len(items), thread_name_prefix="sc-trino") as ex:
+        frames = list(ex.map(one, items))
+    return [df for df in frames if df is not None and not df.empty]
 def smartcare_Validation_Inputs(msisdn_list,startdate,enddate):
     errors = []
 
@@ -69,6 +112,19 @@ def smartcareNodesQueries(
         queries_dict = smartcare_nodes_QUERIES_data
         query_category = "data"
     
+    # 6-hour routing: CS/VoLTE use Smartcare inside the latest 6 h and Trino
+    # otherwise; S1MME (Data) uses the ClickHouse latest-6H or the Hive after-6H query.
+    latest_6h = _is_latest_6h(startdate)
+    if query_category == "voice":
+        if latest_6h:
+            trino_queries = {}
+        else:
+            queries_dict = {k: v for k, v in queries_dict.items() if k not in SMARTCARE_CS_VOLTE_KEYS}
+            trino_queries = trino_voice_QUERIES
+    else:
+        trino_queries = trino_s1mme_QUERIES_latest_6H if latest_6h else trino_s1mme_QUERIES_after_6H
+    logger.info(f"[SMARTCARE NODES] latest_6h={latest_6h} trino_queries={list(trino_queries)}")
+
     tablename = calculate_tablename(startdate)   
     msisdn_str = format_sql_in(msisdn_list, quote=True)
     params = {
@@ -105,6 +161,13 @@ def smartcareNodesQueries(
         )
         if not chunk_data.empty:
             all_chunks_data.append(chunk_data)
+
+    # Trino queries run once over the whole window (not per 2-hour chunk).
+    all_chunks_data.extend(_run_trino_queries(trino_queries, {
+        **params,
+        'start_time_t': time_t_literal(startdate),
+        'end_time_t': time_t_literal(enddate),
+    }))
 
     raw_df = pd.concat(all_chunks_data, ignore_index=True) if all_chunks_data else pd.DataFrame()
     logger.info(f"[SMARTCARE NODES] combined total -> {len(raw_df)} rows across {len(chunks)} chunks")

@@ -365,8 +365,8 @@ def default_sources() -> DataSources:
     def fetch_smartcare(ctx):
         return fetch_smartcare_nodes_data(
             ctx["msisdn_list"], ctx["start_dt"], ctx["end_dt"],
-            ctx.get("imsi", ""), ctx.get("complain_type", "Data"),
-            ctx.get("log_path", ""), "orchestrator", ctx.get("ts", ""),
+            complain_type=ctx.get("complain_type", "Data"), imsi=ctx.get("imsi", ""),
+            log_path=ctx.get("log_path", ""), view="orchestrator", ts=ctx.get("ts", ""),
         )
 
     def derive_sites(cells, ctx):

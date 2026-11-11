@@ -477,8 +477,14 @@ class FakeTrinoSites:
     def __call__(self, sql):
         source = (site_kpi_service.RECENT_SOURCE if "clickhouse.e2e." in sql
                   else site_kpi_service.HISTORY_SOURCE)
-        start = int(re.search(r">= (\d+)", sql).group(1))
-        end = int(re.search(r"\s<\s(\d+)", sql).group(1))
+        if source == site_kpi_service.RECENT_SOURCE:
+            start = int(re.search(r">= (\d+)", sql).group(1))
+            end = int(re.search(r"\s<\s(\d+)", sql).group(1))
+        else:   # Hive: time_t text bounds, local time
+            def epoch(text):
+                return int(pd.Timestamp(text).tz_localize("Africa/Cairo").timestamp())
+            start = epoch(re.search(r"time_t >= '([^']+)'", sql).group(1))
+            end = epoch(re.search(r"time_t < '([^']+)'", sql).group(1))
         self.calls.append({"source": source, "sql": sql, "start_epoch": start, "end_epoch": end})
         if not self.rows:
             return pd.DataFrame(columns=self.COLS)

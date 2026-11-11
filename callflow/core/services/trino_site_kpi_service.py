@@ -242,21 +242,31 @@ def _py(v):
 HIVE_DAYPARTITION_FORMATS = ("%Y%m%d", "%Y-%m-%d")
 
 
-def daypartition_list(start, end):
-    """The daypartition values [start, end) can touch, as a SQL IN list.
+def _local(dt):
+    return dt.astimezone(_LOCAL_TZ).replace(tzinfo=None) if getattr(dt, "tzinfo", None) else dt
 
-    Days are local (Africa/Cairo), like time_t. The day before start is
-    included too, in case partitions are cut on UTC days (Cairo is ahead of
-    UTC, so a local time can sit in the previous UTC day)."""
-    s = start.astimezone(_LOCAL_TZ) if getattr(start, "tzinfo", None) else start
-    e = end.astimezone(_LOCAL_TZ) if getattr(end, "tzinfo", None) else end
+
+def daypartition_list(start, end):
+    """The daypartition values of the days [start, end) covers, as a SQL IN
+    list -- for the Hive part that is the oldest part of the window only.
+    Days are local (Africa/Cairo), like time_t; an end at midnight does not
+    add the next day."""
+    s, e = _local(start), _local(end)
     last = (e - datetime.timedelta(microseconds=1)).date() if e > s else s.date()
-    day, days = s.date() - datetime.timedelta(days=1), []
+    day, days = s.date(), []
     while day <= last:
         days.append(day)
         day += datetime.timedelta(days=1)
     values = [d.strftime(f) for d in days for f in HIVE_DAYPARTITION_FORMATS]
     return "(" + ", ".join("'%s'" % v for v in values) + ")"
+
+
+HIVE_TIME_T_FORMAT = "%Y/%m/%d %H:%M"     # time_t as stored: '2026/11/03 01:30'
+
+
+def time_t_literal(dt):
+    """dt as local time_t text, for comparing time_t without parsing it."""
+    return _local(dt).strftime(HIVE_TIME_T_FORMAT)
 
 
 def run_trino_queries(window_name, source, site_list, start, end, request_logger=None):
@@ -266,7 +276,9 @@ def run_trino_queries(window_name, source, site_list, start, end, request_logger
     start_epoch, end_epoch, start_lit, end_lit = _epochs(start, end)
     sql = trino_s1mme_QUERIES[source].format(
         site_list=site_list, start_epoch=start_epoch, end_epoch=end_epoch,
-        day_list=daypartition_list(start, end))   # unused by the ClickHouse query
+        # the next three are used by the Hive query only
+        day_list=daypartition_list(start, end),
+        start_time_t=time_t_literal(start), end_time_t=time_t_literal(end))
     entry = {"window": window_name, "source": source,
              "start": start_lit, "end": end_lit,
              "start_epoch": start_epoch, "end_epoch": end_epoch}

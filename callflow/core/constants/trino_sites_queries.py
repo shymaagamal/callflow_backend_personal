@@ -8,9 +8,11 @@
 #   {start_epoch}  {end_epoch}           -- integer epoch seconds, half-open
 #                                           range [start, end) so the two
 #                                           periods never overlap
-#   {day_list}     ('20261102','2026-11-02',...) -- Hive only: the daypartition
-#                                           values the range can touch, so Hive
-#                                           reads those partitions only
+#   {day_list}     ('20261103','2026-11-03') -- Hive only: the daypartition
+#                                           value(s) of the days the Hive range
+#                                           covers, so Hive reads those only
+#   {start_time_t} {end_time_t}          -- Hive only: the same [start, end) as
+#                                           local 'YYYY/MM/DD HH:MM' text
 #
 # Both queries return the SAME columns (names and order):
 #   Time, Site_Logical_Name, ATTACH_REQ_TIMES, ATTACH_FAIL_TIMES,
@@ -54,9 +56,10 @@ GROUP BY
 # The cell -> site dimension is de-duplicated (as the old Smartcare query did
 # with GROUP BY 1, 2) so a CGISAI listed twice cannot double the counts.
 # daypartition (the partition key) is filtered first, so Hive reads only the
-# days the window touches instead of the whole table. time_t is varchar and
-# the table has no unix-time column, so the exact [start, end) bound still
-# parses time_t -- but only on the rows of those partitions.
+# days of the Hive range (the oldest part of the window) instead of the whole
+# table. The table has no unix-time column; time_t is zero-padded
+# 'YYYY/MM/DD HH:MM' text, which sorts like the time itself, so the exact
+# [start, end) bound compares the text directly -- no date_parse per row.
 trino_s1mme_history_hive = """SELECT
     a.time_t AS Time,
     c.site_name AS Site_Logical_Name,
@@ -87,8 +90,8 @@ INNER JOIN (
     WHERE site_name IN {site_list}
 ) c ON a.sai_cgi_ecgi = c.CGISAI
 WHERE a.daypartition IN {day_list}
-  AND to_unixtime(date_parse(a.time_t, '%Y/%m/%d %H:%i')) >= {start_epoch}
-  AND to_unixtime(date_parse(a.time_t, '%Y/%m/%d %H:%i')) < {end_epoch}
+  AND a.time_t >= '{start_time_t}'
+  AND a.time_t < '{end_time_t}'
 GROUP BY
     a.time_t,
     c.site_name,

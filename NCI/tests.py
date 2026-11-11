@@ -228,8 +228,14 @@ class _Systems:
 
     def trino(self, sql):
         recent = "clickhouse.e2e." in sql
-        start = int(_re.search(r">= (\d+)", sql).group(1))
-        end = int(_re.search(r"\s<\s(\d+)", sql).group(1))
+        if recent:
+            start = int(_re.search(r">= (\d+)", sql).group(1))
+            end = int(_re.search(r"\s<\s(\d+)", sql).group(1))
+        else:   # Hive: time_t text bounds, local time
+            def epoch(text):
+                return int(_pd.Timestamp(text).tz_localize("Africa/Cairo").timestamp())
+            start = epoch(_re.search(r"time_t >= '([^']+)'", sql).group(1))
+            end = epoch(_re.search(r"time_t < '([^']+)'", sql).group(1))
         with self.lock:
             self.calls["trino"].append(("recent" if recent else "history", start, end))
         if "trino" in self.fail:
@@ -808,16 +814,24 @@ class NCIDuplicateSiteTests(SimpleTestCase):
 class HiveDayPartitionTests(SimpleTestCase):
     databases = []
 
-    def test_day_list_covers_the_window_plus_the_day_before(self):
+    def test_day_list_is_only_the_days_of_the_hive_range(self):
         days = _svc.daypartition_list(_dt.datetime(2026, 11, 3, 1, 30), _dt.datetime(2026, 11, 3, 7, 30))
+        self.assertEqual(days, "('20261103', '2026-11-03')")
+
+    def test_range_over_midnight_lists_both_days(self):
+        days = _svc.daypartition_list(_dt.datetime(2026, 11, 2, 21, 0), _dt.datetime(2026, 11, 3, 3, 0))
         self.assertEqual(days, "('20261102', '2026-11-02', '20261103', '2026-11-03')")
 
     def test_end_at_midnight_does_not_add_the_next_day(self):
         days = _svc.daypartition_list(_dt.datetime(2026, 11, 2, 18, 0), _dt.datetime(2026, 11, 3, 0, 0))
-        self.assertNotIn("20261103", days)
-        self.assertIn("20261102", days)
+        self.assertEqual(days, "('20261102', '2026-11-02')")
 
-    def test_hive_sql_filters_the_partition_first_clickhouse_unchanged(self):
+    def test_time_t_text_sorts_like_the_time(self):
+        a, b = _dt.datetime(2026, 11, 3, 9, 5), _dt.datetime(2026, 11, 3, 10, 0)
+        self.assertEqual(_svc.time_t_literal(a), "2026/11/03 09:05")
+        self.assertLess(_svc.time_t_literal(a), _svc.time_t_literal(b))
+
+    def test_hive_sql_uses_the_partition_and_plain_time_t(self):
         seen = {}
 
         def query(sql):
@@ -829,8 +843,12 @@ class HiveDayPartitionTests(SimpleTestCase):
             _svc.fetch_trino_site_kpis(["D3426"], start=now - _dt.timedelta(hours=12), end=now,
                                        now=now, window_names=("current",))
         hive = seen["hive"]
-        self.assertIn("WHERE a.daypartition IN ('20261102', '2026-11-02', '20261103', '2026-11-03')", hive)
-        self.assertLess(hive.index("a.daypartition IN"), hive.index("date_parse(a.time_t"))
+        # Hive gets only the oldest 6 hours: 01:30 .. 07:30, all on 3 November
+        self.assertIn("WHERE a.daypartition IN ('20261103', '2026-11-03')\n"
+                      "  AND a.time_t >= '2026/11/03 01:30'\n"
+                      "  AND a.time_t < '2026/11/03 07:30'", hive)
+        self.assertNotIn("date_parse", hive)
+        self.assertNotIn("to_unixtime", hive)
         self.assertNotIn("daypartition", seen["clickhouse"])
 
 
