@@ -112,6 +112,38 @@ Same endpoints. A body with `complaints` instead of `Complain_Type` + `msisdn_li
   heartbeat; then 404. Job folders are never deleted before that (`MI_JOB_RETENTION_DAYS` ≥ 2).
 * Single-complaint bodies work exactly as before (`DONE`/`FAILED`, same body).
 
+### DataCube query limits (since 2026-11-15)
+
+Every statement MI sends to Smartcare/DataCube opens a **DataCube session that stays ~3 h**; the
+account allows **100**. Reusing a JDBC connection does not save sessions, so MI limits **statements**:
+
+* **One fetch per Complain_Type, not per complaint group.** The MSISDNs of all Data groups go into
+  ONE `IN (...)` list, those of all Voice groups into another; each query runs once
+  (`pipeline.fetch_plan`). Each group then gets only its own MSISDNs' rows (`RawData.result_for`)
+  and the unchanged analysis runs on them (`pipeline.analyse`). Same result as querying the group
+  alone: every query filters row by row on its subscriber column
+  (`catalog.QUERY_SUBSCRIBER_COLUMN`) and every GROUP BY includes it; the analysis is order-free.
+  An MSISDN in several groups counts in each (`shared/msisdn_groups.json`).
+* **Plan first, max 12 per request** (`MI_MAX_QUERIES_PER_REQUEST`). Data = 4, Voice = 8, both = 12,
+  whatever the number of groups or MSISDNs. Checked at submission (400, no job, no quota used) and
+  again in the job. A window crossing midnight stays 1 statement per query
+  (`<day1> UNION ALL <day2>`, `MI_UNION_DAY_TABLES`); with it off such windows need 2× and are refused.
+* **Retries count.** Every `cursor.execute` passes `query_plan.RequestBudget`: planned statements
+  run once; a retry only uses the room left under 12 (Data+Voice: none, Data only: 8, Voice only: 4).
+  The count can never pass the cap. Connecting runs no query and is not counted.
+* **Global budget across all MI jobs**: Redis ZSET `mi:datacube:sessions`, one entry per executed
+  query kept `MI_DATACUBE_SESSION_TTL_S` (3h15). A job reserves its whole plan atomically (Lua)
+  before the first query; if `MI_DATACUBE_SESSION_BUDGET` (60) would be exceeded it waits
+  (step `waiting_for_datacube_capacity`) up to `MI_DATACUBE_WAIT_S` (30 min), then FAILS (503)
+  with the time capacity frees up — no partial run. Unused reservations are released; retries need
+  one more entry. `selfcheck --smartcare` (SELECT 1) uses the budget too. The ledger only sees MI:
+  keep the budget below 100 by what other tools on the account need.
+* **Logs**: `event=query_plan planned=12 limit=12 retry_allowance=0 ...`, one
+  `event=datacube_query seq=n/12 name=... table=... attempt=...` per statement sent,
+  `event=datacube_queries_done ... executed=12`. Result body / job record: `datacube_queries`
+  `{limit, planned, executed, retries, retries_denied, by_complain_type}`. Compare `seq` lines
+  with DataCube's session monitor.
+
 ## 4. Outputs and logs: `CALLFLOW_OUTPUT/MI/`
 
 Default `…/callflow_portal/callflow_output/MI` (`settings.OUTPUT_DIR/MI`); override with an absolute
@@ -337,3 +369,9 @@ The `.env` lines and `callflow_output/MI/` are harmless to keep. Nothing in the 
 | `MI_DAILY_SUBMISSION_LIMIT` | 100 | accepted submissions per calendar day, all users; 0 = off |
 | `MI_DAILY_LIMIT_TIMEZONE` | `settings.TIME_ZONE` (UTC) | whose midnight resets the limit, e.g. `Africa/Cairo` |
 | `MI_MAX_COMPLAINT_GROUPS` | 20 | complaint groups per request |
+| `MI_MAX_QUERIES_PER_REQUEST` | 12 | DataCube statements per submission, Data + Voice, retries included |
+| `MI_UNION_DAY_TABLES` | True | midnight-crossing window = 1 statement per query (UNION ALL) |
+| `MI_MAX_MSISDNS_PER_QUERY` | 1000 | unique MSISDNs per Complain_Type in one IN list; over → 400 |
+| `MI_DATACUBE_SESSION_BUDGET` | 60 | DataCube sessions MI may hold at once, all jobs; 0 = off |
+| `MI_DATACUBE_SESSION_TTL_S` | 11700 | how long one query is assumed to hold its session (3h15) |
+| `MI_DATACUBE_WAIT_S` / `MI_DATACUBE_POLL_S` | 1800 / 30 | wait for capacity, then fail |

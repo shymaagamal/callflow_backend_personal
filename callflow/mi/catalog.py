@@ -112,6 +112,36 @@ def normalise_subscriber_column(name, frame):
     return frame.rename(columns={source: "MSISDN"}), source
 
 
+# The column of each query's result that holds the number the query filtered on
+# (the `... IN {msisdn_tuple}` column). Shared execution (batch.py) runs each
+# query once for the MSISDNs of ALL complaint groups and gives every group only
+# the rows whose number is one of the group's MSISDNs. That is exactly what the
+# query would return for the group alone, because every query filters row by
+# row on this column and every GROUP BY includes it. A query missing here
+# cannot be split safely: the query plan refuses to run it (QueryPlanError).
+QUERY_SUBSCRIBER_COLUMN = {
+    # Data
+    "smartcare_SGIDiameter_nodes": "MSISDN",
+    "smartcare_S1mme_nodes": "MSISDN",
+    "smartcare_GBIUPS_nodes": "MSISDN",
+    "SCF_CCI_U_T_Data": "MSISDN",
+    # Voice
+    "smartcare_DRA_Voice": "MSISDN",
+    "smartcare_SGS_Voice": "MSISDN",
+    "smartcare_HSS_Voice": "IMPU_TEL_URI",
+    "smartcare_network_CS_MOC": "callerno",
+    "smartcare_network_CS_MTC": "calledno",
+    "smartcare_network_voice_VoLTE_CFR_CSR_MO_CALL": "MSISDN",       # IMPU_TEL_URI AS MSISDN
+    "smartcare_network_VoLTE_CFR_CSR_MT_CALL_voice": "MSISDN",       # IMPU_TEL_URI AS MSISDN
+    "smartcare_nodes_REG_Voice": "IMPU_TEL_URI1",
+}
+
+
+def complain_types_in_order():
+    """Fixed DATA-then-VOICE execution order for shared requests."""
+    return (DATA, VOICE)
+
+
 # Columns each response metric depends on (diagnostics + guards).
 DATA_BASE = ("MSISDN", "cell_name", "SGW_SGSN_NAME")
 DATA_METRICS = OrderedDict([

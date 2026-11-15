@@ -31,7 +31,7 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from . import config, jobs, outputs, response, runner, validation
+from . import batch, config, jobs, outputs, query_plan, response, runner, validation
 from .mi_logging import setup_app_logging
 
 logger = logging.getLogger("callflow.mi.api")
@@ -142,6 +142,18 @@ class _SubmitView(APIView):
                         self.endpoint, code, is_batch, e.message)
             return Response(response.error_body(e.message), status=code)
 
+        # DataCube query plan: refuse BEFORE any job, quota or query when the
+        # request would need more than MI_MAX_QUERIES_PER_REQUEST queries.
+        try:
+            by_type = (batch.msisdns_by_complain_type(req.groups) if is_batch
+                       else {req.complain_type: req.msisdns})
+            plan = query_plan.build_plan(by_type, req.start, req.end)
+        except query_plan.QueryPlanError as e:
+            logger.info("MI request rejected endpoint=%s status=400 reason=query_plan error=%s", self.endpoint, e)
+            body = response.error_body(str(e))
+            body["max_queries_per_request"] = config.max_queries_per_request()
+            return Response(body, status=400)
+
         params = req.to_params()
         fp = jobs.fingerprint(params)
         job_id, day = jobs.new_job_id(), outputs.today_str()
@@ -174,10 +186,10 @@ class _SubmitView(APIView):
             how = dispatch(job_id, params, fp, day, wait=not want_async)
             if is_batch:
                 logger.info("MI job submitted job_id=%s endpoint=%s via=%s async=%s groups=%d msisdns=%d "
-                            "plan=%s quota_used=%s/%s", job_id, self.endpoint, how, want_async, len(req.groups),
-                            req.msisdn_count, ";".join(f"{g.category}/{g.subcategory}/{g.complain_type}/"
-                                                       f"{len(g.msisdns)}" for g in req.groups),
-                            quota.get("used"), quota.get("limit"))
+                            "plan=%s datacube_queries_planned=%d quota_used=%s/%s", job_id, self.endpoint, how,
+                            want_async, len(req.groups), req.msisdn_count,
+                            ";".join(f"{g.category}/{g.subcategory}/{g.complain_type}/{len(g.msisdns)}"
+                                     for g in req.groups), plan.total, quota.get("used"), quota.get("limit"))
             else:
                 logger.info("MI job submitted job_id=%s endpoint=%s via=%s async=%s complain_type=%s msisdns=%d "
                             "quota_used=%s/%s", job_id, self.endpoint, how, want_async, req.complain_type,
@@ -188,6 +200,7 @@ class _SubmitView(APIView):
             body = {"job_id": job_id, "status": job.get("status"), **_links(request, job_id)}
             if is_batch:
                 body["groups"] = len(req.groups)
+            body["datacube_queries_planned"] = plan.total
             if job.get("expires_at"):
                 body["retention_hours"] = round(config.job_ttl_s() / 3600, 2)
             if deduplicated:

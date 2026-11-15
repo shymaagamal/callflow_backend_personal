@@ -267,6 +267,53 @@ def job_ttl_s() -> int:
     return max(1, _int("MI_JOB_TTL_S", 24 * 3600))
 
 
+# ------------------------------------------------- DataCube query limits
+# Every query MI sends to Smartcare/DataCube opens a server-side DataCube
+# session that stays open ~3h; the account allows 100 in total. Connections
+# are NOT sessions: reusing a JDBC connection does not save any. See
+# query_plan.py (per request) and jobs.datacube_* (all requests).
+def max_queries_per_request() -> int:
+    """Hard cap on query executions (first attempts + retries, Data + Voice) per MI submission."""
+    return max(1, _int("MI_MAX_QUERIES_PER_REQUEST", 12))
+
+
+def union_day_tables() -> bool:
+    """
+    A window that crosses midnight reads two day tables. True: one statement
+    (`<day 1> UNION ALL <day 2>`) = 1 query. False: one statement per day
+    table, so such windows usually exceed the query cap and are refused (400).
+    """
+    return _bool("MI_UNION_DAY_TABLES", True)
+
+
+def max_msisdns_per_query() -> int:
+    """Unique MSISDNs in one IN (...) list (all Data or all Voice groups together). Over -> 400, never truncated."""
+    return max(1, _int("MI_MAX_MSISDNS_PER_QUERY", 1000))
+
+
+def datacube_session_budget() -> int:
+    """
+    DataCube sessions MI may hold at once, across ALL MI jobs (0 = no global
+    check). Keep it below the account's 100: other tools on the same account
+    are not visible to MI.
+    """
+    return _int("MI_DATACUBE_SESSION_BUDGET", 60)
+
+
+def datacube_session_ttl_s() -> int:
+    """How long one executed query is assumed to hold its DataCube session (3h + 15 min margin)."""
+    return max(60, _int("MI_DATACUBE_SESSION_TTL_S", 3 * 3600 + 15 * 60))
+
+
+def datacube_wait_s() -> int:
+    """How long a job waits for DataCube capacity before it fails (0 = fail at once)."""
+    return max(0, _int("MI_DATACUBE_WAIT_S", 1800))
+
+
+def datacube_poll_s() -> float:
+    return max(0.05, _float("MI_DATACUBE_POLL_S", 30.0))
+
+
 # ------------------------------------------------- multi-complaint requests
 def max_complaint_groups() -> int:
     """Complaint groups (category/subcategory) allowed in one request."""

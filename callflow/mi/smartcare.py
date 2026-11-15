@@ -21,7 +21,7 @@ from typing import List, Optional
 import pandas as pd
 import jaydebeapi
 import jpype
-from . import config
+from . import config, query_plan
 
 _jvm_lock = threading.Lock()
 EPOCH = datetime.datetime(1970, 1, 1)
@@ -35,7 +35,7 @@ _PATTERNS = (
     ("connection", re.compile(r"Connection reset|Connection refused|Broken pipe|connection (is )?closed|"
                               r"No route to host|TTransportException|EOFException|Communication link", re.I)),
 )
-NON_RETRYABLE = {"unavailable", "query_error", "config"}
+NON_RETRYABLE = {"unavailable", "query_error", "config", "query_budget"}
 
 
 class SmartcareConfigError(RuntimeError):
@@ -256,6 +256,9 @@ class QueryOutcome:
     error_kind: Optional[str] = None
     error: Optional[str] = None
     memo_hit: bool = False
+    # (columns, rows) of every statement that succeeded, as fetched; used to
+    # rebuild the exact frame a smaller MSISDN list would have returned
+    parts: List[tuple] = field(default_factory=list)
 
     @property
     def complete(self):
@@ -286,10 +289,16 @@ class Executor:
     is the same as sequential execution.
     """
 
-    def __init__(self, ctx, request, pool):
+    def __init__(self, ctx, request, pool, budget=None):
+        """
+        budget: query_plan.RequestBudget shared by every Executor of the same MI
+        submission; consulted right before each cursor.execute(), so a request
+        can never send more DataCube queries than its cap (retries included).
+        """
         self.ctx = ctx
         self.request = request
         self.pool = pool
+        self.budget = budget
         self.msisdn_sql = "(" + ",".join(f"'{m}'" for m in request.msisdns) + ")"
         self.tables = day_tables(request.start, request.end)
         self._memo = {}
@@ -343,16 +352,18 @@ class Executor:
         attempts_allowed = 1 if failures else config.max_attempts()
         data = pd.DataFrame()
         outcomes = []
+        parts = []
         session = self.pool.borrow()
         try:
-            for table in self.tables:
-                sql_text = template.format(tablename=table, msisdn_tuple=self.msisdn_sql,
-                                           start_date=str(self.request.start), end_date=str(self.request.end))
+            for table, sql_text in query_plan.statements(template, self.tables, self.msisdn_sql,
+                                                         self.request.start, self.request.end):
                 result = self._run_table(session, name, table, sql_text, attempts_allowed)
                 has_frame = result.pop("_frame", False)
                 df = result.pop("_df", None)
+                raw = result.pop("_raw", None)
                 if result["status"] == "ok" and has_frame:
                     data = pd.concat([data, df], ignore_index=True)      # same concat as before
+                    parts.append(raw)
                 outcomes.append(result)
         finally:
             self.pool.give_back(session)
@@ -369,7 +380,7 @@ class Executor:
         failed = [o for o in outcomes if o["status"] != "ok"]
         outcome = QueryOutcome(name=name, frame=data, status=status, tables=outcomes,
                                error_kind=failed[-1]["kind"] if failed else None,
-                               error=failed[-1]["error"] if failed else None)
+                               error=failed[-1]["error"] if failed else None, parts=parts)
         with self._lock:
             if outcome.complete:
                 self._memo[key] = outcome
@@ -385,6 +396,16 @@ class Executor:
             try:
                 cursor = session.cursor()
                 attach_thread_to_jvm()           # after connect: the JVM exists now
+                if self.budget is not None:
+                    try:
+                        seq = self.budget.acquire((name, str(table)))
+                    except query_plan.BudgetDenied as denied:
+                        self.ctx.warning("datacube_query_denied", name=name, table=table, attempt=attempt,
+                                         reason=denied.reason, detail=denied.detail)
+                        last_kind, last_error = "query_budget", denied.detail
+                        break
+                    self.ctx.event("datacube_query", seq=f"{seq}/{self.budget.limit}", name=name, table=table,
+                                   attempt=attempt)
                 cursor.execute(sql_text)
                 exec_s = time.perf_counter() - t0
                 t1 = time.perf_counter()
@@ -400,7 +421,8 @@ class Executor:
                                       rows=0 if df is None else len(df), columns=columns,
                                       execute_s=round(exec_s, 3), fetch_s=round(fetch_s, 3))
                 return {"table": table, "status": "ok", "attempts": attempt,
-                        "rows": 0 if df is None else len(df), "_frame": df is not None, "_df": df}
+                        "rows": 0 if df is None else len(df), "_frame": df is not None, "_df": df,
+                        "_raw": (cols, rows) if df is not None else None}
             except Exception as e:
                 spent = time.perf_counter() - t0
                 total = self._add_seconds(spent)

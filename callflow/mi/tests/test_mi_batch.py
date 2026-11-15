@@ -154,9 +154,11 @@ class BatchExecutionTests(MITestBase):
                             "end_date": "2026-10-15T11:00", "Complain_Type": "Data"},
                            fs.FakeSmartcare(both_fixture()))
         self.assertEqual(subs(body)[0][2]["analysis_result"], json.loads(single.content))
-        # Data groups ran only Data tables, the Voice group only Voice tables
+        # each query ran ONCE for all groups: 4 Data + 8 Voice = 12 DataCube queries
         self.assertEqual(fake.count("dra_voice"), 1)
-        self.assertEqual(fake.count("s1mme"), 3)
+        self.assertEqual(fake.count("s1mme"), 1)
+        self.assertEqual(len(fake.executions), 12)
+        self.assertEqual((body["datacube_queries"]["planned"], body["datacube_queries"]["executed"]), (12, 12))
 
     def test_groups_have_their_own_folders_and_tagged_logs(self):
         job_id, _resp, _fake = self.run_batch(both_fixture())

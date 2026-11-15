@@ -26,6 +26,7 @@ import logging
 import threading
 import time
 import uuid
+from datetime import datetime
 
 from django.core.cache import cache
 
@@ -63,6 +64,34 @@ _QUOTA_RELEASE_LUA = ("local n = tonumber(redis.call('get', KEYS[1]) or '0') "
                       "if n > 0 then return redis.call('decr', KEYS[1]) else return 0 end")
 
 
+# DataCube session ledger: ZSET member "<job_id>:<n>" -> time the session was
+# taken. Reserve n atomically: drop entries older than the session lifetime,
+# refuse if used + n > budget (and say when enough sessions free up).
+_DATACUBE_RESERVE_LUA = """
+local now = tonumber(ARGV[1])
+local ttl = tonumber(ARGV[2])
+local budget = tonumber(ARGV[3])
+local n = tonumber(ARGV[4])
+local start = tonumber(ARGV[6])
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', now - ttl)
+local used = redis.call('ZCARD', KEYS[1])
+if used + n > budget then
+  local idx = used + n - budget - 1
+  local entry = redis.call('ZRANGE', KEYS[1], idx, idx, 'WITHSCORES')
+  local free_at = 0
+  if entry[2] then free_at = tonumber(entry[2]) + ttl end
+  return {0, used, tostring(free_at)}
+end
+for i = 0, n - 1 do
+  redis.call('ZADD', KEYS[1], now, ARGV[5] .. ':' .. (start + i))
+end
+redis.call('EXPIRE', KEYS[1], ttl + 3600)
+return {1, used + n, '0'}
+"""
+_DATACUBE_MARK_LUA = ("if redis.call('zscore', KEYS[1], ARGV[1]) then "
+                      "return redis.call('zadd', KEYS[1], ARGV[2], ARGV[1]) else return 0 end")
+
+
 # --------------------------------------------------------------- backends
 class LocalBackend:
     name = "local"
@@ -72,6 +101,7 @@ class LocalBackend:
         self._kv = {}
         self._pending = {}
         self._queue = []
+        self._zsets = {}
 
     def _alive(self, key):
         item = self._kv.get(key)
@@ -161,6 +191,39 @@ class LocalBackend:
             return int(self._alive(key) or 0)
 
 
+    # DataCube ledger
+    def datacube_reserve(self, key, now, ttl, budget, n, job, start):
+        with self._lock:
+            z = self._zsets.setdefault(key, {})
+            for member in [m for m, t in z.items() if t <= now - ttl]:
+                del z[member]
+            used = len(z)
+            if used + n > budget:
+                times = sorted(z.values())
+                idx = used + n - budget - 1
+                free_at = times[idx] + ttl if 0 <= idx < len(times) else 0.0
+                return False, used, free_at
+            for i in range(n):
+                z[f"{job}:{start + i}"] = now
+            return True, used + n, 0.0
+
+    def datacube_mark(self, key, member, now):
+        with self._lock:
+            z = self._zsets.get(key, {})
+            if member in z:
+                z[member] = now
+
+    def datacube_remove(self, key, members):
+        with self._lock:
+            z = self._zsets.get(key, {})
+            for m in members:
+                z.pop(m, None)
+
+    def datacube_used(self, key, now, ttl):
+        with self._lock:
+            return sum(1 for t in self._zsets.get(key, {}).values() if t > now - ttl)
+
+
 class RedisBackend:
     name = "redis"
 
@@ -170,6 +233,8 @@ class RedisBackend:
         self._refresh = client.register_script(_REFRESH_LUA)
         self._quota_reserve = client.register_script(_QUOTA_RESERVE_LUA)
         self._quota_release = client.register_script(_QUOTA_RELEASE_LUA)
+        self._dc_reserve = client.register_script(_DATACUBE_RESERVE_LUA)
+        self._dc_mark = client.register_script(_DATACUBE_MARK_LUA)
 
     @staticmethod
     def _s(v):
@@ -219,6 +284,21 @@ class RedisBackend:
 
     def quota_used(self, key):
         return int(self._s(self.r.get(key)) or 0)
+
+    def datacube_reserve(self, key, now, ttl, budget, n, job, start):
+        ok, used, free_at = self._dc_reserve(keys=[key], args=[repr(now), int(ttl), int(budget), int(n),
+                                                              job, int(start)])
+        return bool(int(ok)), int(used), float(self._s(free_at) or 0)
+
+    def datacube_mark(self, key, member, now):
+        self._dc_mark(keys=[key], args=[member, repr(now)])
+
+    def datacube_remove(self, key, members):
+        if members:
+            self.r.zrem(key, *members)
+
+    def datacube_used(self, key, now, ttl):
+        return int(self.r.zcount(key, now - ttl, "+inf"))
 
 
 _backend = None
@@ -555,3 +635,99 @@ def release_submission(quota):
         backend().quota_release(QUOTA_KEY.format(quota["day"]))
     except Exception:
         logger.warning("quota release failed", exc_info=True)
+
+
+# ------------------------------------------------------ DataCube sessions
+DATACUBE_KEY = "mi:datacube:sessions"
+
+
+class DataCubeBusy(Exception):
+    def __init__(self, message, used=None, budget=None, free_at=None):
+        super().__init__(message)
+        self.used, self.budget, self.free_at = used, budget, free_at
+
+
+def datacube_status(now=None):
+    """{'budget', 'in_use', 'available', 'session_ttl_s'} for MI's DataCube sessions."""
+    now = time.time() if now is None else now
+    budget, ttl = config.datacube_session_budget(), config.datacube_session_ttl_s()
+    used = backend().datacube_used(DATACUBE_KEY, now, ttl)
+    return {"budget": budget or None, "in_use": used,
+            "available": max(0, budget - used) if budget else None, "session_ttl_s": ttl}
+
+
+class DataCubeReservation:
+    """
+    DataCube sessions held by one MI job. Each query MI executes is assumed to
+    open a DataCube session for MI_DATACUBE_SESSION_TTL_S (3h15), so the ledger
+    keeps one entry per executed query for that long, across all MI processes.
+
+    reserve(n)  - all planned queries at once, before the first one runs
+    extra()     - one more session for a retry (False when the budget is full)
+    mark(seq)   - the seq-th query was executed now (its session starts now)
+    finish(k)   - k queries were executed; give back the reserved, unused rest
+    """
+
+    def __init__(self, job_id):
+        self.job_id = job_id
+        self.reserved = 0
+        self.enabled = config.datacube_session_budget() > 0
+        self._lock = threading.Lock()
+
+    def _try(self, n):
+        ok, used, free_at = backend().datacube_reserve(
+            DATACUBE_KEY, time.time(), config.datacube_session_ttl_s(), config.datacube_session_budget(),
+            n, self.job_id, self.reserved + 1)
+        if ok:
+            self.reserved += n
+        return ok, used, free_at
+
+    def reserve(self, n, wait_s=None, on_wait=None):
+        """Wait (up to MI_DATACUBE_WAIT_S) until n sessions fit; raises DataCubeBusy."""
+        if not self.enabled or n <= 0:
+            return
+        budget = config.datacube_session_budget()
+        if n > budget:
+            raise DataCubeBusy(f"this request needs {n} DataCube queries but MI_DATACUBE_SESSION_BUDGET is "
+                               f"{budget}", budget=budget)
+        wait_s = config.datacube_wait_s() if wait_s is None else wait_s
+        deadline = time.monotonic() + wait_s
+        while True:
+            with self._lock:
+                ok, used, free_at = self._try(n)
+            if ok:
+                return
+            if time.monotonic() >= deadline:
+                when = datetime.fromtimestamp(free_at).astimezone().isoformat(timespec="minutes") if free_at else "?"
+                raise DataCubeBusy(
+                    f"DataCube session budget for MI is in use ({used} of {budget} sessions opened in the last "
+                    f"{config.datacube_session_ttl_s() // 60} min); this request needs {n}. "
+                    f"Enough sessions free up around {when}; submit again then.",
+                    used=used, budget=budget, free_at=free_at)
+            if on_wait is not None:
+                on_wait(used=used, budget=budget, free_at=free_at)
+            time.sleep(min(config.datacube_poll_s(), max(0.05, deadline - time.monotonic())))
+
+    def extra(self):
+        if not self.enabled:
+            return True
+        with self._lock:
+            ok, _used, _free = self._try(1)
+            return ok
+
+    def mark(self, seq):
+        if self.enabled:
+            backend().datacube_mark(DATACUBE_KEY, f"{self.job_id}:{seq}", time.time())
+
+    def finish(self, executed):
+        """Keep one entry per executed query (they hold real sessions); drop the rest."""
+        if not self.enabled:
+            return
+        with self._lock:
+            unused = [f"{self.job_id}:{i}" for i in range(executed + 1, self.reserved + 1)]
+            self.reserved = min(self.reserved, executed)
+        try:
+            backend().datacube_remove(DATACUBE_KEY, unused)
+        except Exception:
+            logger.warning("could not release %d unused DataCube reservations of job %s", len(unused),
+                           self.job_id, exc_info=True)

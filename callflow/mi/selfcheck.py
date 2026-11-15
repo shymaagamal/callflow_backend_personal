@@ -57,16 +57,34 @@ def main(argv=None):
     print(f"executor={config.executor()} fallback={config.worker_fallback()} "
           f"max_concurrent={config.max_concurrent()} legacy_mode={config.legacy_endpoint_mode()} "
           f"new_mode={config.new_endpoint_mode()} query_parallelism={config.query_parallelism()}")
+    try:
+        dc = jobs.datacube_status()
+        print(f"datacube: {dc['in_use']} of {dc['budget']} MI sessions in use (last {dc['session_ttl_s'] // 60} min); "
+              f"max_queries_per_request={config.max_queries_per_request()} "
+              f"union_day_tables={config.union_day_tables()}")
+    except Exception as e:
+        print(f"datacube ledger unreadable: {e}")
 
     if "--smartcare" in argv:
+        # SELECT 1 is a real DataCube query (one ~3h session): take it from the
+        # MI budget like any other query, and only when there is room.
+        reservation = jobs.DataCubeReservation(f"selfcheck-{os.getpid()}")
+        executed = 0
         try:
+            reservation.reserve(1, wait_s=0)
             cursor = smartcare.connect()
+            reservation.mark(1)
+            executed = 1
             cursor.execute("SELECT 1")
             cursor.fetchall()
             smartcare.close_cursor(cursor)
-            check("Smartcare connection + SELECT 1", True)
+            check("Smartcare connection + SELECT 1 (uses 1 DataCube session)", True)
+        except jobs.DataCubeBusy as e:
+            check("Smartcare connection + SELECT 1", False, f"not sent: {e}")
         except Exception as e:
             check("Smartcare connection + SELECT 1", False, smartcare.short_error(e))
+        finally:
+            reservation.finish(executed)
     return 1 if failures else 0
 
 

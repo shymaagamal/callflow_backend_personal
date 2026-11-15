@@ -140,9 +140,13 @@ class FakeSmartcare:
     """`fail`: {fixture_key: count} or {fixture_key: (count, message)}.
     `java_values=True`: return strings/ints the way an unattached JPype thread does."""
 
-    def __init__(self, fixture, fail=None, java_values=False):
+    def __init__(self, fixture, fail=None, java_values=False, filter_msisdns=False):
+        """filter_msisdns=True: like the real DataCube, return only rows whose
+        subscriber column is in the statement's IN (...) list."""
         self.fixture = fixture
         self.java_values = java_values
+        self.filter_msisdns = filter_msisdns
+        self.sqls = []
         self.fail = {}
         for k, v in (fail or {}).items():
             self.fail[k] = list(v) if isinstance(v, tuple) else [v, f"injected failure for {k}"]
@@ -164,6 +168,21 @@ class FakeSmartcare:
 
     def count(self, key):
         return self.executions.count(key)
+
+
+SUBSCRIBER_COLUMNS = ("MSISDN", "IMPU_TEL_URI1", "IMPU_TEL_URI", "callerno", "calledno")
+
+
+def _filter_rows(sql, cols, rows):
+    """Keep rows whose subscriber column value is in the first IN ('..','..') list of the SQL."""
+    m = re.search(r"\bIN\s*\(((?:\s*'[^']*'\s*,?)+)\)", sql, re.I)
+    if not m:
+        return rows
+    wanted = set(re.findall(r"'([^']*)'", m.group(1)))
+    idx = next((cols.index(c) for c in SUBSCRIBER_COLUMNS if c in cols), None)
+    if idx is None:
+        return rows
+    return [r for r in rows if str(r[idx]).strip() in wanted]
 
 
 class _Conn:
@@ -191,11 +210,14 @@ class FakeCursor:
         key = self.owner.route(sql)
         with self.owner.lock:
             self.owner.executions.append(key)
+            self.owner.sqls.append(sql)
             spec = self.owner.fail.get(key)
             if spec and spec[0] > 0:
                 spec[0] -= 1
                 raise RuntimeError(spec[1])
         cols, rows = self.owner.fixture.get(key, (["MSISDN"], []))
+        if self.owner.filter_msisdns:
+            rows = _filter_rows(sql, cols, rows)
         if self.owner.java_values:
             self.description = [(JavaString(c),) for c in cols]
             self._rows = [tuple(_javaify(v) for v in r) for r in rows]

@@ -88,6 +88,9 @@ class MITestBase(SimpleTestCase):
             MI_EXECUTOR="inline",
             MI_CONCURRENCY_BACKEND="local",
             MI_SMARTCARE_RETRY_BACKOFF_S=0,
+            # the DataCube ledger has its own tests (test_mi_datacube); here many
+            # jobs run in one process, so it must not make them wait
+            MI_DATACUBE_SESSION_BUDGET=100000,
             STCC_SMARTCARE_DB_USER="test", STCC_SMARTCARE_DB_PASSWORD="test",
         )
         self.override.enable()
@@ -303,9 +306,18 @@ class RootCauseTests(MITestBase):
         self.assertIn("smartcare_DRA_Voice", [w.get("query") for w in warnings if w["code"] == "query_unavailable"])
 
     def test_window_crossing_midnight_reads_both_day_tables(self):
+        # both day tables, in ONE DataCube statement (UNION ALL) per query
         fake = fs.FakeSmartcare(fs.data_fixture())
         self.post(body(start_date="2026-10-15T23:00", end_date="2026-10-16T01:00"), fake)
-        self.assertEqual(fake.count("s1mme"), 2)
+        self.assertEqual(fake.count("s1mme"), 1)
+        sql = next(q for q in fake.sqls if "S1MME" in q.upper())
+        self.assertIn("DETAIL_CDR_S1MME_20741", sql)
+        self.assertIn("DETAIL_CDR_S1MME_20742", sql)
+        self.assertIn("UNION ALL", sql)
+        with override_settings(MI_UNION_DAY_TABLES=False):          # one statement per day table
+            fake = fs.FakeSmartcare(fs.data_fixture())
+            self.post(body(start_date="2026-10-15T23:00", end_date="2026-10-16T01:00"), fake)
+            self.assertEqual(fake.count("s1mme"), 2)
         with override_settings(MI_FIX_MIDNIGHT_TABLES=False):
             fake = fs.FakeSmartcare(fs.data_fixture())
             self.post(body(start_date="2026-10-15T23:00", end_date="2026-10-16T01:00"), fake)

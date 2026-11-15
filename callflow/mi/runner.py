@@ -51,7 +51,11 @@ def execute_job(job_id, params, fp=None, mode="worker", day=None, connect_fn=Non
                             job_id, params, ctx, connect_fn=connect_fn,
                             publish=lambda **fields: jobs.update_job(job_id, **fields))
                     else:
-                        http_status, body = pipeline.run(params, ctx, connect_fn=connect_fn)
+                        http_status, body = pipeline.run(
+                            params, ctx, connect_fn=connect_fn,
+                            on_wait=lambda used, budget, free_at: jobs.update_job(
+                                job_id, step="waiting_for_datacube_capacity",
+                                datacube_wait={"in_use": used, "budget": budget, "frees_at": free_at or None}))
                     body = to_python_deep(body)      # never pickle Java objects into Redis
             finally:
                 slot.__exit__(None, None, None)
@@ -76,6 +80,8 @@ def execute_job(job_id, params, fp=None, mode="worker", day=None, connect_fn=Non
                 timings={"total_s": round(ctx.elapsed(), 3), "smartcare_s": round(ctx.smartcare_seconds, 3),
                          "stages": ctx.stage_totals()},
                 output_dir=str(ctx.dir),
+                datacube=(body.get("datacube_queries") if is_batch and isinstance(body, dict)
+                          else getattr(ctx, "datacube", None)),
             )
             return http_status, body
     except Exception as e:
