@@ -36,7 +36,8 @@ def site_letters(site_names, site_numbers):
 
 def add_site_columns(frame, cell_col):
     """The Prototype 'SITE LOGIC' block (note: split('_L').str[1], not [-1])."""
-    frame['site_name'] = frame[cell_col].str.split('_L').str[1]
+    # astype(str): CS cell names come back as numbers (e.g. 39239); .str needs text
+    frame['site_name'] = frame[cell_col].astype(str).str.split('_L').str[1]
     frame['site_name'] = frame['site_name'].str.split('_').str[0]
     frame['site_name_number'] = frame['site_name'].str.extract(r'(\d+)')
     frame['site_name_number'] = frame['site_name_number'].astype(str)
