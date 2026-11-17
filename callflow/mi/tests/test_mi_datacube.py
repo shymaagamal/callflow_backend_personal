@@ -248,12 +248,17 @@ class QueryCapTests(MITestBase):
         self.assertEqual(out[0][1], out[1][1])
 
 
+SPARK_TREE = ("java.sql.SQLException: java.sql.SQLException: [2F000-1][SPARK-SPARKSQL] Failed to execute SQL statements "
+              "in the database. -> org.apache.hive.service.cli.HiveSQLException: Error running query: "
+              "org.apache.spark.sql.catalyst.errors.package$TreeNodeException: execute, tree:")
+
+
 class DataCubeLedgerTests(MITestBase):
-    """Account share for MI = 20 sessions; a full Data+Voice request needs 12."""
+    """A request = 4 DataCube sessions (its connections), however many queries. MI's share here: 6."""
 
     def setUp(self):
         super().setUp()                      # MITestBase sets a huge budget; restore a real one
-        self.ledger = override_settings(MI_DATACUBE_SESSION_BUDGET=20, MI_DATACUBE_WAIT_S=0)
+        self.ledger = override_settings(MI_DATACUBE_SESSION_BUDGET=6, MI_DATACUBE_WAIT_S=0)
         self.ledger.enable()
 
     def tearDown(self):
@@ -266,28 +271,33 @@ class DataCubeLedgerTests(MITestBase):
         job_id = json.loads(resp.content)["job_id"]
         return job_id, self.get(f"{MI_PATH}/jobs/{job_id}/result"), fake
 
-    def test_second_full_request_waits_then_fails_without_any_query(self):
-        _j, first, _f = self.submit(("MI", "a", (A,)), ("Network", "b", (B,)))
-        self.assertEqual(first.status_code, 200)
-        self.assertEqual(jobs.datacube_status()["in_use"], 12)
+    def test_full_request_reserves_4_sessions_for_12_queries(self):
+        job_id, resp, fake = self.submit(("MI", "a", (A,)), ("Network", "b", (B,)))
+        dc = json.loads(resp.content)["datacube_queries"]
+        self.assertEqual((len(fake.executions), dc["executed"], dc["sessions_reserved"]), (12, 12, 4))
+        # connections open lazily (real queries take minutes, so all 4 open; the
+        # fake answers at once, so fewer may) - never more than 4
+        self.assertLessEqual(dc["sessions_opened"], 4)
+        self.assertEqual(fake.opened, dc["sessions_opened"])
+        self.assertEqual(jobs.datacube_status()["in_use"], dc["sessions_opened"])
+        log = (self.job_dir(job_id) / "job.log").read_text()
+        self.assertIn("stage=datacube_reservation sessions=4", log)
+        self.assertIn("parallelism=4", log)
+
+    def test_second_request_waits_then_fails_without_any_query(self):
+        jobs.DataCubeReservation("other").reserve(4)                 # another request holds 4 of 6
         job_id, second, fake = self.submit(("MI", "c", (C,)), ("Network", "d", (D,)))
         self.assertEqual(second.status_code, 503)
         body = json.loads(second.content)
-        self.assertEqual(body["status"], "FAILED")
         self.assertEqual(fake.executions, [])                       # nothing sent
         for _c, _t, s in subs(body):
-            self.assertIn("DataCube session budget for MI is in use (12 of 20", s["error"])
-            self.assertIn("this request needs 12", s["error"])
-        self.assertEqual(jobs.datacube_status()["in_use"], 12)    # the failed job holds nothing
-        # a Data-only request (4) still fits: 12 + 4 <= 20
-        _j, third, _f = self.submit(("MI", "e", (C,)))
-        self.assertEqual(third.status_code, 200)
-        self.assertEqual(jobs.datacube_status()["in_use"], 16)
+            self.assertIn("DataCube session budget for MI is in use (4 of 6", s["error"])
+            self.assertIn("this request needs 4 sessions", s["error"])
+        self.assertEqual(jobs.datacube_status()["in_use"], 4)     # the failed job holds nothing
 
     def test_sessions_expire_after_the_session_lifetime(self):
         self.submit(("MI", "a", (A,)), ("Network", "b", (B,)))
         later = time.time() + 3 * 3600 + 15 * 60 + 1
-        self.assertEqual(jobs.backend().datacube_used(jobs.DATACUBE_KEY, later, 3 * 3600 + 15 * 60), 0)
         with mock.patch.object(jobs.time, "time", return_value=later):
             self.assertEqual(jobs.datacube_status()["in_use"], 0)
 
@@ -299,48 +309,119 @@ class DataCubeLedgerTests(MITestBase):
         with override_settings(MI_SMARTCARE_MAX_ATTEMPTS=1):
             _j, resp, _f = self.submit(("MI", "a", (A,)), ("Network", "b", (B,)), fake=fake)
         self.assertEqual(resp.status_code, 500)
-        self.assertEqual(jobs.datacube_status()["in_use"], 0)      # nothing executed -> nothing held
+        self.assertEqual(jobs.datacube_status()["in_use"], 0)      # no connection opened -> no session held
 
-    def test_retry_needs_a_global_session(self):
-        with override_settings(MI_DATACUBE_SESSION_BUDGET=4):
-            fake = fs.FakeSmartcare(both_fixture(), fail={"s1mme": (1, TIMEOUT)})
-            _j, resp, _f = self.submit(("MI", "a", (A,)), fake=fake)
-        body = json.loads(resp.content)
-        self.assertEqual(fake.count("s1mme"), 1)                   # request had room, the account budget not
-        self.assertEqual(body["datacube_queries"]["retries_denied"], 1)
-        self.assertEqual(jobs.datacube_status()["in_use"], 4)
-
-    def test_plan_larger_than_budget_fails_clearly(self):
-        with override_settings(MI_DATACUBE_SESSION_BUDGET=10):
+    def test_budget_smaller_than_one_request_fails_clearly(self):
+        with override_settings(MI_DATACUBE_SESSION_BUDGET=3):
             _j, resp, fake = self.submit(("MI", "a", (A,)), ("Network", "b", (B,)))
         self.assertEqual(resp.status_code, 503)
-        self.assertIn("needs 12 DataCube queries but MI_DATACUBE_SESSION_BUDGET is 10",
+        self.assertIn("needs 4 DataCube sessions but MI_DATACUBE_SESSION_BUDGET is 3",
                       subs(json.loads(resp.content))[0][2]["error"])
         self.assertEqual(fake.executions, [])
 
-    @override_settings(MI_DATACUBE_WAIT_S=5, MI_DATACUBE_POLL_S=0.05)
     def test_waiting_job_shows_it_and_starts_when_capacity_frees(self):
-        r = jobs.DataCubeReservation("other-job")
-        r.reserve(12)
-        for seq in range(1, 13):
-            r.mark(seq)
-        steps = []
-        real = jobs.update_job
+        with override_settings(MI_DATACUBE_WAIT_S=5, MI_DATACUBE_POLL_S=0.05):
+            r = jobs.DataCubeReservation("other-job")
+            r.reserve(4)
+            steps = []
+            real = jobs.update_job
 
-        def spy(job_id, **fields):
-            if fields.get("step") == "waiting_for_datacube_capacity":
-                steps.append(fields["datacube_wait"])
-                r.finish(0)                                      # the other job's sessions end
-            return real(job_id, **fields)
-        with mock.patch.object(jobs, "update_job", spy):
-            _j, resp, fake = self.submit(("MI", "a", (A,)), ("Network", "b", (B,)))
+            def spy(job_id, **fields):
+                if fields.get("step") == "waiting_for_datacube_capacity":
+                    steps.append(fields["datacube_wait"])
+                    r.finish(0)                                  # the other request's sessions end
+                return real(job_id, **fields)
+            with mock.patch.object(jobs, "update_job", spy):
+                _j, resp, fake = self.submit(("MI", "a", (A,)), ("Network", "b", (B,)))
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(steps[0]["in_use"], 12)
-        self.assertEqual(steps[0]["needed"], 12)
+        self.assertEqual((steps[0]["in_use"], steps[0]["needed"]), (4, 4))
         self.assertEqual(len(fake.executions), 12)
 
     def test_single_request_uses_the_ledger(self):
         resp = self.post({"msisdn_list": [A], "start_date": "2026-10-15T10:00", "end_date": "2026-10-15T11:00",
                           "Complain_Type": "Voice"}, fs.FakeSmartcare(both_fixture()))
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(jobs.datacube_status()["in_use"], 8)
+        self.assertTrue(0 < jobs.datacube_status()["in_use"] <= 4)
+
+    @override_settings(MI_DATACUBE_SESSIONS_PER_REQUEST=1)
+    def test_reconnect_after_timeout_is_recorded_as_one_more_session(self):
+        fake = fs.FakeSmartcare(both_fixture(), fail={"s1mme": (1, TIMEOUT)})
+        _j, resp, _f = self.submit(("MI", "a", (A,)), fake=fake)
+        dc = json.loads(resp.content)["datacube_queries"]
+        self.assertEqual((dc["sessions_reserved"], dc["sessions_opened"]), (1, 2))
+        self.assertEqual(jobs.datacube_status()["in_use"], 2)
+
+
+@override_settings(MI_MAX_QUERIES_PER_REQUEST=15)
+class RetryTests(MITestBase):
+    """Job 3da4de8105e64c66: 12 planned, limit 15, three Voice queries failing with a Spark error."""
+
+    FAILING = ("volte_mo", "volte_mt", "reg")
+
+    def run_job(self, fake, *groups):
+        groups = groups or (("MI", "data", (A, B)), ("Network", "v1", (A,)), ("Network", "v2", (C,)))
+        resp = self.post(request(*groups), fake, path=MI_PATH)
+        job_id = json.loads(resp.content)["job_id"]
+        return job_id, json.loads(self.get(f"{MI_PATH}/jobs/{job_id}/result").content)
+
+    def test_only_failed_queries_are_retried_and_recover(self):
+        fake = fs.FakeSmartcare(both_fixture(), fail={k: (1, SPARK_TREE) for k in self.FAILING})
+        job_id, body = self.run_job(fake)
+        for key in self.FAILING:
+            self.assertEqual(fake.count(key), 2, key)                 # first run + one retry
+        for key in set(fake.executions) - set(self.FAILING):
+            self.assertEqual(fake.count(key), 1, key)                 # successful ones never re-run
+        dc = body["datacube_queries"]
+        self.assertEqual((dc["planned"], dc["executed"], dc["retries"], dc["retry_succeeded"], dc["retry_failed"]),
+                         (12, 15, 3, 3, 0))
+        self.assertEqual(body["status"], "COMPLETED")
+        log = (self.job_dir(job_id) / "job.log").read_text()
+        self.assertEqual(log.count("event=query_retry "), 3)
+        self.assertIn("after_kind=error", log)
+        self.assertIn("fresh_connection=False", log)
+
+    def test_still_failing_groups_are_partial_and_data_untouched(self):
+        fake = fs.FakeSmartcare(both_fixture(), fail={k: (99, SPARK_TREE) for k in self.FAILING})
+        _job, body = self.run_job(fake)
+        self.assertEqual(len(fake.executions), 15)                     # never more than the limit
+        dc = body["datacube_queries"]
+        self.assertEqual((dc["retries"], dc["retry_failed"]), (3, 3))
+        self.assertGreater(dc["retries_denied"], 0)                   # 3 more wanted, no room left
+        statuses = {s["subcategory"]: s["status"] for _c, _t, s in subs(body)}
+        self.assertEqual(statuses, {"data": "COMPLETED", "v1": "PARTIALLY_COMPLETED", "v2": "PARTIALLY_COMPLETED"})
+
+    def test_no_retry_room_at_limit_12(self):
+        with override_settings(MI_MAX_QUERIES_PER_REQUEST=12):
+            fake = fs.FakeSmartcare(both_fixture(), fail={k: (1, SPARK_TREE) for k in self.FAILING})
+            _job, body = self.run_job(fake)
+        self.assertEqual(len(fake.executions), 12)
+        self.assertEqual(body["datacube_queries"]["retries_denied"], 3)
+
+    def test_sql_errors_are_not_retried(self):
+        fake = fs.FakeSmartcare(both_fixture(),
+                                fail={"reg": (9, "org.apache.spark.sql.AnalysisException: cannot resolve 'x'")})
+        _job, body = self.run_job(fake)
+        self.assertEqual(fake.count("reg"), 1)
+        self.assertEqual(body["datacube_queries"]["retries"], 0)
+
+    @override_settings(MI_DATACUBE_SESSIONS_PER_REQUEST=1)
+    def test_reconnect_only_after_timeout(self):
+        fake = fs.FakeSmartcare(both_fixture(), fail={"reg": (1, TIMEOUT)})
+        self.run_job(fake, ("Network", "v", (A,)))
+        self.assertEqual(fake.opened, 2)                               # new connection for the retry
+        fake = fs.FakeSmartcare(both_fixture(), fail={"reg": (1, SPARK_TREE)})
+        self.run_job(fake, ("Network", "v", (A,)))
+        self.assertEqual(fake.opened, 1)                               # same connection
+
+    @override_settings(MI_SMARTCARE_RETRY_BACKOFF_S=10, MI_SMARTCARE_RETRY_BACKOFF_MAX_S=15,
+                       MI_SMARTCARE_RETRY_JITTER=0.25, MI_SMARTCARE_MAX_ATTEMPTS=3)
+    def test_backoff_exponential_with_jitter_and_cap(self):
+        from callflow.mi import smartcare
+        sleeps = []
+        fake = fs.FakeSmartcare(both_fixture(), fail={"reg": (2, SPARK_TREE)})
+        with mock.patch.object(smartcare.time, "sleep", side_effect=sleeps.append), \
+                mock.patch.object(smartcare.random, "uniform", side_effect=[0.2, -0.2]):
+            _job, body = self.run_job(fake, ("Network", "v", (A,)))
+        self.assertEqual([round(x, 2) for x in sleeps], [12.0, 12.0])   # 10*1.2 ; min(15, 20)*0.8
+        self.assertEqual(fake.count("reg"), 3)
+        self.assertEqual(body["status"], "COMPLETED")

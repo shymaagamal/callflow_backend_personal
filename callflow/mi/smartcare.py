@@ -7,10 +7,17 @@ Error classes (from the messages Smartcare actually returns):
   query_error  other AnalysisException / ParseException / permission -> never retried
   timeout      java.net.SocketTimeoutException, "timed out"          -> retried, reconnect
   connection   reset / refused / broken pipe / closed / transport     -> retried, reconnect
-  error        anything else                                          -> retried
+  error        anything else (e.g. Spark TreeNodeException)           -> retried, same connection
+
+Retries: only the failed query is retried (each query retries itself in its
+own thread; queries that succeeded are never run again), up to
+MI_SMARTCARE_MAX_ATTEMPTS executions, after MI_SMARTCARE_RETRY_BACKOFF_S x 2^n
+(max MI_SMARTCARE_RETRY_BACKOFF_MAX_S, +/- MI_SMARTCARE_RETRY_JITTER), and only
+while the request still has room under MI_MAX_QUERIES_PER_REQUEST.
 """
 import datetime
 import queue
+import random
 import re
 import threading
 import time
@@ -36,6 +43,7 @@ _PATTERNS = (
                               r"No route to host|TTransportException|EOFException|Communication link", re.I)),
 )
 NON_RETRYABLE = {"unavailable", "query_error", "config", "query_budget"}
+FRESH_CONNECTION = {"timeout", "connection"}     # retry these on a new connection (a new session)
 
 
 class SmartcareConfigError(RuntimeError):
@@ -405,7 +413,7 @@ class Executor:
                         last_kind, last_error = "query_budget", denied.detail
                         break
                     self.ctx.event("datacube_query", seq=f"{seq}/{self.budget.limit}", name=name, table=table,
-                                   attempt=attempt)
+                                   attempt=attempt, retry=attempt > 1)
                 cursor.execute(sql_text)
                 exec_s = time.perf_counter() - t0
                 t1 = time.perf_counter()
@@ -420,6 +428,8 @@ class Executor:
                 self.ctx.record_query(name=name, table=table, attempt=attempt, ok=True,
                                       rows=0 if df is None else len(df), columns=columns,
                                       execute_s=round(exec_s, 3), fetch_s=round(fetch_s, 3))
+                if attempt > 1 and self.budget is not None:
+                    self.budget.retry_result(True)
                 return {"table": table, "status": "ok", "attempts": attempt,
                         "rows": 0 if df is None else len(df), "_frame": df is not None, "_df": df,
                         "_raw": (cols, rows) if df is not None else None}
@@ -435,13 +445,24 @@ class Executor:
                                       will_retry=will_retry)
                 self.ctx.debug("smartcare_query_error_detail", name=name, table=table,
                                attempt=attempt, error=str(e)[:4000])
+                if attempt > 1 and self.budget is not None:
+                    self.budget.retry_result(False)
                 if not will_retry:
                     if over_budget and attempt < attempts_allowed and last_kind not in NON_RETRYABLE:
                         self.ctx.warning("retry_budget_exhausted", name=name, table=table,
                                          smartcare_s=round(total, 1))
                     break
-                session.reset()                  # connection may be broken after a timeout
+                # Only a timeout / connection error can leave the connection
+                # broken; any other failed query is retried on the same
+                # connection, so the retry opens no new DataCube session.
+                fresh = last_kind in FRESH_CONNECTION
+                if fresh:
+                    session.reset()
                 delay = min(config.retry_backoff_max_s(), config.retry_backoff_s() * (2 ** (attempt - 1)))
+                if delay > 0 and config.retry_jitter() > 0:
+                    delay *= 1 + random.uniform(-config.retry_jitter(), config.retry_jitter())
+                self.ctx.event("query_retry", name=name, table=table, next_attempt=attempt + 1,
+                               after_kind=last_kind, delay_s=round(max(delay, 0.0), 1), fresh_connection=fresh)
                 if delay > 0:
                     time.sleep(delay)
         status = "unavailable" if last_kind == "unavailable" else "failed"

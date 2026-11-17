@@ -658,14 +658,16 @@ def datacube_status(now=None):
 
 class DataCubeReservation:
     """
-    DataCube sessions held by one MI job. Each query MI executes is assumed to
-    open a DataCube session for MI_DATACUBE_SESSION_TTL_S (3h15), so the ledger
-    keeps one entry per executed query for that long, across all MI processes.
+    DataCube sessions held by one MI job, across all MI processes. A request
+    opens one session per JDBC connection (MI_DATACUBE_SESSIONS_PER_REQUEST,
+    4), not one per query; each is assumed to stay open for
+    MI_DATACUBE_SESSION_TTL_S (3h15), so the ledger keeps one entry per opened
+    connection for that long.
 
-    reserve(n)  - all planned queries at once, before the first one runs
-    extra()     - one more session for a retry (False when the budget is full)
-    mark(seq)   - the seq-th query was executed now (its session starts now)
-    finish(k)   - k queries were executed; give back the reserved, unused rest
+    reserve(n)  - the request's sessions at once, before it connects
+    extra()     - one more session (a reconnect after a timeout)
+    mark(seq)   - the seq-th session started now
+    finish(k)   - k connections were opened; give back the reserved, unused rest
     """
 
     def __init__(self, job_id):
@@ -688,7 +690,7 @@ class DataCubeReservation:
             return
         budget = config.datacube_session_budget()
         if n > budget:
-            raise DataCubeBusy(f"this request needs {n} DataCube queries but MI_DATACUBE_SESSION_BUDGET is "
+            raise DataCubeBusy(f"this request needs {n} DataCube sessions but MI_DATACUBE_SESSION_BUDGET is "
                                f"{budget}", budget=budget)
         wait_s = config.datacube_wait_s() if wait_s is None else wait_s
         deadline = time.monotonic() + wait_s
@@ -701,7 +703,7 @@ class DataCubeReservation:
                 when = datetime.fromtimestamp(free_at).astimezone().isoformat(timespec="minutes") if free_at else "?"
                 raise DataCubeBusy(
                     f"DataCube session budget for MI is in use ({used} of {budget} sessions opened in the last "
-                    f"{config.datacube_session_ttl_s() // 60} min); this request needs {n}. "
+                    f"{config.datacube_session_ttl_s() // 60} min); this request needs {n} sessions. "
                     f"Enough sessions free up around {when}; submit again then.",
                     used=used, budget=budget, free_at=free_at)
             if on_wait is not None:

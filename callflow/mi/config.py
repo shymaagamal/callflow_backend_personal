@@ -145,6 +145,11 @@ def max_attempts() -> int:
     return max(1, _int("MI_SMARTCARE_MAX_ATTEMPTS", 3))
 
 
+def retry_jitter() -> float:
+    """Random +/- fraction applied to each retry delay (0.25 = +/-25%); 0 = none."""
+    return min(1.0, max(0.0, _float("MI_SMARTCARE_RETRY_JITTER", 0.25)))
+
+
 def retry_backoff_s() -> float:
     return _float("MI_SMARTCARE_RETRY_BACKOFF_S", 10.0)
 
@@ -291,6 +296,15 @@ def max_msisdns_per_query() -> int:
     return max(1, _int("MI_MAX_MSISDNS_PER_QUERY", 1000))
 
 
+def datacube_sessions_per_request() -> int:
+    """
+    DataCube sessions one MI request opens. Observed: 4 per complete request
+    (one per JDBC connection), not one per SQL query. MI runs at most this
+    many queries at once, so it never needs more connections.
+    """
+    return max(1, _int("MI_DATACUBE_SESSIONS_PER_REQUEST", 4))
+
+
 def datacube_session_budget() -> int:
     """
     DataCube sessions MI may hold at once, across ALL MI jobs (0 = no global
@@ -301,7 +315,7 @@ def datacube_session_budget() -> int:
 
 
 def datacube_session_ttl_s() -> int:
-    """How long one executed query is assumed to hold its DataCube session (3h + 15 min margin)."""
+    """How long one DataCube session is assumed to stay open (3h + 15 min margin)."""
     return max(60, _int("MI_DATACUBE_SESSION_TTL_S", 3 * 3600 + 15 * 60))
 
 

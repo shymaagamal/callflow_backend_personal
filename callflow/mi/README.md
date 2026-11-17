@@ -144,6 +144,21 @@ account allows **100**. Reusing a JDBC connection does not save sessions, so MI 
   `{limit, planned, executed, retries, retries_denied, by_complain_type}`. Compare `seq` lines
   with DataCube's session monitor.
 
+**Update 2026-11-17: sessions are per connection, not per query.** Testing showed one complete
+request opens **4 DataCube sessions** (one per JDBC connection), however many queries it runs.
+A request now reserves `MI_DATACUBE_SESSIONS_PER_REQUEST` (4) in the ledger, runs at most that many
+queries at once (so it never opens more connections), and the ledger records the connections
+actually opened (a reconnect after a timeout counts as one more). The query cap
+(`MI_MAX_QUERIES_PER_REQUEST`) is separate and still counts every execution, retries included.
+
+**Retries:** a failed query is retried on its own (queries that succeeded are never run again), up
+to `MI_SMARTCARE_MAX_ATTEMPTS` executions, after `MI_SMARTCARE_RETRY_BACKOFF_S × 2^n` (max
+`MI_SMARTCARE_RETRY_BACKOFF_MAX_S`, ± `MI_SMARTCARE_RETRY_JITTER`), while the request has room
+under the query cap. SQL errors (`query_error`, `unavailable`) are not retried. Only timeouts and
+connection errors reconnect; other retries reuse the same connection (no new session). Logs:
+`event=query_retry`; result `datacube_queries`: `executed, retries, retry_succeeded, retry_failed,
+retries_denied, sessions_reserved, sessions_opened`.
+
 ## 4. Outputs and logs: `CALLFLOW_OUTPUT/MI/`
 
 Default `…/callflow_portal/callflow_output/MI` (`settings.OUTPUT_DIR/MI`); override with an absolute

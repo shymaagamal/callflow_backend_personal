@@ -1,9 +1,8 @@
 """
 DataCube query plan and per-request query budget.
 
-Why: every statement MI sends to Smartcare/DataCube opens a server-side
-DataCube session that lives ~3h, whatever JDBC connection it goes through, and
-the account allows 100. So MI counts and caps STATEMENTS, not connections:
+The number of SQL queries a request sends is capped and known before it
+starts (separately from DataCube sessions, which are 4 per request):
 
 * build_plan() lists every statement a request will send BEFORE anything runs:
   one per query of each Complain_Type present (Data = smartcare_Data_QUERIES,
@@ -15,8 +14,8 @@ the account allows 100. So MI counts and caps STATEMENTS, not connections:
 
 * RequestBudget is checked right before every cursor.execute(): each planned
   statement may run once; a retry runs only if the plan left room under the
-  cap (12 - planned) AND the global DataCube ledger grants one more session.
-  It can never let a request execute more than the cap.
+  cap (limit - planned). It can never let a request execute more than the cap.
+  It counts queries, not DataCube sessions (4 per request, see pipeline.fetch_plan).
 """
 import threading
 from collections import OrderedDict
@@ -139,26 +138,27 @@ class BudgetDenied(Exception):
 
 class RequestBudget:
     """
-    Counts DataCube executions of ONE MI submission (shared by its Data and
-    Voice fetches and all their threads). acquire() is called immediately
-    before each cursor.execute():
+    Counts SQL query executions of ONE MI submission (shared by its Data and
+    Voice fetches and all their threads). These are NOT DataCube sessions:
+    a request opens 4 sessions (its connections) however many queries run on
+    them. acquire() is called immediately before each cursor.execute():
 
     * the first execution of a planned statement uses its planned slot;
     * any other execution is a retry: it needs room under the cap
-      (limit - planned - retries used) and one more session from the global
-      ledger (`reservation.extra()`).
+      (limit - planned - retries used).
 
     Raises BudgetDenied otherwise; `executed` can never exceed `limit`.
     """
 
-    def __init__(self, limit, planned, reservation=None, on_execute=None):
+    def __init__(self, limit, planned, on_execute=None):
         if planned > limit:
             raise QueryPlanError(f"planned {planned} queries exceed the limit {limit}")
         self.limit, self.planned = limit, planned
-        self.reservation = reservation
         self.on_execute = on_execute
         self.executed = 0
         self.retries = 0
+        self.retry_succeeded = 0
+        self.retry_failed = 0
         self.denied = []
         self._first = set()
         self._lock = threading.Lock()
@@ -180,18 +180,20 @@ class RequestBudget:
                 if self.retries >= self.retry_allowance:
                     self._deny("request_limit", statement_key,
                                f"no retry left: the plan uses {self.planned} of {self.limit} DataCube queries")
-                if self.reservation is not None and not self.reservation.extra():
-                    self._deny("datacube_budget", statement_key,
-                               "no DataCube session left in the global MI budget for a retry")
                 self.retries += 1
                 kind = "retry"
             self.executed += 1
             seq = self.executed
-        if self.reservation is not None:
-            self.reservation.mark(seq)
         if self.on_execute is not None:
             self.on_execute(seq=seq, kind=kind, statement=statement_key)
         return seq
+
+    def retry_result(self, ok):
+        with self._lock:
+            if ok:
+                self.retry_succeeded += 1
+            else:
+                self.retry_failed += 1
 
     def _deny(self, reason, key, detail):
         self.denied.append({"statement": key, "reason": reason})
@@ -199,4 +201,5 @@ class RequestBudget:
 
     def summary(self):
         return OrderedDict([("limit", self.limit), ("planned", self.planned), ("executed", self.executed),
-                            ("retries", self.retries), ("retries_denied", len(self.denied))])
+                            ("retries", self.retries), ("retry_succeeded", self.retry_succeeded),
+                            ("retry_failed", self.retry_failed), ("retries_denied", len(self.denied))])

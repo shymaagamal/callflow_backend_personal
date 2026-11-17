@@ -47,7 +47,7 @@ Parent status
 import time
 from collections import OrderedDict
 
-from . import catalog, jobs, outputs, pipeline, query_plan, validation
+from . import catalog, config, jobs, outputs, pipeline, query_plan, validation
 from .mi_logging import JobContext
 from .smartcare import to_python_deep
 
@@ -307,7 +307,7 @@ def run_groups(job_id, params, ctx, connect_fn=None, publish=None):
 
     def waiting(used, budget, free_at):
         publish(step="waiting_for_datacube_capacity",
-                datacube_wait={"in_use": used, "budget": budget, "needed": plan.total,
+                datacube_wait={"in_use": used, "budget": budget, "needed": config.datacube_sessions_per_request(),
                                "frees_at": free_at or None})
 
     try:

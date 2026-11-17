@@ -150,33 +150,45 @@ class FetchResult:
         self.error = None                   # e.g. 'Database connection failed'
         self.http_status = None
         self.budget = None
+        self.sessions_reserved = 0          # DataCube sessions = connections, not queries
+        self.sessions_opened = 0
 
     def summary(self):
+        """Queries (planned / executed / retries) and DataCube sessions, kept apart."""
         out = OrderedDict(self.plan.summary())
         b = self.budget
-        out.update(executed=b.executed if b else 0, retries=b.retries if b else 0,
-                   retries_denied=len(b.denied) if b else 0)
+        if b is not None:
+            out.update((k, v) for k, v in b.summary().items() if k not in ("limit", "planned"))
+        else:
+            out.update(executed=0, retries=0, retry_succeeded=0, retry_failed=0, retries_denied=0)
+        out["sessions_reserved"] = self.sessions_reserved
+        out["sessions_opened"] = self.sessions_opened
         return out
 
 
 def fetch_plan(plan, ctx, connect_fn=None, on_wait=None):
     """
-    Execute a query plan: reserve its DataCube sessions, connect, run every
-    planned query once (in parallel, MI_QUERY_PARALLELISM), Data first then
-    Voice, all under one RequestBudget. Returns FetchResult; raises
+    Execute a query plan: reserve the request's DataCube sessions
+    (MI_DATACUBE_SESSIONS_PER_REQUEST = 4: one per connection, not one per
+    query), connect, run every planned query (at most that many at once, so
+    no more connections are opened), Data first then Voice on the same
+    connections, all under one RequestBudget. Returns FetchResult; raises
     jobs.DataCubeBusy when the global budget stays full for MI_DATACUBE_WAIT_S.
     """
     fetched = FetchResult(plan)
+    sessions = config.datacube_sessions_per_request()
+    parallelism = min(config.query_parallelism(), sessions)
+    fetched.sessions_reserved = sessions
     ctx.event("query_plan", planned=plan.total, limit=plan.limit, retry_allowance=plan.retry_allowance,
               tables=",".join(map(str, plan.tables)), union_day_tables=plan.union_day_tables,
               msisdns=";".join(f"{catalog.COMPLAIN_TYPE_LABEL.get(ct, ct)}={len(m)}"
                                for ct, m in plan.msisdns_by_type.items()),
-              queries=plan.describe(), parallelism=config.query_parallelism())
+              queries=plan.describe(), parallelism=parallelism, sessions_reserved=sessions)
     reservation = jobs.DataCubeReservation(ctx.job_id)
     session = pool = None
     try:
-        with ctx.stage("datacube_reservation", sessions=plan.total) as rec:
-            reservation.reserve(plan.total, on_wait=on_wait)
+        with ctx.stage("datacube_reservation", sessions=sessions) as rec:
+            reservation.reserve(sessions, on_wait=on_wait)
             rec["in_use_after"] = jobs.datacube_status().get("in_use")
 
         session = Session(ctx, connect_fn)
@@ -188,14 +200,14 @@ def fetch_plan(plan, ctx, connect_fn=None, on_wait=None):
             return fetched
 
         pool = SessionPool(ctx, connect_fn, first=session)
-        fetched.budget = query_plan.RequestBudget(plan.limit, plan.total, reservation)
+        fetched.budget = query_plan.RequestBudget(plan.limit, plan.total)
         for complain_type, msisdns in plan.msisdns_by_type.items():
             request = SimpleNamespace(msisdns=msisdns, start=plan.window[0], end=plan.window[1])
             executor = Executor(ctx, request, pool, budget=fetched.budget)
             queries = [(q.name, q.template) for q in plan.queries_for(complain_type)]
             with ctx.stage("query_execution", complain_type=complain_type, msisdns=len(msisdns),
-                           parallelism=config.query_parallelism()):
-                outcomes = executor.run_many(queries)
+                           parallelism=parallelism):
+                outcomes = executor.run_many(queries, parallelism=parallelism)
             raw = RawData(complain_type, msisdns, queries, outcomes)
             fetched.raw[complain_type] = raw
             for name, outcome in raw.outcomes.items():
@@ -204,14 +216,23 @@ def fetch_plan(plan, ctx, connect_fn=None, on_wait=None):
             unmatched = raw.unmatched_rows()
             if unmatched:
                 ctx.warning("rows_without_requested_msisdn", complain_type=complain_type, rows=unmatched)
-        ctx.event("datacube_queries_done", **fetched.summary())
         return fetched
     finally:
         if pool is not None:
+            opened = pool.connects             # every connection opened = one DataCube session
             pool.close()                       # closes every session, including the first
         elif session is not None:
+            opened = session.connects
             session.close()
-        reservation.finish(fetched.budget.executed if fetched.budget else 0)
+        else:
+            opened = 0
+        fetched.sessions_opened = opened
+        # a reconnect after a timeout opens one more session than reserved:
+        # record it in the ledger too, so the global count stays true
+        for _ in range(max(0, opened - sessions)):
+            reservation.extra()
+        reservation.finish(opened)
+        ctx.event("datacube_queries_done", **fetched.summary())
 
 
 def plan_for(msisdns_by_type, start, end):
