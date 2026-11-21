@@ -1,0 +1,17 @@
+SELECT
+   D1."DATETIME_ID" AS "DATETIMEID",
+   D1."DNPREFIX" AS "DNPREFIX",
+   D1."HOUR_ID" AS "HOURID",
+   D1."NE_ID" AS "NEID",
+   D1."sbgSipChallengedIncInvSessions",
+   D1."sbgSipNetIncSessionEstabNetworkSuccess",
+   D1."sbgSipInitiatedSessionRelease",
+   D1."sbgSipSessionIncNormalRelease",
+   D1."sbgSipSessionOutNormalRelease",
+   D1."sbgSipIngressInitRegThrottlingRej",
+   D1."sbgSipInitRegThrottlingRejectedCnt",
+   D1."sbgSipTotalIncSessSetups" AS "SBGSIPTOTALINCSESSSETUPS"
+FROM
+   "DC_E_IMSSBG_SIP_RAW" D1
+Where 
+ D1."DATETIME_ID">= dateadd(hour, -1, getdate())

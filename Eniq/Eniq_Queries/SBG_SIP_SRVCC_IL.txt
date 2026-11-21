@@ -1,0 +1,11 @@
+SELECT
+   D1."DATETIME_ID" AS "DATETIMEID",
+   D1."NE_ID" AS "NEID",
+   D1."sbgSipRejectedIncAlertingSessions488",
+   D1."sbgSipRejectedIncPreAlertingSessions488",
+   D1."sbgSipSuccessIncSessions" AS "SBGSIPSUCCESSINCSESSIONS",
+   D1."sbgSipTotalIncSessSetups" AS "SBGSIPTOTALINCSESSSETUPS"
+FROM
+   "DC_E_IMSSBG_SIP_RAW" D1
+WHERE
+   ( D1."DATETIME_ID">= dateadd(hour, -1, getdate())

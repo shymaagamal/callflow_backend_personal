@@ -1,0 +1,17 @@
+SELECT
+   D1."DATETIME_ID" AS "DATETIMEID",
+   D1."HOUR_ID" AS "HOURID",
+   D1."MGW" AS "MGW",
+   D1."MIN_ID" AS "MINID",
+   D1."MOID" AS "MOID",
+   D1."pmNrOfAal2TermsRej" AS "PMNROFAAL2TERMSREJ",
+   D1."pmNrOfAal2TermsReq" AS "PMNROFAAL2TERMSREQ",
+   D1."pmNrOfIpTermsRej" AS "PMNROFIPTERMSREJ",
+   D1."pmNrOfIpTermsReq" AS "PMNROFIPTERMSREQ",
+   D1."pmNrOfOrigNbInit" AS "PMNROFORIGNBINIT",
+   D1."pmNrOfOrigNbInitFaults" AS "PMNROFORIGNBINITFAULTS",
+   D1."Vmgw" AS "VMGW"
+FROM
+   "DC_E_MGW_VMGW_RAW" D1
+WHERE
+D1."DATETIME_ID">= dateadd(hour, -1, getdate())

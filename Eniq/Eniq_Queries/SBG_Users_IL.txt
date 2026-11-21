@@ -1,0 +1,12 @@
+SELECT
+   D1."DATETIME_ID" AS "DATETIMEID",
+   D1."DNPREFIX" AS "DNPREFIX",
+   D1."HOUR_ID" AS "HOURID",
+   D1."NE_ID" AS "NEID",
+   D1."sbgSgcRegResCurrentTotalReg" AS "SBGSGCREGRESCURRENTTOTALREG"
+FROM
+   "DC_E_IMSSBG_SGC_RAW" D1
+
+
+WHERE
+   ( D1."DATETIME_ID">= dateadd(hour, -1, getdate())

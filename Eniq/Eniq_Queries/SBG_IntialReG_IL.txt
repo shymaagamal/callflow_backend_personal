@@ -1,0 +1,13 @@
+SELECT
+   D1."DATETIME_ID" AS "DATETIMEID",
+   D1."HOUR_ID" AS "HOURID",
+   D1."NE_ID" AS "NEID",
+   D1."sbgSipRegStatInitialAccCnt" AS "SBGSIPREGSTATINITIALACCCNT",
+   D1."sbgSipRegStatInitialAttCnt" AS "SBGSIPREGSTATINITIALATTCNT",
+   D1."sbgSipRegStatRejInitialRegCnt400",
+   D1."sbgSipRegStatRejInitialRegCnt403",
+   D1."sbgSipRegStatRejInitialRegCnt404"
+FROM
+   "DC_E_IMSSBG_PROXYREGISTRAR_RAW" D1
+WHERE
+   ( D1."DATETIME_ID">= dateadd(hour, -1, getdate())
