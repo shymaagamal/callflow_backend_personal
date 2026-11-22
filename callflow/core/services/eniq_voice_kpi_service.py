@@ -3,9 +3,10 @@ Voice KPI calculation from ENIQ counter rows.
 
 Input:  one DataFrame per ENIQ query, as returned by the Voice KPI ENIQ view
         (columns labelled exactly as ENIQ returns them).
-Output: per KPI, the calculated value per node and 15-minute period, with the
-        green output dimensions from the formula sheet. Raw counters are not
-        returned.
+Output: one table per query with the green columns of its sample workbook
+        (time, node, green counters, calculated KPIs), one row per node and
+        15-minute period, plus per-KPI status and mapping. The counters that
+        only feed a formula are not returned.
 
 The KPI definitions (query, counters, formula, output columns) are in
 constants/voice_kpis_Eniq_Formulas.py.
@@ -27,7 +28,9 @@ import math
 import numpy as np
 import pandas as pd
 
-from ..constants.voice_kpis_Eniq_Formulas import DATETIME_COLUMNS, VOICE_KPI_SPECS
+from ..constants.voice_kpis_Eniq_Formulas import (
+    DATETIME_COLUMNS, QUERY_OUTPUT_NOTES, QUERY_OUTPUTS, VOICE_KPI_SPECS,
+)
 
 logger = logging.getLogger("callflow_logger")
 
@@ -189,6 +192,15 @@ def calculate_kpi(spec, df, level="node"):
 
     result, skipped = _compute(spec, work, counters, group_cols)
 
+    # Key columns + value, kept for the per-query output tables (removed
+    # from the block before it is returned to the client).
+    keys = ["_time", "_node"] + extra_cols
+    if level == "object":
+        result = result.assign(_row=result.index)
+        keys = keys + object_cols + ["_row"]
+    block["_frame"] = result.reindex(columns=keys + ["value"])
+    block["_keys"] = {"extra": extra_cols, "object": object_cols if level == "object" else []}
+
     rows = []
     for rec in result.to_dict(orient="records"):
         row = {"datetime": _format_time(rec.get("_time")), "node": rec.get("_node")}
@@ -270,15 +282,86 @@ def calculate_voice_kpis(frames, specs=VOICE_KPI_SPECS, level="node", query_erro
     return blocks
 
 
-def kpi_blocks_to_frame(blocks):
-    """Long table of all calculated values (one row per KPI, node, time) for CSV export."""
-    records = []
+def _table_for_query(query, blocks, layout, level):
+    """Merge the KPIs of one query into the sample's green-column table."""
+    ok = [b for b in blocks if b["status"] == "SUCCESS"]
+    failed = [b for b in blocks if b["status"] != "SUCCESS"]
+    wanted = {b["kpi"] for b in blocks}
+    # Only the columns of the KPIs that were requested.
+    layout = [(h, src) for h, src in layout
+              if not src.startswith("kpi:") or src[4:] in wanted]
+
+    table = {"query": query, "level": level}
+    if QUERY_OUTPUT_NOTES.get(query):
+        table["note"] = QUERY_OUTPUT_NOTES[query]
+    if failed:
+        table["errors"] = {b["kpi"]: b.get("error") for b in failed}
+    if not ok:
+        table.update({"status": "FAILED", "columns": [h for h, _ in layout],
+                      "count": 0, "results": []})
+        return table, None
+
+    extra = ok[0]["_keys"]["extra"]
+    objects = ok[0]["_keys"]["object"]
+    keys = ["_time", "_node"] + extra + (objects + ["_row"] if level == "object" else [])
+
+    merged = None
+    for b in ok:
+        f = b["_frame"].rename(columns={"value": f"kpi:{b['kpi']}"})
+        merged = f if merged is None else merged.merge(f, on=keys, how="outer")
+    merged = merged.sort_values(["_time", "_node"], kind="stable", na_position="last")
+
+    source_col = {"datetime": "_time", "node": "_node", **{c.upper(): c for c in extra}}
+    out = pd.DataFrame(index=merged.index)
+    columns = []
+    for header, src in layout:
+        if src.startswith("kpi:"):
+            col = merged[src] if src in merged.columns else pd.Series(None, index=merged.index)
+            out[header] = [_clean_value(v) for v in col]
+        else:
+            name = source_col.get(src.upper(), source_col.get(src))
+            if name is None:  # dimension not returned by ENIQ
+                out[header] = None
+            elif name == "_node":
+                out[header] = merged[name]
+            else:
+                out[header] = [_format_time(v) for v in merged[name]]
+        columns.append(header)
+        if src == "node" and level == "object":
+            for c in objects:
+                out[c] = merged[c]
+                columns.append(c)
+    out = out[columns].astype(object).where(out[columns].notna(), None)
+
+    table.update({
+        "status": "SUCCESS" if not failed else "PARTIAL",
+        "columns": columns,
+        "count": int(len(out)),
+        "results": out.to_dict(orient="records"),
+    })
+    return table, out
+
+
+def build_query_outputs(blocks, level="node"):
+    """
+    One output table per query, with the green columns of its sample workbook:
+    time, node, green counters and calculated KPIs (no raw formula inputs).
+
+    Returns (tables, frames): tables for the response, {query: DataFrame} for CSV.
+    Removes the internal frames from `blocks`.
+    """
+    by_query = {}
     for b in blocks:
-        for r in b.get("results", []):
-            records.append({"kpi": b["kpi"], "unit": b.get("unit"), **r})
-    if not records:
-        return pd.DataFrame(columns=["kpi", "unit", "datetime", "node", "value"])
-    df = pd.DataFrame(records)
-    lead = ["kpi", "unit", "datetime", "node"]
-    rest = [c for c in df.columns if c not in lead and c != "value"]
-    return df[lead + rest + ["value"]].replace({np.nan: None})
+        by_query.setdefault(b["query"], []).append(b)
+    tables, frames = [], {}
+    for query, qblocks in by_query.items():
+        layout = QUERY_OUTPUTS.get(query) or [("DATETIMEID", "datetime"), ("NODE", "node")] + [
+            (b["kpi"], f"kpi:{b['kpi']}") for b in qblocks]
+        table, df = _table_for_query(query, qblocks, layout, level)
+        tables.append(table)
+        if df is not None:
+            frames[query] = df
+    for b in blocks:
+        b.pop("_frame", None)
+        b.pop("_keys", None)
+    return tables, frames

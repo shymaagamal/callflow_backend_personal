@@ -8,8 +8,10 @@ GET /callflow/api/voice-kpi-eniq?hours=1
     services/eniq_voice_kpi_service.py) and returns the KPI values per node
     and period. Raw counters are not returned unless include_data=true.
     Files written to OUTPUT_DIR/VOICE/eniq_<YYYYmmdd_HHMMSS>/:
-        <QUERY_NAME>.csv   raw counters, one per query (as before)
-        voice_kpis.csv     all calculated KPI values, one row per KPI/node/time
+        <QUERY_NAME>.csv      raw counters, one per query (as before)
+        <QUERY_NAME>_KPI.csv  the calculated output of that query: the green
+                              columns of its sample workbook (time, node,
+                              green counters, KPI values)
 
 How the concurrency works
     `workers` threads are started. Each thread opens ONE ENIQ connection and
@@ -37,8 +39,11 @@ Optional query params:
     include_data  "true" to also return the raw query rows (default false)
 
 Response
-    kpis     one block per KPI: status, unit, formula, counter mapping and
-             results [{datetime, node, <other output dims>, value}]
+    outputs  one table per query with the green columns of its sample, e.g.
+             CSSR_CDR_THROTTLING_IL -> [{DATETIMEID, NEID,
+             sbgSipIngressInitRegThrottlingRej, sbgSipInitRegThrottlingRejectedCnt,
+             SBG CFR, SBG CDR}], plus the path of its _KPI.csv
+    kpis     one entry per KPI: status, unit, formula, counter mapping, notes
     queries  one status entry per ENIQ query that was run
 
 HTTP 200 if at least one KPI was calculated (or, when only KPI-less queries
@@ -60,7 +65,7 @@ from rest_framework.views import APIView
 
 from ..constants.voice_kpis_Eniq_Queries import VOICE_KPI_ENIQ_QUERIES
 from ..services.eniq_voice_kpi_service import (
-    LEVELS, calculate_voice_kpis, kpi_blocks_to_frame, required_queries, select_specs,
+    LEVELS, build_query_outputs, calculate_voice_kpis, required_queries, select_specs,
 )
 from ..utils.connections import EniqConnection
 from ..utils.data_utils import convert_java_types
@@ -273,14 +278,20 @@ class SybaseQueryView(APIView):
 
         kpi_blocks = calculate_voice_kpis(frames, specs=specs, level=level,
                                           query_errors=query_errors)
-        kpi_csv = None
-        try:
-            kpi_df = kpi_blocks_to_frame(kpi_blocks)
-            kpi_csv = os.path.join(out_dir, "voice_kpis.csv")
-            kpi_df.to_csv(kpi_csv, index=False)
-        except Exception as e:
-            logger.error("[ENIQ] writing voice_kpis.csv failed: %s", e, exc_info=True)
-            kpi_csv = None
+        outputs, output_frames = build_query_outputs(kpi_blocks, level=level)
+        for table in outputs:
+            df = output_frames.get(table["query"])
+            table["csv"] = None
+            if df is None:
+                continue
+            path = os.path.join(out_dir, f"{table['query']}_KPI.csv")
+            try:
+                df.to_csv(path, index=False)
+                table["csv"] = path
+            except Exception as e:
+                logger.error("[ENIQ] writing %s failed: %s", path, e, exc_info=True)
+        for b in kpi_blocks:  # values are in `outputs`
+            b.pop("results", None)
 
         succeeded = sum(1 for r in ordered if r["status"] == "SUCCESS")
         kpis_ok = sum(1 for b in kpi_blocks if b["status"] == "SUCCESS")
@@ -288,7 +299,6 @@ class SybaseQueryView(APIView):
             "hours": hours,
             "level": level,
             "output_dir": out_dir,
-            "kpi_csv": kpi_csv,
             "total_kpis": len(kpi_blocks),
             "kpis_succeeded": kpis_ok,
             "kpis_failed": len(kpi_blocks) - kpis_ok,
@@ -299,6 +309,7 @@ class SybaseQueryView(APIView):
             "workers_connected": len(connected),
             "connect_errors": sorted(set(connect_errors)),
             "duration_s": round(time.monotonic() - started, 2),
+            "outputs": outputs,
             "kpis": kpi_blocks,
             "queries": ordered,
         }

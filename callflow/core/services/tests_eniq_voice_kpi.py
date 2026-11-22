@@ -30,7 +30,7 @@ from django.test import SimpleTestCase, override_settings
 from rest_framework.test import APIRequestFactory
 
 from ..constants.voice_kpis_Eniq_Formulas import (
-    DATETIME_COLUMNS, VOICE_KPI_SPECS, VOICE_KPI_SPECS_BY_NAME,
+    DATETIME_COLUMNS, QUERY_OUTPUTS, VOICE_KPI_SPECS, VOICE_KPI_SPECS_BY_NAME,
 )
 from ..constants.voice_kpis_Eniq_Queries import VOICE_KPI_ENIQ_QUERIES
 from . import eniq_voice_kpi_service as svc
@@ -277,6 +277,55 @@ class SampleFormulaTests(SimpleTestCase):
         self.assertEqual(block["results"][0]["UTCDATETIMEID"], "2026-10-27 14:30:00")
 
 
+    def _green(self, sample):
+        import openpyxl
+        ws = openpyxl.load_workbook(SAMPLE_DIR / f"{sample}.xlsx").active
+        return {ws.cell(1, c).value for c in range(1, ws.max_column + 1)
+                if ws.cell(1, c).fill.fill_type and ws.cell(1, c).fill.fgColor.rgb == "FF92D050"}
+
+    def test_output_columns_are_the_green_columns(self):
+        for query, layout in QUERY_OUTPUTS.items():
+            sample = {"MGW_LU_UPD_IL": "MSC_LU_UPD_IL"}.get(query, query)
+            if not (SAMPLE_DIR / f"{sample}.xlsx").exists():
+                continue
+            with self.subTest(query=query):
+                headers = {h for h, _ in layout}
+                added = {"MGW"} if query == "MGW_CPU_IL" else set()
+                self.assertEqual(headers - added, self._green(sample))
+
+    def test_cssr_output_table(self):
+        df = load_sample("CSSR_CDR_THROTTLING_IL")
+        specs = [s for s in VOICE_KPI_SPECS if s.query == "CSSR_CDR_THROTTLING_IL"]
+        blocks = svc.calculate_voice_kpis({"CSSR_CDR_THROTTLING_IL": df}, specs)
+        tables, frames = svc.build_query_outputs(blocks)
+        t = tables[0]
+        self.assertEqual(t["columns"], ["DATETIMEID", "NEID", "sbgSipIngressInitRegThrottlingRej",
+                                        "sbgSipInitRegThrottlingRejectedCnt", "SBG CFR", "SBG CDR"])
+        self.assertEqual(t["count"], df.groupby(["DATETIMEID", "NEID"]).ngroups)
+        row = next(r for r in t["results"] if r["NEID"] == "BSW-SBG-01"
+                   and r["DATETIMEID"] == "2026-10-27 14:00:00")
+        g = df[(df.NEID == "BSW-SBG-01") & (pd.to_datetime(df.DATETIMEID) == "2026-10-27 14:00:00")]
+        cfr = 100 * (1 - g.sbgSipNetIncSessionEstabNetworkSuccess.sum()
+                     / (g.SBGSIPTOTALINCSESSSETUPS.sum() - g.sbgSipChallengedIncInvSessions.fillna(0).sum()))
+        self.assertTrue(_close(row["SBG CFR"], round(cfr, 6)))
+        self.assertEqual(row["sbgSipIngressInitRegThrottlingRej"],
+                         float(g.sbgSipIngressInitRegThrottlingRej.fillna(0).sum()))
+        self.assertEqual(list(frames["CSSR_CDR_THROTTLING_IL"].columns), t["columns"])
+        self.assertNotIn("_frame", blocks[0])
+
+    def test_every_sample_builds_its_table(self):
+        for query in QUERY_OUTPUTS:
+            sample = {"MGW_LU_UPD_IL": "MSC_LU_UPD_IL"}.get(query, query)
+            if not (SAMPLE_DIR / f"{sample}.xlsx").exists():
+                continue
+            with self.subTest(query=query):
+                specs = [s for s in VOICE_KPI_SPECS if s.query == query]
+                blocks = svc.calculate_voice_kpis({query: load_sample(sample)}, specs)
+                t = svc.build_query_outputs(blocks)[0][0]
+                self.assertEqual(t["status"], "SUCCESS", t.get("errors"))
+                self.assertGreater(t["count"], 0)
+                self.assertEqual(set(t["results"][0]), {h for h, _ in QUERY_OUTPUTS[query]})
+
 # ----------------------------------------------------- 3. rules on small frames
 class CalculationRuleTests(SimpleTestCase):
     T1, T2 = "2026-10-27 14:00:00.0", "2026-10-27 14:15:00.0"
@@ -398,27 +447,35 @@ class VoiceKpiViewTests(SimpleTestCase):
     def test_returns_calculated_kpis(self):
         resp = self._get({"kpis": "MGW_NB_ReJ,MGW_CPU", "hours": "2"})
         self.assertEqual(resp.status_code, 200, resp.data)
-        kpis = {b["kpi"]: b for b in resp.data["kpis"]}
-        self.assertEqual(kpis["MGW_NB_ReJ"]["results"],
-                         [{"datetime": "2026-10-27 14:00:00", "node": "MGW1", "value": 0.1}])
-        self.assertEqual(kpis["MGW_CPU"]["results"][0]["value"], 20.0)
+        out = {t["query"]: t for t in resp.data["outputs"]}
+        self.assertEqual(out["MGW_NBREJ_IL"]["results"],
+                         [{"DATETIMEID": "2026-10-27 14:00:00", "MGW": "MGW1", "MGW Rejections": 0.1}])
+        self.assertEqual(out["MGW_CPU_IL"]["results"],
+                         [{"DATETIMEID": "2026-10-27 14:00:00", "MGW": "MGW1", "PMPROCESSORLOAD": 20.0}])
         self.assertEqual([q["query"] for q in resp.data["queries"]], ["MGW_NBREJ_IL", "MGW_CPU_IL"])
         self.assertNotIn("results", resp.data["queries"][0])  # raw rows only with include_data
-        csv = pd.read_csv(resp.data["kpi_csv"])
-        self.assertEqual(list(csv.columns), ["kpi", "unit", "datetime", "node", "value"])
-        self.assertEqual(len(csv), 2)
+        self.assertNotIn("results", resp.data["kpis"][0])     # values live in outputs
+        csv = pd.read_csv(out["MGW_NBREJ_IL"]["csv"])
+        self.assertEqual(list(csv.columns), ["DATETIMEID", "MGW", "MGW Rejections"])
+        self.assertEqual(csv.iloc[0].tolist(), ["2026-10-27 14:00:00", "MGW1", 0.1])
+        self.assertTrue(out["MGW_NBREJ_IL"]["csv"].endswith("MGW_NBREJ_IL_KPI.csv"))
         self.assertTrue(os.path.exists(os.path.join(resp.data["output_dir"], "MGW_NBREJ_IL.csv")))
 
     def test_object_level(self):
         resp = self._get({"kpis": "MGW_NB_ReJ", "level": "object"})
-        rows = resp.data["kpis"][0]["results"]
-        self.assertEqual([(r["VMGW"], r["value"]) for r in rows], [("a", 0.01), ("b", 0.11)])
+        table = resp.data["outputs"][0]
+        self.assertEqual(table["columns"], ["DATETIMEID", "MGW", "VMGW", "MGW Rejections"])
+        self.assertEqual([(r["VMGW"], r["MGW Rejections"]) for r in table["results"]],
+                         [("a", 0.01), ("b", 0.11)])
 
     def test_empty_result_is_success_with_no_rows(self):
         resp = self._get({"kpis": "SBG CFR"})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data["kpis"][0]["status"], "SUCCESS")
-        self.assertEqual(resp.data["kpis"][0]["results"], [])
+        table = resp.data["outputs"][0]
+        self.assertEqual(table["columns"], ["DATETIMEID", "NEID", "SBG CFR"])
+        self.assertEqual(table["results"], [])
+        self.assertEqual(list(pd.read_csv(table["csv"]).columns), ["DATETIMEID", "NEID", "SBG CFR"])
 
     def test_bad_params(self):
         self.assertEqual(self._get({"kpis": "NOT_A_KPI"}).status_code, 400)
@@ -428,6 +485,7 @@ class VoiceKpiViewTests(SimpleTestCase):
         resp = self._get({"kpis": "MGW_LU_IL"})
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data["kpis"], [])
+        self.assertEqual(resp.data["outputs"], [])
         self.assertEqual(resp.data["queries"][0]["query"], "MGW_LU_IL")
 
     def test_connection_failure_fails_kpis(self):
@@ -440,3 +498,5 @@ class VoiceKpiViewTests(SimpleTestCase):
         self.assertEqual(resp.status_code, 500)
         self.assertEqual(resp.data["kpis"][0]["status"], "FAILED")
         self.assertIn("refused", resp.data["kpis"][0]["error"])
+        self.assertEqual(resp.data["outputs"][0]["status"], "FAILED")
+        self.assertIsNone(resp.data["outputs"][0]["csv"])

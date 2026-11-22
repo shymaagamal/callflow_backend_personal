@@ -323,3 +323,66 @@ VOICE_KPI_SPECS = (
 )
 
 VOICE_KPI_SPECS_BY_NAME = {s.name: s for s in VOICE_KPI_SPECS}
+
+
+# Output table per query: the green columns of its sample workbook in
+# Eniq/eniq_Samples/, as (header, source). Sources:
+#     "datetime"   the period (DATETIME_ID)
+#     "node"       the node column of the KPIs of that query
+#     "<label>"    another green dimension (e.g. UTCDATETIMEID)
+#     "kpi:<name>" the calculated value of that KPI. Green raw counters
+#                  (e.g. sbgSipIngressInitRegThrottlingRej) are KPIs of their own,
+#                  so they come out summed / averaged per node like the rest.
+# Headers are the sample's green headers. Exceptions, noted in the response:
+#     MGW_CPU_IL  the sample has no node column in green; MGW is added.
+#     Traffic_MSC_IL  no sample workbook; layout follows the other CNAXE tables.
+# With level=object the sub-object column (MOID, peer, route ...) is added
+# after the node.
+QUERY_OUTPUTS = {
+    "BGF_Packerloss_IL": [("DATETIMEID", "datetime"), ("NODENAME", "node"),
+                          ("Packetloss %", "kpi:BGF PKT LOSS")],
+    "CSSR_CDR_THROTTLING_IL": [("DATETIMEID", "datetime"), ("NEID", "node"),
+                               ("sbgSipIngressInitRegThrottlingRej", "kpi:ThrottlingRej"),
+                               ("sbgSipInitRegThrottlingRejectedCnt", "kpi:ThrottlingRejCNT"),
+                               ("SBG CFR", "kpi:SBG CFR"), ("SBG CDR", "kpi:SBG CDR")],
+    "DSC_ERROR_IL": [("DATETIMEID", "datetime"), ("DSC", "node"),
+                     ("CCINANSNUMOFMSGSEBITSET", "kpi:DSC Error")],
+    "DSC_Throttling_IL": [("DATETIMEID", "datetime"), ("DSC", "node"),
+                          ("CCOUTREQPEERGROUPTHROTTLINGR", "kpi:DSC Throttling")],
+    "IPSTP_PRC_THROTTLING_IL": [("DATETIMEID", "datetime"), ("ELEM", "node"),
+                                ("MSGPERPRC", "kpi:IPSTP PRC MESG")],
+    "MGW_CPU_IL": [("DATETIMEID", "datetime"), ("MGW", "node"),
+                   ("PMPROCESSORLOAD", "kpi:MGW_CPU")],
+    "MGW_NBREJ_IL": [("DATETIMEID", "datetime"), ("MGW", "node"),
+                     ("MGW Rejections", "kpi:MGW_NB_ReJ")],
+    "MGW_PKTLOSS_IL": [("DATETIMEID", "datetime"), ("MGW", "node"),
+                       ("MGW_PKTLOSS", "kpi:MGW_PKTLOSS")],
+    "MSCBC_CPU_IL": [("DATETIMEID", "datetime"), ("ELEM", "node"),
+                     ("MSC_CPLOAD", "kpi:MSC_CPLOAD")],
+    "MGW_LU_UPD_IL": [("DATETIMEID", "datetime"), ("SN", "node"),
+                      ("MSC_Total_LU SR", "kpi:MSC_Total_LU")],
+    "MSC_USERS_IL": [("DATETIMEID", "datetime"), ("SN", "node"),
+                     ("NMMESATSGS", "kpi:MSC_Users")],
+    "SAE_MSC_IL": [("UTCDATETIMEID", "UTCDATETIMEID"), ("SN", "node"),
+                   ("MSC_SAE", "kpi:MSC_SAE")],
+    "SAPC_RX_GX_IL": [("DATETIMEID", "datetime"), ("G3MANAGEDELEMENT", "node"),
+                      ("SAPC GX CCR FR", "kpi:SAPC GX CCR FR"), ("SAPC RX FR", "kpi:SAPC RX FR")],
+    "SBG_CPUUsage_IL": [("DATETIMEID", "datetime"), ("NEID", "node"),
+                        ("SBGAPPLCPUUSAGEMAX", "kpi:SBG CPU Usage")],
+    "SBG_CPU_IL": [("DATETIMEID", "datetime"), ("NEID", "node"),
+                   ("CPULOADTOTAL", "kpi:SBG CPU LOAD")],
+    "SBG_IntialReG_IL": [("DATETIMEID", "datetime"), ("NEID", "node"),
+                         ("SBG Intial REG SR", "kpi:SBG Intial REG SR")],
+    "SBG_SIP_SRVCC_IL": [("DATETIMEID", "datetime"), ("NEID", "node"),
+                         ("SBG SRVCC SR", "kpi:SBG SRVCC SR")],
+    "SBG_Users_IL": [("DATETIMEID", "datetime"), ("NEID", "node"),
+                     ("SBGSGCREGRESCURRENTTOTALREG", "kpi:SBG Total Users")],
+    "Traffic_MSC_IL": [("DATETIMEID", "datetime"), ("SN", "node"),
+                       ("SBG Traffic", "kpi:SBG Traffic")],
+}
+
+QUERY_OUTPUT_NOTES = {
+    "MGW_CPU_IL": "The sample's green columns have no node; MGW was added so rows can be told apart.",
+    "SAE_MSC_IL": "Time is UTCDATETIMEID, as in the sample's green columns.",
+    "Traffic_MSC_IL": "No sample workbook was provided; columns are not confirmed.",
+}
