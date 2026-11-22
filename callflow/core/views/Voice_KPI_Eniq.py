@@ -29,7 +29,11 @@ How the concurrency works
 Optional query params:
     hours         look-back window, int 1..168 (default 7)
     kpis          comma-separated KPI names (e.g. "SBG CFR,MGW_CPU") and/or
-                  query names (all KPIs of that query). Default: all KPIs.
+                  query names. Default: all KPIs. A KPI selects its query, and
+                  the query's whole output table is returned (all its green
+                  columns, e.g. SBG CFR -> DATETIMEID, NEID,
+                  sbgSipIngressInitRegThrottlingRej,
+                  sbgSipInitRegThrottlingRejectedCnt, SBG CFR, SBG CDR).
                   A query name with no KPI (e.g. MGW_LU_IL) still runs and
                   writes its CSV.
     level         "node" (default): one value per node and period, counters
@@ -196,6 +200,10 @@ def _select(requested):
     tokens = [n.strip() for n in requested.split(",") if n.strip()] if requested else []
     specs, unknown = select_specs(tokens)
     names = required_queries(specs)
+    # Every query returns its full output table (all green columns of its
+    # sample), so asking for one KPI also calculates the other KPIs of the
+    # same query, e.g. SBG CFR -> SBG CDR, ThrottlingRej, ThrottlingRejCNT.
+    specs = [s for s in select_specs()[0] if s.query in names]
     # A query name that feeds no KPI (e.g. MGW_LU_IL) is still a valid request.
     by_upper = {q.upper(): q for q in VOICE_KPI_ENIQ_QUERIES}
     still_unknown = []
