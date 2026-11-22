@@ -1,10 +1,15 @@
 """
-Voice KPI extraction from ENIQ (Sybase IQ).
+Voice KPI calculation from ENIQ (Sybase IQ).
 
 GET /callflow/api/voice-kpi-eniq?hours=1
-    Runs every query in constants/voice_kpis_Eniq_Queries.py concurrently and
-    writes one CSV per KPI to
-        OUTPUT_DIR/VOICE/eniq_<YYYYmmdd_HHMMSS>/<KPI_NAME>.csv
+    Runs the ENIQ queries the requested KPIs need (constants/
+    voice_kpis_Eniq_Queries.py) concurrently, calculates every Voice KPI from
+    the returned counters (constants/voice_kpis_Eniq_Formulas.py,
+    services/eniq_voice_kpi_service.py) and returns the KPI values per node
+    and period. Raw counters are not returned unless include_data=true.
+    Files written to OUTPUT_DIR/VOICE/eniq_<YYYYmmdd_HHMMSS>/:
+        <QUERY_NAME>.csv   raw counters, one per query (as before)
+        voice_kpis.csv     all calculated KPI values, one row per KPI/node/time
 
 How the concurrency works
     `workers` threads are started. Each thread opens ONE ENIQ connection and
@@ -20,12 +25,24 @@ How the concurrency works
     all, or the query itself raised an error.
 
 Optional query params:
-    hours         look-back window, int 1..168 (default 1)
-    kpis          comma-separated subset of KPI names (default: all)
+    hours         look-back window, int 1..168 (default 7)
+    kpis          comma-separated KPI names (e.g. "SBG CFR,MGW_CPU") and/or
+                  query names (all KPIs of that query). Default: all KPIs.
+                  A query name with no KPI (e.g. MGW_LU_IL) still runs and
+                  writes its CSV.
+    level         "node" (default): one value per node and period, counters
+                  summed over the node's sub-objects before the formula;
+                  "object": one value per ENIQ row (per plug-in unit, peer ...).
     workers       parallel connections, 1..20 (default 4)
-    include_data  "true" to also return the rows in the response (default false)
+    include_data  "true" to also return the raw query rows (default false)
 
-HTTP 200 if at least one query succeeded, 500 if all failed.
+Response
+    kpis     one block per KPI: status, unit, formula, counter mapping and
+             results [{datetime, node, <other output dims>, value}]
+    queries  one status entry per ENIQ query that was run
+
+HTTP 200 if at least one KPI was calculated (or, when only KPI-less queries
+were requested, at least one query succeeded), 500 otherwise.
 """
 import datetime
 import logging
@@ -42,6 +59,9 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ..constants.voice_kpis_Eniq_Queries import VOICE_KPI_ENIQ_QUERIES
+from ..services.eniq_voice_kpi_service import (
+    LEVELS, calculate_voice_kpis, kpi_blocks_to_frame, required_queries, select_specs,
+)
 from ..utils.connections import EniqConnection
 from ..utils.data_utils import convert_java_types
 
@@ -166,28 +186,46 @@ def _worker(worker_id, jobs, results, out_dir, connect_errors, connected):
         _close(conn)
 
 
+def _select(requested):
+    """KPI specs and query names for the `kpis` param (KPI names and/or query names)."""
+    tokens = [n.strip() for n in requested.split(",") if n.strip()] if requested else []
+    specs, unknown = select_specs(tokens)
+    names = required_queries(specs)
+    # A query name that feeds no KPI (e.g. MGW_LU_IL) is still a valid request.
+    by_upper = {q.upper(): q for q in VOICE_KPI_ENIQ_QUERIES}
+    still_unknown = []
+    for token in unknown:
+        q = by_upper.get(token.upper())
+        if q is None:
+            still_unknown.append(token)
+        elif q not in names:
+            names.append(q)
+    if still_unknown:
+        kpi_names = [s.name for s in select_specs()[0]]
+        raise ValueError(
+            f"Unknown KPI(s) or query(s): {still_unknown}. "
+            f"KPIs: {kpi_names}. Queries: {sorted(VOICE_KPI_ENIQ_QUERIES)}"
+        )
+    missing = [q for q in names if q not in VOICE_KPI_ENIQ_QUERIES]
+    if missing:  # a KPI spec points at a query that is not defined
+        raise ValueError(f"No ENIQ query defined for: {missing}")
+    return specs, names
+
+
 class SybaseQueryView(APIView):
-    """Run all Voice KPI ENIQ queries concurrently and save one CSV each."""
+    """Run the Voice KPI ENIQ queries concurrently and return the calculated KPIs."""
 
     def get(self, request):
         try:
-            print("request.query_params", request.query_params)
             hours = _int_param(request.query_params.get("hours"),
                                DEFAULT_HOURS, 1, MAX_HOURS, "hours")
             workers = _int_param(request.query_params.get("workers"),
                                  DEFAULT_WORKERS, 1, MAX_WORKERS, "workers")
             include_data = str(request.query_params.get("include_data", "")).lower() in ("1", "true", "yes")
-
-            requested = request.query_params.get("kpis")
-            if requested:
-                names = [n.strip() for n in requested.split(",") if n.strip()]
-                unknown = [n for n in names if n not in VOICE_KPI_ENIQ_QUERIES]
-                if unknown:
-                    raise ValueError(
-                        f"Unknown KPI(s): {unknown}. Available: {sorted(VOICE_KPI_ENIQ_QUERIES)}"
-                    )
-            else:
-                names = list(VOICE_KPI_ENIQ_QUERIES)
+            level = str(request.query_params.get("level") or "node").lower()
+            if level not in LEVELS:
+                raise ValueError(f"'level' must be one of {list(LEVELS)}")
+            specs, names = _select(request.query_params.get("kpis"))
         except ValueError as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -217,20 +255,43 @@ class SybaseQueryView(APIView):
         # Queries no worker could pick up (every connection attempt failed).
         conn_error = connect_errors[-1] if connect_errors else "not executed"
         ordered = []
+        frames, query_errors = {}, {}
         for name in names:
             res = results.get(name) or {
                 "kpi": name, "status": "FAILED",
                 "error": f"No ENIQ connection: {conn_error}", "duration_s": 0,
             }
+            res = {"query": res.pop("kpi", name), **res}
             df = res.pop("_df", None)
+            if df is not None:
+                frames[name] = df
+            else:
+                query_errors[name] = res.get("error", "failed")
             if include_data and df is not None:
                 res["results"] = df.to_dict(orient="records")
             ordered.append(res)
 
+        kpi_blocks = calculate_voice_kpis(frames, specs=specs, level=level,
+                                          query_errors=query_errors)
+        kpi_csv = None
+        try:
+            kpi_df = kpi_blocks_to_frame(kpi_blocks)
+            kpi_csv = os.path.join(out_dir, "voice_kpis.csv")
+            kpi_df.to_csv(kpi_csv, index=False)
+        except Exception as e:
+            logger.error("[ENIQ] writing voice_kpis.csv failed: %s", e, exc_info=True)
+            kpi_csv = None
+
         succeeded = sum(1 for r in ordered if r["status"] == "SUCCESS")
+        kpis_ok = sum(1 for b in kpi_blocks if b["status"] == "SUCCESS")
         body = {
             "hours": hours,
+            "level": level,
             "output_dir": out_dir,
+            "kpi_csv": kpi_csv,
+            "total_kpis": len(kpi_blocks),
+            "kpis_succeeded": kpis_ok,
+            "kpis_failed": len(kpi_blocks) - kpis_ok,
             "total": len(ordered),
             "succeeded": succeeded,
             "failed": len(ordered) - succeeded,
@@ -238,7 +299,9 @@ class SybaseQueryView(APIView):
             "workers_connected": len(connected),
             "connect_errors": sorted(set(connect_errors)),
             "duration_s": round(time.monotonic() - started, 2),
-            "kpis": ordered,
+            "kpis": kpi_blocks,
+            "queries": ordered,
         }
-        http_status = status.HTTP_200_OK if succeeded else status.HTTP_500_INTERNAL_SERVER_ERROR
+        ok = kpis_ok if kpi_blocks else succeeded
+        http_status = status.HTTP_200_OK if ok else status.HTTP_500_INTERNAL_SERVER_ERROR
         return Response(body, status=http_status)

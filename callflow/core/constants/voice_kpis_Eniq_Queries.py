@@ -1,63 +1,56 @@
 """
 Voice KPI queries executed against ENIQ (Sybase IQ) by
-callflow.core.views.Voice_KPI_Eniq.VoiceKpiEniqView.
+callflow.core.views.Voice_KPI_Eniq.SybaseQueryView.
 
 Each query is a template with one placeholder, {hours}: the look-back window
 (DATETIME_ID >= now - hours). The view formats it with a validated int.
 
-Source: one .txt file per KPI in voiceKpi/ (key = file name without .txt).
-Fixes applied while moving them here:
-  - unbalanced "(" before the DATETIME_ID filter removed (13 queries)
+Source: the updated queries in Eniq/Eniq_Queries/ (key = file name without
+.txt). Their SELECT lists are copied unchanged, so the column labels ENIQ
+returns are exactly the ones in those files (aliases where an AS is given,
+the raw counter name, e.g. "sbgSipChallengedIncInvSessions", where it is not).
+The KPI formulas that read these columns are in voice_kpis_Eniq_Formulas.py.
+
+Fixes applied while moving them here (the SELECT lists are not touched):
+  - unbalanced "(" before the DATETIME_ID filter removed
   - IPSTP_PRC_THROTTLING_IL: "AND MOID=.. OR MOID=.." returned every row of
     the table for 3 of the 4 PRCs (AND binds before OR) and had a stray ")";
     now "AND MOID IN (...)"
-  - tables qualified with the dcpublic schema, as in the original view
+  - tables qualified with the dcpublic schema, as in the previous version
+  - the hard-coded 1-hour window replaced by {hours}
 """
-
-VOICE_KPI_ENIQ_QUERIES = {
-    "BGF_Packerloss_IL": """SELECT
+BGF_Packerloss_IL= """SELECT
    D1."BgfNetwork" AS "BGFNETWORK",
    D1."DATETIME_ID" AS "DATETIMEID",
+   D1."HOUR_ID" AS "HOURID",
+   D1."MIN_ID" AS "MINID",
    D1."NODE_NAME" AS "NODENAME",
    D1."rtpLostPackets" AS "RTPLOSTPACKETS",
    D1."rtpReceivedPackets" AS "RTPRECEIVEDPACKETS"
 FROM
    dcpublic.DC_E_MRS_BGF_BGFREALM_RAW D1
 WHERE
-   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())""",
+   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())"""
 
-    "CSSR_CDR_THROTTLING_IL": """SELECT
-   D1."BLADESYSTEMID" AS "BLADESYSTEMID",
+CSSR_CDR_THROTTLING_IL= """SELECT
    D1."DATETIME_ID" AS "DATETIMEID",
    D1."DNPREFIX" AS "DNPREFIX",
-   D1."Identifier" AS "IDENTIFIER",
-   D1."MOID" AS "MOID",
+   D1."HOUR_ID" AS "HOURID",
    D1."NE_ID" AS "NEID",
-   D1."NEDN" AS "NEDN",
-   D1."OBJ_ID" AS "OBJID",
-   D1."sbgSipChallengedIncInvSessions" AS "SBGSIPCHALLENGEDINCINVSESSIO",
-   D1."sbgSipIngressInitRegThrottlingRej" AS "SBGSIPINGRESSINITREGTHROTTLI",
-   D1."sbgSipInitiatedSessionRelease" AS "SBGSIPINITIATEDSESSIONRELEAS",
-   D1."sbgSipInitRegThrottlingRejectedCnt" AS "SBGSIPINITREGTHROTTLINGREJEC",
-   D1."sbgSipNetIncSessionEstabNetworkSuccess" AS "SBGSIPNETINCSESSIONESTABNETW",
-   D1."sbgSipNetIncSessionSetupTime" AS "SBGSIPNETINCSESSIONSETUPTIME",
-   D1."sbgSipNetIncSessionSetupUserSuccess" AS "SBGSIPNETINCSESSIONSETUPUSER",
-   D1."sbgSipNetOutSessionEstabNetworkSuccess" AS "SBGSIPNETOUTSESSIONESTABNETW",
-   D1."sbgSipNetOutSessionSetupTime" AS "SBGSIPNETOUTSESSIONSETUPTIME",
-   D1."sbgSipNetOutSessionSetupUserSuccess" AS "SBGSIPNETOUTSESSIONSETUPUSER",
-   D1."sbgSipRejectedIncAlertingSessions488" AS "SBGSIPREJECTEDINCALERTINGSES",
-   D1."sbgSipRejectedIncPreAlertingSessions488" AS "SBGSIPREJECTEDINCPREALERTING",
-   D1."sbgSipSessionIncNormalRelease" AS "SBGSIPSESSIONINCNORMALRELEAS",
-   D1."sbgSipSessionOutNormalRelease" AS "SBGSIPSESSIONOUTNORMALRELEAS",
-   D1."sbgSipSuccessIncSessions" AS "SBGSIPSUCCESSINCSESSIONS",
-   D1."sbgSipTotalIncSessSetups" AS "SBGSIPTOTALINCSESSSETUPS",
-   D1."sbgSipTotalOutSessSetups" AS "SBGSIPTOTALOUTSESSSETUPS"
+   D1."sbgSipChallengedIncInvSessions",
+   D1."sbgSipNetIncSessionEstabNetworkSuccess",
+   D1."sbgSipInitiatedSessionRelease",
+   D1."sbgSipSessionIncNormalRelease",
+   D1."sbgSipSessionOutNormalRelease",
+   D1."sbgSipIngressInitRegThrottlingRej",
+   D1."sbgSipInitRegThrottlingRejectedCnt",
+   D1."sbgSipTotalIncSessSetups" AS "SBGSIPTOTALINCSESSSETUPS"
 FROM
    dcpublic.DC_E_IMSSBG_SIP_RAW D1
 WHERE
-   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())""",
+   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())"""  
 
-    "DSC_ERROR_IL": """SELECT
+DSC_ERROR_IL="""SELECT
    D1."DATETIME_ID" AS "DATETIMEID",
    D1."CC_IN_ANS_HBH_ID_NOT_MATCHED" AS "CCINANSHBHIDNOTMATCHED",
    D1."CC_IN_ANS_HX" AS "CCINANSHX",
@@ -144,6 +137,7 @@ WHERE
    D1."CC_OUT_REQ_UNABLE_TO_DELIVER" AS "CCOUTREQUNABLETODELIVER",
    D1."CC_ROUTING_MSG_DROPPED" AS "CCROUTINGMSGDROPPED",
    D1."CC_ROUTING_MSG_REJECTED" AS "CCROUTINGMSGREJECTED",
+   D1."DAY_ID" AS "DAYID",
    D1."DSC" AS "DSC",
    D1."DscAdjacentRealm" AS "DSCADJACENTREALM",
    D1."DscAdjacentRealms" AS "DSCADJACENTREALMS",
@@ -155,14 +149,18 @@ WHERE
    D1."GC_NUM_OF_UNANSWERED_TRANSACTIONS" AS "GCNUMOFUNANSWEREDTRANSACTION",
    D1."GC_PEER_AVG_RTT" AS "GCPEERAVGRTT",
    D1."GC_PEER_MAX_RTT" AS "GCPEERMAXRTT",
+   D1."HOUR_ID" AS "HOURID",
+   D1."MIN_ID" AS "MINID",
    D1."MOID" AS "MOID",
+   D1."MONTH_ID" AS "MONTHID",
    D1."OSS_ID" AS "OSSID"
 FROM
    dcpublic.DC_E_DSC_DSCREMOTEPEER_RAW D1
 WHERE
-   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())""",
+   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())"""
 
-    "DSC_Throttling_IL": """SELECT
+
+DSC_Throttling_IL= """SELECT
    D1."CC_OUT_REQ_PEER_GROUP_DOIC_THROTTLING_REJECTED" AS "CCOUTREQPEERGROUPDOICTHROTTL",
    D1."CC_OUT_REQ_PEER_GROUP_THROTTLING_REJECTED" AS "CCOUTREQPEERGROUPTHROTTLINGR",
    D1."DATETIME_ID" AS "DATETIMEID",
@@ -171,36 +169,47 @@ WHERE
    D1."DscNode" AS "DSCNODE",
    D1."DscNodes" AS "DSCNODES",
    D1."DscPeerGroup" AS "DSCPEERGROUP",
+   D1."HOUR_ID" AS "HOURID",
    D1."DscPeerGroups" AS "DSCPEERGROUPS",
+   D1."MIN_ID" AS "MINID",
    D1."MOID" AS "MOID"
 FROM
    dcpublic.DC_E_DSC_PEERGRP_RAW D1
 WHERE
-   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())""",
+   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())"""
 
-    "IPSTP_PRC_THROTTLING_IL": """SELECT
+
+
+IPSTP_PRC_THROTTLING_IL="""SELECT
+   D1."BATCH_ID" AS "BATCHID",
    D1."DATETIME_ID" AS "DATETIMEID",
    D1."DC_RELEASE" AS "DCRELEASE",
    D1."DC_SOURCE" AS "DCSOURCE",
    D1."DC_SUSPECTFLAG" AS "DCSUSPECTFLAG",
    D1."DC_TIMEZONE" AS "DCTIMEZONE",
    D1."ELEM" AS "ELEM",
+   D1."HOUR_ID" AS "HOURID",
+   D1."MIN_ID" AS "MINID",
    D1."MOID" AS "MOID",
    D1."MSGPERPRC" AS "MSGPERPRC",
    D1."OSS_ID" AS "OSSID",
+   D1."RECORDTYPE" AS "RECORDTYPE",
    D1."ROWSTATUS" AS "ROWSTATUS",
+   D1."SESSION_ID" AS "SESSIONID",
    D1."SN" AS "SN",
    D1."STATISTICS_TYPE" AS "STATISTICSTYPE"
 FROM
    dcpublic.DC_E_CNAXE_C7SCPOLRES_RAW D1
 WHERE
    D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())
-   AND D1."MOID" IN ('PRC600-', 'PRC601-', 'PRC575-', 'PRC578-')""",
+   AND D1."MOID" IN ('PRC600-', 'PRC601-', 'PRC575-', 'PRC578-')"""
 
-    "MGW_CPU_IL": """SELECT
+MGW_CPU_IL = """SELECT
    D1."DATETIME_ID" AS "DATETIMEID",
    D1."Equipment" AS "EQUIPMENT",
+   D1."HOUR_ID" AS "HOURID",
    D1."MGW" AS "MGW",
+   D1."MIN_ID" AS "MINID",
    D1."MOID" AS "MOID",
    D1."NEUN" AS "NEUN",
    D1."PlugInUnit" AS "PLUGINUNIT",
@@ -210,9 +219,9 @@ WHERE
 FROM
    dcpublic.DC_E_MGW_PLUGINUNIT_RAW D1
 WHERE
-   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())""",
+   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())"""
 
-    "MGW_LU_IL": """SELECT
+MGW_LU_IL= """SELECT
    D1."CSFB_NFEXPPAGCSFB" AS "CSFBNFEXPPAGCSFB",
    D1."CSFB_NFREJPAGCSFB" AS "CSFBNFREJPAGCSFB",
    D1."CSFB_NSPAG1CSFB" AS "CSFBNSPAG1CSFB",
@@ -228,8 +237,11 @@ WHERE
    D1."DC_SOURCE" AS "DCSOURCE",
    D1."DC_TIMEZONE" AS "DCTIMEZONE",
    D1."ELEM" AS "ELEM",
+   D1."HOUR_ID" AS "HOURID",
+   D1."MIN_ID" AS "MINID",
    D1."MOID" AS "MOID",
    D1."OSS_ID" AS "OSSID",
+   D1."RECORDTYPE" AS "RECORDTYPE",
    D1."ROWSTATUS" AS "ROWSTATUS",
    D1."SGS_NSPAG1SGS" AS "SGSNSPAG1SGS",
    D1."SGS_NSPAG2SGS" AS "SGSNSPAG2SGS",
@@ -243,11 +255,15 @@ WHERE
 FROM
    dcpublic.DC_E_CNAXE_SGCSFB_RAW D1
 WHERE
-   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())""",
+   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())"""
 
-    "MGW_LU_UPD_IL": """SELECT
+MGW_LU_UPD_IL = """SELECT
+   D1."DATE_ID" AS "DATEID",
    D1."DATETIME_ID" AS "DATETIMEID",
+   D1."DAY_ID" AS "DAYID",
    D1."ELEM" AS "ELEM",
+   D1."HOUR_ID" AS "HOURID",
+   D1."MIN_ID" AS "MINID",
    D1."MOID" AS "MOID",
    D1."NLALIOSUCC" AS "NLALIOSUCC",
    D1."NLALIOTOT" AS "NLALIOTOT",
@@ -266,11 +282,13 @@ WHERE
 FROM
    dcpublic.DC_E_CNAXE_LOCAREAST_RAW D1
 WHERE
-   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())""",
+   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())"""
 
-    "MGW_NBREJ_IL": """SELECT
+MGW_NBREJ_IL = """SELECT
    D1."DATETIME_ID" AS "DATETIMEID",
+   D1."HOUR_ID" AS "HOURID",
    D1."MGW" AS "MGW",
+   D1."MIN_ID" AS "MINID",
    D1."MOID" AS "MOID",
    D1."pmNrOfAal2TermsRej" AS "PMNROFAAL2TERMSREJ",
    D1."pmNrOfAal2TermsReq" AS "PMNROFAAL2TERMSREQ",
@@ -282,12 +300,14 @@ WHERE
 FROM
    dcpublic.DC_E_MGW_VMGW_RAW D1
 WHERE
-   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())""",
+   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())"""
 
-    "MGW_PKTLOSS_IL": """SELECT
+MGW_PKTLOSS_IL="""SELECT
    D1."DATETIME_ID" AS "DATETIMEID",
+   D1."HOUR_ID" AS "HOURID",
    D1."IpNetwork" AS "IPNETWORK",
    D1."MGW" AS "MGW",
+   D1."MIN_ID" AS "MINID",
    D1."MOID" AS "MOID",
    D1."pmRtpLostPkts" AS "PMRTPLOSTPKTS",
    D1."pmRtpReceivedPktsHi" AS "PMRTPRECEIVEDPKTSHI",
@@ -297,42 +317,51 @@ WHERE
 FROM
    dcpublic.DC_E_MGW_REMOTESITE_RAW D1
 WHERE
-   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())""",
-
-    "MSC_USERS_IL": """SELECT
+   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())"""
+MSC_USERS_IL ="""SELECT
    D1."DATETIME_ID" AS "DATETIMEID",
    D1."ELEM" AS "ELEM",
+   D1."HOUR_ID" AS "HOURID",
+   D1."MIN_ID" AS "MINID",
    D1."NMMESATSGS" AS "NMMESATSGS",
    D1."SN" AS "SN"
 FROM
    dcpublic.DC_E_CNAXE_MMESTAT_RAW D1
 WHERE
-   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())""",
+   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())"""
 
-    "MSCBC_CPU_IL": """SELECT
+MSCBC_CPU_IL= """SELECT
    D1."DATETIME_ID" AS "DATETIMEID",
    D1."ELEM" AS "ELEM",
+   D1."HOUR_ID" AS "HOURID",
    D1."LOAS_ACCLOAD" AS "LOASACCLOAD",
    D1."LOAS_NSCAN" AS "LOASNSCAN",
+   D1."MIN_ID" AS "MINID",
    D1."SN" AS "SN"
 FROM
    dcpublic.DC_E_CMN_STS_TOT_RAW D1
 WHERE
-   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())""",
+   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())"""
 
-    "SAE_MSC_IL": """SELECT
+SAE_MSC_IL= """SELECT
+   D1."BATCH_ID" AS "BATCHID",
    D1."BLOCK" AS "BLOCK",
    D1."BLOCK_NO" AS "BLOCKNO",
    D1."BLOCK_SAE" AS "BLOCKSAE",
+   D1."DATE_ID" AS "DATEID",
    D1."DATETIME_ID" AS "DATETIMEID",
+   D1."DAY_ID" AS "DAYID",
    D1."DC_RELEASE" AS "DCRELEASE",
    D1."DC_SOURCE" AS "DCSOURCE",
    D1."DC_SUSPECTFLAG" AS "DCSUSPECTFLAG",
    D1."DC_TIMEZONE" AS "DCTIMEZONE",
    D1."ELEM" AS "ELEM",
+   D1."HOUR_ID" AS "HOURID",
    D1."ID1" AS "ID1",
    D1."ID2" AS "ID2",
+   D1."MIN_ID" AS "MINID",
    D1."MOID" AS "MOID",
+   D1."MONTH_ID" AS "MONTHID",
    D1."NCALLS" AS "NCALLS",
    D1."NIND" AS "NIND",
    D1."NOVERFLOW" AS "NOVERFLOW",
@@ -344,15 +373,19 @@ WHERE
    D1."ROWSTATUS" AS "ROWSTATUS",
    D1."SAE" AS "SAE",
    D1."SAE_ID" AS "SAEID",
+   D1."SESSION_ID" AS "SESSIONID",
    D1."SN" AS "SN",
    D1."STATISTICS_TYPE" AS "STATISTICSTYPE",
-   D1."UTC_DATETIME_ID" AS "UTCDATETIMEID"
+   D1."TIMELEVEL" AS "TIMELEVEL",
+   D1."UTC_DATETIME_ID" AS "UTCDATETIMEID",
+   D1."YEAR_ID" AS "YEARID"
 FROM
    dcpublic.DC_E_CNAXE_SAE_RAW D1
 WHERE
-   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())""",
+   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())"""
 
-    "SAPC_RX_GX_IL": """SELECT
+SAPC_RX_GX_IL = """SELECT
+   D1."DATE_ID" AS "DATEID",
    D1."DATETIME_ID" AS "DATETIMEID",
    D1."g3ManagedElement" AS "G3MANAGEDELEMENT",
    D1."g3SubNetwork" AS "G3SUBNETWORK",
@@ -364,6 +397,8 @@ WHERE
    D1."GxxPdpActivatesSuccess" AS "GXXPDPACTIVATESSUCCESS",
    D1."GxxPdpActivatesUnableToComply" AS "GXXPDPACTIVATESUNABLETOCOMPL",
    D1."GxxResponsesSent" AS "GXXRESPONSESSENT",
+   D1."HOUR_ID" AS "HOURID",
+   D1."MIN_ID" AS "MINID",
    D1."MOID" AS "MOID",
    D1."OSS_ID" AS "OSSID",
    D1."rxAaasAfSignallingSuccess" AS "RXAAASAFSIGNALLINGSUCCESS",
@@ -387,28 +422,35 @@ WHERE
 FROM
    dcpublic.DC_E_SAPC_SAPC_RAW D1
 WHERE
-   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())""",
+   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())"""
 
-    "SBG_CPU_IL": """SELECT
+SBG_CPU_IL= """SELECT
    D1."BLADESYSTEMID" AS "BLADESYSTEMID",
    D1."CPULoad_Total" AS "CPULOADTOTAL",
    D1."DATETIME_ID" AS "DATETIMEID",
    D1."Disk_PercentUsed" AS "DISKPERCENTUSED",
    D1."DNPREFIX" AS "DNPREFIX",
+   D1."HOUR_ID" AS "HOURID",
    D1."Mem_PercentUsed" AS "MEMPERCENTUSED",
+   D1."MIN_ID" AS "MINID",
    D1."MOID" AS "MOID",
    D1."NE_ID" AS "NEID",
    D1."NEDN" AS "NEDN",
-   D1."OBJ_ID" AS "OBJID"
+   D1."OBJ_ID" AS "OBJID",
+   D1."SESSION_ID" AS "SESSIONID"
 FROM
    dcpublic.DC_E_IMSSBG_OSPROCESSINGUNIT_RAW D1
 WHERE
-   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())""",
+   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())"""
 
-    "SBG_CPUUsage_IL": """SELECT
+SBG_CPUUsage_IL="""SELECT
    D1."DATETIME_ID" AS "DATETIMEID",
+   D1."DAY_ID" AS "DAYID",
    D1."DNPREFIX" AS "DNPREFIX",
+   D1."HOUR_ID" AS "HOURID",
+   D1."MIN_ID" AS "MINID",
    D1."MOID" AS "MOID",
+   D1."MONTH_ID" AS "MONTHID",
    D1."NE_ID" AS "NEID",
    D1."NEDN" AS "NEDN",
    D1."OBJ_ID" AS "OBJID",
@@ -418,81 +460,52 @@ WHERE
 FROM
    dcpublic.DC_E_IMSSBG_VIRTUAL_RESUTIL_RAW D1
 WHERE
-   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())""",
+   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())"""
 
-    "SBG_IntialReG_IL": """SELECT
+SBG_IntialReG_IL = """SELECT
    D1."DATETIME_ID" AS "DATETIMEID",
-   D1."MOID" AS "MOID",
+   D1."HOUR_ID" AS "HOURID",
    D1."NE_ID" AS "NEID",
-   D1."NEDN" AS "NEDN",
-   D1."sbgInitRegTime" AS "SBGINITREGTIME",
    D1."sbgSipRegStatInitialAccCnt" AS "SBGSIPREGSTATINITIALACCCNT",
    D1."sbgSipRegStatInitialAttCnt" AS "SBGSIPREGSTATINITIALATTCNT",
-   D1."sbgSipRegStatRejInitialRegCnt400" AS "SBGSIPREGSTATREJINITIALREGCN1",
-   D1."sbgSipRegStatRejInitialRegCnt403" AS "SBGSIPREGSTATREJINITIALREGCN2",
-   D1."sbgSipRegStatRejInitialRegCnt404" AS "SBGSIPREGSTATREJINITIALREGCN3",
-   D1."sbgSipRegStatRejReRegCnt400" AS "SBGSIPREGSTATREJREREGCNT400",
-   D1."sbgSipRegStatRejReRegCnt403" AS "SBGSIPREGSTATREJREREGCNT403",
-   D1."sbgSipRegStatReRegAccCnt" AS "SBGSIPREGSTATREREGACCCNT",
-   D1."sbgSipRegStatReRegAttCnt" AS "SBGSIPREGSTATREREGATTCNT"
+   D1."sbgSipRegStatRejInitialRegCnt400",
+   D1."sbgSipRegStatRejInitialRegCnt403",
+   D1."sbgSipRegStatRejInitialRegCnt404"
 FROM
    dcpublic.DC_E_IMSSBG_PROXYREGISTRAR_RAW D1
 WHERE
-   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())""",
+   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())"""
 
-    "SBG_SIP_SRVCC_IL": """SELECT
-   D1."BLADESYSTEMID" AS "BLADESYSTEMID",
+SBG_SIP_SRVCC_IL= """SELECT
    D1."DATETIME_ID" AS "DATETIMEID",
-   D1."DNPREFIX" AS "DNPREFIX",
-   D1."Identifier" AS "IDENTIFIER",
-   D1."MOID" AS "MOID",
    D1."NE_ID" AS "NEID",
-   D1."NEDN" AS "NEDN",
-   D1."OBJ_ID" AS "OBJID",
-   D1."sbgSipChallengedIncInvSessions" AS "SBGSIPCHALLENGEDINCINVSESSIO",
-   D1."sbgSipIngressInitRegThrottlingRej" AS "SBGSIPINGRESSINITREGTHROTTLI",
-   D1."sbgSipInitiatedSessionRelease" AS "SBGSIPINITIATEDSESSIONRELEAS",
-   D1."sbgSipInitRegThrottlingRejectedCnt" AS "SBGSIPINITREGTHROTTLINGREJEC",
-   D1."sbgSipNetIncSessionEstabNetworkSuccess" AS "SBGSIPNETINCSESSIONESTABNETW",
-   D1."sbgSipNetIncSessionSetupTime" AS "SBGSIPNETINCSESSIONSETUPTIME",
-   D1."sbgSipNetIncSessionSetupUserSuccess" AS "SBGSIPNETINCSESSIONSETUPUSER",
-   D1."sbgSipNetOutSessionEstabNetworkSuccess" AS "SBGSIPNETOUTSESSIONESTABNETW",
-   D1."sbgSipNetOutSessionSetupTime" AS "SBGSIPNETOUTSESSIONSETUPTIME",
-   D1."sbgSipNetOutSessionSetupUserSuccess" AS "SBGSIPNETOUTSESSIONSETUPUSER",
-   D1."sbgSipRejectedIncAlertingSessions488" AS "SBGSIPREJECTEDINCALERTINGSES",
-   D1."sbgSipRejectedIncPreAlertingSessions488" AS "SBGSIPREJECTEDINCPREALERTING",
-   D1."sbgSipSessionIncNormalRelease" AS "SBGSIPSESSIONINCNORMALRELEAS",
-   D1."sbgSipSessionOutNormalRelease" AS "SBGSIPSESSIONOUTNORMALRELEAS",
+   D1."sbgSipRejectedIncAlertingSessions488",
+   D1."sbgSipRejectedIncPreAlertingSessions488",
    D1."sbgSipSuccessIncSessions" AS "SBGSIPSUCCESSINCSESSIONS",
-   D1."sbgSipTotalIncSessSetups" AS "SBGSIPTOTALINCSESSSETUPS",
-   D1."sbgSipTotalOutSessSetups" AS "SBGSIPTOTALOUTSESSSETUPS"
+   D1."sbgSipTotalIncSessSetups" AS "SBGSIPTOTALINCSESSSETUPS"
 FROM
    dcpublic.DC_E_IMSSBG_SIP_RAW D1
 WHERE
-   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())""",
+   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())"""
 
-    "SBG_Users_IL": """SELECT
+SBG_Users_IL= """SELECT
    D1."DATETIME_ID" AS "DATETIMEID",
    D1."DNPREFIX" AS "DNPREFIX",
-   D1."MOID" AS "MOID",
+   D1."HOUR_ID" AS "HOURID",
    D1."NE_ID" AS "NEID",
-   D1."NEDN" AS "NEDN",
-   D1."OBJ_ID" AS "OBJID",
-   D1."sbgCurrentTotalLocalRegUsers" AS "SBGCURRENTTOTALLOCALREGUSERS",
-   D1."sbgNumberOfActiveEmergencySessions" AS "SBGNUMBEROFACTIVEEMERGENCYSE",
-   D1."sbgNumberOfActivePrioritySessions" AS "SBGNUMBEROFACTIVEPRIORITYSES",
-   D1."sbgSgcRegResCurrentTotalReg" AS "SBGSGCREGRESCURRENTTOTALREG",
-   D1."sbgSgcRegResMaxRegUsers" AS "SBGSGCREGRESMAXREGUSERS",
-   D1."sbgSgcRegResNumberOfActiveSessions" AS "SBGSGCREGRESNUMBEROFACTIVESE",
-   D1."sbgSgcRegResNumberOfActiveSubscribeSessions" AS "SBGSGCREGRESNUMBEROFACTIVESU"
+   D1."sbgSgcRegResCurrentTotalReg" AS "SBGSGCREGRESCURRENTTOTALREG"
 FROM
    dcpublic.DC_E_IMSSBG_SGC_RAW D1
 WHERE
-   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())""",
+   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())"""
 
-    "Traffic_MSC_IL": """SELECT
+
+Traffic_MSC_IL =  """SELECT
+   D1."DATE_ID" AS "DATEID",
    D1."DATETIME_ID" AS "DATETIMEID",
    D1."ELEM" AS "ELEM",
+   D1."HOUR_ID" AS "HOURID",
+   D1."MIN_ID" AS "MINID",
    D1."MOID" AS "MOID",
    D1."NANSWERSI" AS "NANSWERSI",
    D1."NANSWERSO" AS "NANSWERSO",
@@ -507,6 +520,29 @@ WHERE
 FROM
    dcpublic.DC_E_CNAXE_TRUNKROUTE_RAW D1
 WHERE
-   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())""",
+   D1."DATETIME_ID" >= dateadd(hour, -{hours}, getdate())"""
+
+
+VOICE_KPI_ENIQ_QUERIES = {
+    "BGF_Packerloss_IL": BGF_Packerloss_IL,
+    "CSSR_CDR_THROTTLING_IL": CSSR_CDR_THROTTLING_IL,
+    "DSC_ERROR_IL": DSC_ERROR_IL,
+    "DSC_Throttling_IL": DSC_Throttling_IL,
+    "IPSTP_PRC_THROTTLING_IL": IPSTP_PRC_THROTTLING_IL,
+    "MGW_CPU_IL": MGW_CPU_IL,
+    "MGW_LU_IL": MGW_LU_IL,
+    "MGW_LU_UPD_IL": MGW_LU_UPD_IL,
+    "MGW_NBREJ_IL": MGW_NBREJ_IL,
+    "MGW_PKTLOSS_IL": MGW_PKTLOSS_IL,
+    "MSC_USERS_IL": MSC_USERS_IL,
+    "MSCBC_CPU_IL": MSCBC_CPU_IL,
+    "SAE_MSC_IL": SAE_MSC_IL,
+    "SAPC_RX_GX_IL": SAPC_RX_GX_IL,
+    "SBG_CPU_IL": SBG_CPU_IL,
+    "SBG_CPUUsage_IL": SBG_CPUUsage_IL,
+    "SBG_IntialReG_IL": SBG_IntialReG_IL,
+    "SBG_SIP_SRVCC_IL": SBG_SIP_SRVCC_IL,
+    "SBG_Users_IL":SBG_Users_IL,
+    "Traffic_MSC_IL": Traffic_MSC_IL,
 
 }
