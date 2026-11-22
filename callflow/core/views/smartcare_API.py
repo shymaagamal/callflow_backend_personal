@@ -12,7 +12,7 @@ from callflow_portal import settings
 from .base import BaseCallFlowAPIView
 from ..services.smartcare_service import fetch_smartcare_nodes_data
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('testingAPI_logs')
 
 class SmartcareAPIView(BaseCallFlowAPIView):
     def post(self, request):
@@ -30,7 +30,7 @@ class SmartcareAPIView(BaseCallFlowAPIView):
                 start_dt,
                 end_dt,
                 complain_type,
-                log_path=os.path.join(settings.LOG_DIR, "smartcare_api.log")
+                log_path=os.path.join(settings.OUTPUT_DIR, "smartcare_api.log")
             )
             result=payload["processed_data"]
 

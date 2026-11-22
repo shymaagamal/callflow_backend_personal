@@ -205,4 +205,4 @@ def aggregate_voice(nodes, ctx, export=None):
               base_rows=0 if base is None else len(base),
               unavailable=",".join(m.unavailable) or "none",
               **{f"n_{k}": len(v) for k, v in out.items()})
-    return out, list(out["Suspected_Cells"].keys())
+    return out, list(out["Suspected_Cells"].keys())

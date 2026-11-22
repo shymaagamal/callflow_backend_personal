@@ -248,11 +248,11 @@ def sync_wait_timeout_s() -> float:
 
 def max_concurrent() -> int:
     """Jobs allowed to run at once across ALL processes (= Smartcare sessions)."""
-    return max(1, _int("MI_MAX_CONCURRENT", 1))
+    return max(1, _int("MI_MAX_CONCURRENT",3))
 
 
 def slot_wait_s() -> float:
-    return _float("MI_SLOT_WAIT_S", 3600.0)
+    return _float("MI_SLOT_WAIT_S", 300.0)
 
 
 def max_queued_jobs() -> int:
@@ -279,7 +279,7 @@ def job_ttl_s() -> int:
 # query_plan.py (per request) and jobs.datacube_* (all requests).
 def max_queries_per_request() -> int:
     """Hard cap on query executions (first attempts + retries, Data + Voice) per MI submission."""
-    return max(1, _int("MI_MAX_QUERIES_PER_REQUEST", 12))
+    return max(1, _int("MI_MAX_QUERIES_PER_REQUEST", 15))
 
 
 def union_day_tables() -> bool:
@@ -311,7 +311,7 @@ def datacube_session_budget() -> int:
     check). Keep it below the account's 100: other tools on the same account
     are not visible to MI.
     """
-    return _int("MI_DATACUBE_SESSION_BUDGET", 60)
+    return _int("MI_DATACUBE_SESSION_BUDGET", 100)
 
 
 def datacube_session_ttl_s() -> int:

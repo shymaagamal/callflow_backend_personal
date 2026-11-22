@@ -162,6 +162,7 @@ def connect():
         "password": str(password),
         "socketTimeout": str(config.socket_timeout_ms()),
         "connectTimeout": str(config.connect_timeout_ms()),
+        "timeout": "1800",
     }
     conn = jaydebeapi.connect(config.smartcare_jdbc_driver(), config.smartcare_jdbc_url(), props, jar)
     try:

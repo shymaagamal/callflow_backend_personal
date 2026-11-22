@@ -26,7 +26,7 @@ from ..constants.trino_data_queries import trino_s1mme_QUERIES_latest_6H, trino_
 from .trino_site_kpi_service import (
     RECENT_HOURS, NCI_CACHE_GRANULARITY_MINUTES, _round_down, time_t_literal,
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('testingAPI_logger')
 
 # Smartcare CS / VoLTE queries that are replaced by trino_voice_QUERIES when the
 # window is older than the latest RECENT_HOURS (6 h).
