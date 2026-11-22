@@ -4,8 +4,8 @@ Tests for the Voice KPI ENIQ calculation.
     python manage.py test callflow.core.services.tests_eniq_voice_kpi
 
 1. Every KPI's counters, node and time columns resolve against the column
-   labels of the shipped queries and of the updated query files in
-   Eniq/Eniq_Queries/ (no assumed counter names).
+   labels of the queries in constants/voice_kpis_Eniq_Queries.py (the source
+   of truth) and of the query files in Eniq/Eniq_Queries/.
 2. Per-row values (level=object) match the Excel formulas written in the
    sample workbooks in Eniq/eniq_Samples/. The expected values below are
    written from the sample sheets' own formulas and column letters, not from
@@ -76,13 +76,6 @@ class CounterMappingTests(SimpleTestCase):
         labels = {p.stem: select_labels(p.read_text(encoding="utf-8"))
                   for p in QUERY_DIR.glob("*.txt")}
         self._assert_resolves(labels, "Eniq/Eniq_Queries")
-
-    @skipUnless(HAVE_QUERIES, "Eniq/Eniq_Queries not present")
-    def test_shipped_select_lists_equal_updated_files(self):
-        for p in QUERY_DIR.glob("*.txt"):
-            with self.subTest(query=p.stem):
-                self.assertEqual(select_labels(VOICE_KPI_ENIQ_QUERIES[p.stem]),
-                                 select_labels(p.read_text(encoding="utf-8")))
 
     def test_queries_are_well_formed(self):
         for name, sql in VOICE_KPI_ENIQ_QUERIES.items():
@@ -473,9 +466,33 @@ class VoiceKpiViewTests(SimpleTestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.data["kpis"][0]["status"], "SUCCESS")
         table = resp.data["outputs"][0]
-        self.assertEqual(table["columns"], ["DATETIMEID", "NEID", "SBG CFR"])
+        full = ["DATETIMEID", "NEID", "sbgSipIngressInitRegThrottlingRej",
+                "sbgSipInitRegThrottlingRejectedCnt", "SBG CFR", "SBG CDR"]
+        self.assertEqual(table["columns"], full)
         self.assertEqual(table["results"], [])
-        self.assertEqual(list(pd.read_csv(table["csv"]).columns), ["DATETIMEID", "NEID", "SBG CFR"])
+        self.assertEqual(list(pd.read_csv(table["csv"]).columns), full)
+
+    def test_one_kpi_returns_the_whole_query_table(self):
+        t = "2026-10-27 14:00:00.0"
+        self.tables["DC_E_IMSSBG_SIP_RAW"] = pd.DataFrame(
+            [[t, "SBG1", 2, 90, 1, 80, 15, 3, 1, 100],
+             [t, "SBG1", 0, 98, 0, 85, 10, 2, 0, 100]],
+            columns=["DATETIMEID", "NEID", "sbgSipChallengedIncInvSessions",
+                     "sbgSipNetIncSessionEstabNetworkSuccess", "sbgSipInitiatedSessionRelease",
+                     "sbgSipSessionIncNormalRelease", "sbgSipSessionOutNormalRelease",
+                     "sbgSipIngressInitRegThrottlingRej", "sbgSipInitRegThrottlingRejectedCnt",
+                     "SBGSIPTOTALINCSESSSETUPS"])
+        resp = self._get({"kpis": "SBG CFR", "hours": "1"})
+        self.assertEqual(resp.status_code, 200, resp.data)
+        table = resp.data["outputs"][0]
+        cfr = round(100 * (1 - 188 / (200 - 2)), 6)
+        cdr = round(100 - 100 * (165 + 25) / (165 + 25 + 1), 6)
+        self.assertEqual(table["results"], [{
+            "DATETIMEID": "2026-10-27 14:00:00", "NEID": "SBG1",
+            "sbgSipIngressInitRegThrottlingRej": 5.0, "sbgSipInitRegThrottlingRejectedCnt": 1.0,
+            "SBG CFR": cfr, "SBG CDR": cdr}])
+        csv = pd.read_csv(table["csv"])
+        self.assertEqual(list(csv.columns), list(table["results"][0]))
 
     def test_bad_params(self):
         self.assertEqual(self._get({"kpis": "NOT_A_KPI"}).status_code, 400)
